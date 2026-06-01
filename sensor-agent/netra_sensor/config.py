@@ -11,6 +11,8 @@ class SensorConfig:
     shared_key: str
     name: str
     poll_seconds: float
+    retry_initial_seconds: float
+    retry_max_seconds: float
 
     @classmethod
     def from_env(cls) -> "SensorConfig":
@@ -21,4 +23,6 @@ class SensorConfig:
             ),
             name=os.getenv("NETRA_SENSOR_NAME", f"Netra Sensor - {socket.gethostname()}"),
             poll_seconds=float(os.getenv("NETRA_SENSOR_POLL_SECONDS", "3")),
+            retry_initial_seconds=float(os.getenv("NETRA_SENSOR_RETRY_INITIAL_SECONDS", "1")),
+            retry_max_seconds=float(os.getenv("NETRA_SENSOR_RETRY_MAX_SECONDS", "30")),
         )

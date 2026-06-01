@@ -7,11 +7,22 @@ $caseId = "CYB-GJ-PHASE3-HYDRA"
 
 Write-Host "Validating Phase 3 vault, custody, operations, integrations, and safety in no-login mode..." -ForegroundColor Cyan
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $uploadJson = curl.exe -s -F "caseId=$caseId" -F "file=@$pcap" "$api/evidence/upload"
 $upload = $uploadJson | ConvertFrom-Json
 if ($upload.error) { throw "Upload failed: $($upload.error)" }
 if (-not $upload.encrypted_sha256) { throw "Encrypted artifact hash missing from upload." }
 Write-Host "[PASS] upload encrypted evidence $($upload.id)"
+Wait-NetraJob $upload.jobId | Out-Null
 
 $manifest = Invoke-RestMethod -Uri "$api/evidence/$($upload.id)/manifest"
 if (-not $manifest.manifest.manifestHash) { throw "Evidence manifest missing hash." }

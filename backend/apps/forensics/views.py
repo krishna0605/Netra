@@ -14,13 +14,15 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.db import connection
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, CaptureJob, Case, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Sensor, UserProfile, WorkerHeartbeat
+from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
 from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission
 from common.analysis import analyze_pcap, build_alert_csv, build_evidence_bundle, build_report_html, empty_analysis
+from common.async_pipeline import queue_uploaded_evidence
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
 from common.indexing import search_index
@@ -29,7 +31,9 @@ from common.kafka import publish_event
 from common.pcap import available_packet_tools
 from common.persistence import analysis_for_case, latest_job_for_case, persist_analysis, record_export, record_report, update_analysis_alert_status
 from common.hashing import sha256_file, sha256_text
+from common.fleet import backpressure_allows_new_capture, capacity_payload, ensure_default_retention_policy, execute_safe_retention, kafka_lag_payload, queue_schedule_run, retention_policy_payload, retention_preview, retention_run_payload, schedule_payload, sensor_group_payload
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, ensure_capture_case, finalize_capture, heartbeat_state, ingest_capture_chunk, mark_capture_running, sensor_key_valid, sensor_payload, start_replay, stop_capture, validate_capture_bounds, worker_payload
+from common.storage_provider import resolve_storage_path
 from common.storage import save_uploaded_file, write_text_artifact
 from common.vault import fernet, read_encrypted_or_plain
 
@@ -419,15 +423,24 @@ def evidence_upload(request):
     }
     evidence_id = f"ev-{uuid4().hex[:8]}"
     job_id = f"job-{uuid4().hex[:8]}"
+    public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
+    if settings.NETRA_PROCESSING_MODE == "async-primary":
+        job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor)
+        event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "processingMode": settings.NETRA_PROCESSING_MODE, "saved": public_saved, "intake": saved["intake"]}
+        if publish_event("netra.pcap.uploaded", event, key=job_id):
+            Path(saved["analysis_path"]).unlink(missing_ok=True)
+            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **public_saved}, status=202)
     try:
         analysis = analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
+        analysis["processingPath"] = "sync-fallback"
+        if settings.NETRA_PROCESSING_MODE == "async-primary":
+            analysis["fallbackReason"] = "kafka-publish-failed"
         job = persist_analysis(analysis, saved, actor)
     except Exception as exc:
         return JsonResponse({"error": f"PCAP analysis failed: {exc}", "id": evidence_id, "caseId": case_id, "jobId": job_id, **saved}, status=422)
     finally:
         if saved.get("analysis_path"):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
-    public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
     event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "summary": analysis["summary"], "processingMode": settings.NETRA_PROCESSING_MODE, **public_saved}
     publish_event("netra.pcap.uploaded", event)
     return JsonResponse(
@@ -467,7 +480,7 @@ def evidence_verify_integrity(request, evidence_id: str):
     manifest = getattr(evidence, "manifest", None)
     if not manifest:
         return JsonResponse({"verified": False, "error": "manifest missing"}, status=404)
-    path = Path(evidence.stored_path)
+    path = resolve_storage_path(evidence.stored_path)
     encrypted_hash = sha256_file(path) if path.exists() else ""
     encrypted_verified = bool(encrypted_hash and encrypted_hash == manifest.encrypted_sha256)
     canonical_manifest = {key: value for key, value in manifest.manifest_json.items() if key != "manifestHash"}
@@ -499,7 +512,10 @@ def capture_live_start(request):
         return denied
     payload = _json_body(request)
     sensor = Sensor.objects.filter(id=payload.get("sensorId")).first()
-    if not sensor or heartbeat_state(sensor.last_heartbeat_at) != "healthy":
+    allowed, capacity = backpressure_allows_new_capture()
+    if not allowed:
+        return JsonResponse({"error": "New capture rejected while fleet capacity is critical.", "capacity": capacity}, status=503)
+    if not sensor or not sensor.enabled or heartbeat_state(sensor.last_heartbeat_at) != "healthy":
         return JsonResponse({"error": "A healthy registered sensor is required for native capture."}, status=409)
     try:
         duration = int(payload.get("durationSeconds", 0))
@@ -510,6 +526,7 @@ def capture_live_start(request):
         return JsonResponse({"error": str(exc)}, status=400)
     case = ensure_capture_case(payload.get("caseId") or f"CYB-GJ-LIVE-{datetime.now().strftime('%Y%m%d%H%M%S')}")
     job = create_capture_job(case=case, mode=CaptureJob.Mode.LIVE_CAPTURE, sensor=sensor, interface_name=payload.get("interfaceName", ""), duration_seconds=duration, packet_limit=packet_limit, chunk_interval_seconds=chunk_interval, bpf_filter=payload.get("bpfFilter", ""), source_label=sensor.name)
+    SensorCommand.objects.create(sensor=sensor, capture_job=job, command_type="capture.start", payload_json=capture_job_payload(job))
     return JsonResponse(capture_job_payload(job), status=201)
 
 
@@ -558,6 +575,9 @@ def capture_replay_start(request):
     upload = request.FILES.get("file")
     if not upload:
         return JsonResponse({"error": "A PCAP or PCAPNG file is required for replay."}, status=400)
+    allowed, capacity = backpressure_allows_new_capture()
+    if not allowed:
+        return JsonResponse({"error": "Replay rejected while fleet capacity is critical.", "capacity": capacity}, status=503)
     try:
         packet_limit = int(request.POST.get("packetLimit", "10000"))
         chunk_interval = int(request.POST.get("chunkIntervalSeconds", "5"))
@@ -596,7 +616,18 @@ def capture_replay_status(_request, job_id: str):
 def sensors(request):
     if request.method == "POST":
         return sensor_register(request)
-    return JsonResponse({"results": [sensor_payload(row) for row in Sensor.objects.order_by("name")]})
+    rows = Sensor.objects.select_related("group").order_by("name")
+    if request.GET.get("groupId"):
+        rows = rows.filter(group_id=request.GET["groupId"])
+    if request.GET.get("location"):
+        rows = rows.filter(location__icontains=request.GET["location"])
+    results = [sensor_payload(row) for row in rows]
+    if request.GET.get("status"):
+        results = [row for row in results if row["status"] == request.GET["status"]]
+    if request.GET.get("q"):
+        query = request.GET["q"].lower()
+        results = [row for row in results if query in json.dumps(row).lower()]
+    return JsonResponse({"results": results})
 
 
 @csrf_exempt
@@ -625,10 +656,21 @@ def sensor_register(request):
     return JsonResponse(sensor_payload(sensor), status=201)
 
 
-def sensor_detail(_request, sensor_id: str):
-    sensor = Sensor.objects.filter(id=sensor_id).first()
+@csrf_exempt
+@require_http_methods(["GET", "PATCH"])
+def sensor_detail(request, sensor_id: str):
+    sensor = Sensor.objects.select_related("group").filter(id=sensor_id).first()
     if not sensor:
         raise Http404("Sensor not found")
+    if request.method == "PATCH":
+        payload = _json_body(request)
+        if "groupId" in payload:
+            sensor.group = SensorGroup.objects.filter(id=payload["groupId"]).first() if payload["groupId"] else None
+        sensor.location = payload.get("location", sensor.location)
+        sensor.tags_json = payload.get("tags", sensor.tags_json)
+        sensor.notes = payload.get("notes", sensor.notes)
+        sensor.enabled = payload.get("enabled", sensor.enabled)
+        sensor.save(update_fields=["group", "location", "tags_json", "notes", "enabled", "updated_at"])
     return JsonResponse(sensor_payload(sensor))
 
 
@@ -642,10 +684,19 @@ def sensor_heartbeat(request, sensor_id: str):
         raise Http404("Sensor not found")
     payload = _json_body(request)
     sensor.last_heartbeat_at = datetime.now(timezone.utc)
-    sensor.status = Sensor.Status.ONLINE
+    sensor.status = Sensor.Status.ONLINE if sensor.enabled else Sensor.Status.DISABLED
     sensor.interfaces_json = payload.get("interfaces", sensor.interfaces_json)
     sensor.metadata_json = sensor.metadata_json | payload.get("metadata", {})
     sensor.save(update_fields=["last_heartbeat_at", "status", "interfaces_json", "metadata_json", "updated_at"])
+    SensorHealthSnapshot.objects.create(
+        sensor=sensor,
+        status=sensor.status,
+        heartbeat_age_seconds=0,
+        capture_engine=sensor.capture_engine,
+        interface_count=len(sensor.interfaces_json),
+        current_job_id=sensor.current_capture_job_id or "",
+        metadata_json=sensor.metadata_json,
+    )
     emit_operational_event("sensor.heartbeat", sensor_payload(sensor))
     return JsonResponse(sensor_payload(sensor))
 
@@ -656,9 +707,16 @@ def sensor_next_command(request, sensor_id: str):
     sensor = Sensor.objects.filter(id=sensor_id).first()
     if not sensor:
         raise Http404("Sensor not found")
-    job = CaptureJob.objects.filter(sensor=sensor, mode=CaptureJob.Mode.LIVE_CAPTURE, status=CaptureJob.Status.QUEUED).order_by("created_at").first()
-    if job:
+    command = SensorCommand.objects.filter(sensor=sensor, status=SensorCommand.Status.QUEUED).select_related("capture_job").order_by("issued_at").first()
+    job = command.capture_job if command else CaptureJob.objects.filter(sensor=sensor, mode=CaptureJob.Mode.LIVE_CAPTURE, status=CaptureJob.Status.QUEUED).order_by("created_at").first()
+    if job and sensor.enabled:
         mark_capture_running(job)
+        sensor.last_command_at = datetime.now(timezone.utc)
+        sensor.save(update_fields=["last_command_at", "updated_at"])
+        if command:
+            command.status = SensorCommand.Status.CLAIMED
+            command.claimed_at = datetime.now(timezone.utc)
+            command.save(update_fields=["status", "claimed_at", "updated_at"])
     return JsonResponse({"command": capture_job_payload(job) if job else None})
 
 
@@ -689,7 +747,9 @@ def sensor_capture_complete(request, sensor_id: str, job_id: str):
     if not job:
         raise Http404("Capture job not found")
     try:
-        return JsonResponse(finalize_capture(job))
+        response = finalize_capture(job)
+        SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.COMPLETED, completed_at=datetime.now(timezone.utc))
+        return JsonResponse(response)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=422)
 
@@ -707,8 +767,208 @@ def sensor_capture_fail(request, sensor_id: str, job_id: str):
     job.error_message = payload.get("error", "Sensor capture failed.")
     job.completed_at = datetime.now(timezone.utc)
     job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
+    SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.FAILED, completed_at=datetime.now(timezone.utc), error_message=job.error_message)
     emit_operational_event("capture.failed", capture_job_payload(job), capture_job=job)
     return JsonResponse(capture_job_payload(job))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sensor_enable(_request, sensor_id: str):
+    sensor = Sensor.objects.filter(id=sensor_id).first()
+    if not sensor:
+        raise Http404("Sensor not found")
+    sensor.enabled = True
+    sensor.status = Sensor.Status.ONLINE if heartbeat_state(sensor.last_heartbeat_at) == "healthy" else Sensor.Status.OFFLINE
+    sensor.save(update_fields=["enabled", "status", "updated_at"])
+    return JsonResponse(sensor_payload(sensor))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sensor_disable(_request, sensor_id: str):
+    sensor = Sensor.objects.filter(id=sensor_id).first()
+    if not sensor:
+        raise Http404("Sensor not found")
+    if CaptureJob.objects.filter(sensor=sensor, status=CaptureJob.Status.RUNNING).exists():
+        return JsonResponse({"error": "Stop the active capture before disabling this sensor."}, status=409)
+    sensor.enabled = False
+    sensor.status = Sensor.Status.DISABLED
+    sensor.save(update_fields=["enabled", "status", "updated_at"])
+    return JsonResponse(sensor_payload(sensor))
+
+
+def sensor_history(_request, sensor_id: str):
+    sensor = Sensor.objects.filter(id=sensor_id).first()
+    if not sensor:
+        raise Http404("Sensor not found")
+    rows = sensor.commands.order_by("-issued_at")[:100]
+    return JsonResponse({"results": [{"id": row.id, "type": row.command_type, "status": row.status, "jobId": row.capture_job_id or "", "issuedAt": row.issued_at.isoformat(), "completedAt": row.completed_at.isoformat() if row.completed_at else None, "error": row.error_message} for row in rows]})
+
+
+def sensor_captures(_request, sensor_id: str):
+    rows = CaptureJob.objects.filter(sensor_id=sensor_id).order_by("-created_at")[:100]
+    return JsonResponse({"results": [capture_job_payload(row) for row in rows]})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def sensor_groups(request):
+    if request.method == "POST":
+        payload = _json_body(request)
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"error": "Group name is required."}, status=400)
+        group = SensorGroup.objects.create(name=name, description=payload.get("description", ""), color=payload.get("color", "#2563eb"))
+        return JsonResponse(sensor_group_payload(group), status=201)
+    return JsonResponse({"results": [sensor_group_payload(row) for row in SensorGroup.objects.order_by("name")]})
+
+
+@csrf_exempt
+@require_http_methods(["PATCH", "DELETE"])
+def sensor_group_detail(request, group_id: str):
+    group = SensorGroup.objects.filter(id=group_id).first()
+    if not group:
+        raise Http404("Sensor group not found")
+    if request.method == "DELETE":
+        group.delete()
+        return JsonResponse({"status": "deleted"})
+    payload = _json_body(request)
+    group.name = payload.get("name", group.name)
+    group.description = payload.get("description", group.description)
+    group.color = payload.get("color", group.color)
+    group.save(update_fields=["name", "description", "color", "updated_at"])
+    return JsonResponse(sensor_group_payload(group))
+
+
+def _schedule_values(payload: dict, schedule: CaptureSchedule | None = None) -> dict:
+    sensor = Sensor.objects.filter(id=payload.get("sensorId") or (schedule.sensor_id if schedule else "")).first()
+    if not sensor:
+        raise ValueError("A registered sensor is required.")
+    duration = int(payload.get("durationSeconds", schedule.duration_seconds if schedule else 60))
+    packet_limit = int(payload.get("packetLimit", schedule.packet_limit if schedule else 10000))
+    chunk_interval = int(payload.get("chunkIntervalSeconds", schedule.chunk_interval_seconds if schedule else 5))
+    bpf_filter = payload.get("bpfFilter", schedule.bpf_filter if schedule else "")
+    validate_capture_bounds(duration, packet_limit, chunk_interval, bpf_filter)
+    start_at = parse_datetime(payload.get("startAt", "")) or (schedule.start_at if schedule else None)
+    if not start_at:
+        raise ValueError("startAt must be an ISO timestamp.")
+    schedule_type = payload.get("scheduleType", schedule.schedule_type if schedule else "one-time")
+    if schedule_type not in CaptureSchedule.ScheduleType.values:
+        raise ValueError("scheduleType must be one-time, daily, or weekly.")
+    return {
+        "name": payload.get("name", schedule.name if schedule else "Bounded capture schedule"),
+        "sensor": sensor,
+        "enabled": payload.get("enabled", schedule.enabled if schedule else True),
+        "schedule_type": schedule_type,
+        "start_at": start_at,
+        "timezone": payload.get("timezone", schedule.timezone if schedule else "Asia/Kolkata"),
+        "weekdays_json": payload.get("weekdays", schedule.weekdays_json if schedule else []),
+        "duration_seconds": duration,
+        "packet_limit": packet_limit,
+        "chunk_interval_seconds": chunk_interval,
+        "interface_name": payload.get("interfaceName", schedule.interface_name if schedule else ""),
+        "bpf_filter": bpf_filter,
+        "case_id_prefix": payload.get("caseIdPrefix", schedule.case_id_prefix if schedule else "CYB-GJ-SCHEDULED"),
+    }
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def capture_schedules(request):
+    if request.method == "POST":
+        try:
+            schedule = CaptureSchedule.objects.create(**_schedule_values(_json_body(request)))
+            from common.fleet import calculate_next_run
+            schedule.next_run_at = calculate_next_run(schedule)
+            schedule.save(update_fields=["next_run_at", "updated_at"])
+            return JsonResponse(schedule_payload(schedule), status=201)
+        except (TypeError, ValueError) as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+    rows = CaptureSchedule.objects.select_related("sensor").order_by("name")
+    if request.GET.get("sensorId"):
+        rows = rows.filter(sensor_id=request.GET["sensorId"])
+    if request.GET.get("enabled") in {"true", "false"}:
+        rows = rows.filter(enabled=request.GET["enabled"] == "true")
+    return JsonResponse({"results": [schedule_payload(row) for row in rows]})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def capture_schedule_detail(request, schedule_id: str):
+    schedule = CaptureSchedule.objects.select_related("sensor").filter(id=schedule_id).first()
+    if not schedule:
+        raise Http404("Capture schedule not found")
+    if request.method == "DELETE":
+        schedule.delete()
+        return JsonResponse({"status": "deleted"})
+    if request.method == "PATCH":
+        try:
+            for key, value in _schedule_values(_json_body(request), schedule).items():
+                setattr(schedule, key, value)
+            from common.fleet import calculate_next_run
+            schedule.next_run_at = calculate_next_run(schedule)
+            schedule.save()
+        except (TypeError, ValueError) as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+    return JsonResponse(schedule_payload(schedule))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def capture_schedule_run_now(_request, schedule_id: str):
+    schedule = CaptureSchedule.objects.filter(id=schedule_id).first()
+    if not schedule:
+        raise Http404("Capture schedule not found")
+    job = queue_schedule_run(schedule)
+    return JsonResponse({"status": "queued" if job else "skipped", "job": capture_job_payload(job) if job else None}, status=201 if job else 409)
+
+
+def capture_schedule_history(_request, schedule_id: str):
+    rows = CaptureJob.objects.filter(schedule_runs__id=schedule_id).order_by("-created_at")[:100]
+    return JsonResponse({"results": [capture_job_payload(row) for row in rows]})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PATCH"])
+def retention_policy(request):
+    policy = ensure_default_retention_policy()
+    if request.method == "PATCH":
+        payload = _json_body(request)
+        policy.high_volume_search_days = int(payload.get("highVolumeSearchDays", policy.high_volume_search_days))
+        policy.evidence_days = int(payload.get("evidenceDays", policy.evidence_days))
+        policy.capture_chunk_days = int(payload.get("captureChunkDays", policy.capture_chunk_days))
+        policy.enabled = payload.get("enabled", policy.enabled)
+        policy.save()
+    return JsonResponse(retention_policy_payload(policy))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def retention_preview_view(_request):
+    return JsonResponse(retention_run_payload(retention_preview()), status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def retention_execute(_request):
+    return JsonResponse(retention_run_payload(execute_safe_retention()), status=201)
+
+
+def retention_runs(_request):
+    return JsonResponse({"results": [retention_run_payload(row) for row in RetentionRun.objects.order_by("-started_at")[:100]]})
+
+
+@csrf_exempt
+@require_http_methods(["POST", "DELETE"])
+def case_legal_hold(request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    case.legal_hold = request.method == "POST"
+    case.legal_hold_reason = _json_body(request).get("reason", "") if request.method == "POST" else ""
+    case.save(update_fields=["legal_hold", "legal_hold_reason", "updated_at"])
+    return JsonResponse({"caseId": case.id, "legalHold": case.legal_hold, "reason": case.legal_hold_reason})
 
 
 def operational_events(request):
@@ -789,14 +1049,24 @@ def job_events(_request, job_id: str):
 
 
 def system_workers(_request):
-    expected = ["capture", "parser", "decoder", "session", "detection", "anomaly", "report-export"]
+    expected = ["capture", "pcap-ingestion", "parser", "decoder", "session", "detection", "anomaly", "analysis-finalizer", "report-export", "scheduler", "retention"]
     latest = {}
+    by_worker = {}
     for row in WorkerHeartbeat.objects.order_by("worker_name", "-last_seen_at"):
         latest.setdefault(row.worker_name, row)
+        by_worker.setdefault(row.worker_name, []).append(row)
     results = []
     for worker in expected:
         row = latest.get(worker)
-        results.append(worker_payload(row, worker) if row else {"name": worker, "status": "offline", "lastSeen": None, "currentJobId": "", "details": {}})
+        if not row:
+            results.append({"name": worker, "status": "offline", "lastSeen": None, "currentJobId": "", "details": {}, "replicaCount": 0, "replicas": []})
+            continue
+        replicas = [
+            {"instanceId": instance.instance_id, "status": heartbeat_state(instance.last_seen_at), "lastSeen": instance.last_seen_at.isoformat()}
+            for instance in by_worker.get(worker, [])
+            if heartbeat_state(instance.last_seen_at) in {"healthy", "stale"}
+        ]
+        results.append(worker_payload(row, worker) | {"replicaCount": sum(1 for instance in replicas if instance["status"] == "healthy"), "replicas": replicas})
     return JsonResponse({"processingMode": settings.NETRA_PROCESSING_MODE, "results": results})
 
 
@@ -866,6 +1136,26 @@ def system_indexes(_request):
 def system_kafka(_request):
     probe = _probe_kafka()
     return JsonResponse({"bootstrap": settings.NETRA_KAFKA_BOOTSTRAP, **probe, "topics": ["netra.pcap.uploaded", "netra.capture.chunk.received", "netra.packets.normalized", "netra.operational.events", "netra.dead_letter"]}, status=200 if probe["status"] == "ok" else 503)
+
+
+def system_capacity(_request):
+    return JsonResponse(capacity_payload())
+
+
+def system_kafka_lag(_request):
+    return JsonResponse(kafka_lag_payload())
+
+
+def system_throughput(_request):
+    cutoff = datetime.now(timezone.utc).timestamp() - 60
+    recent_chunks = [row for row in OperationalEvent.objects.filter(event_type="capture.chunk_received").order_by("-created_at")[:500] if row.created_at.timestamp() >= cutoff]
+    packets = sum(int(row.payload_json.get("chunkPackets", 0)) for row in recent_chunks)
+    return JsonResponse({"windowSeconds": 60, "chunksPerMinute": len(recent_chunks), "packetsIndexedPerMinute": packets})
+
+
+def system_index_retention(_request):
+    policy = ensure_default_retention_policy()
+    return JsonResponse({"status": "configured", "policy": retention_policy_payload(policy), "aliases": ["netra-packets", "netra-sessions", "netra-protocols", "netra-payloads", "netra-alerts", "netra-zeek", "netra-live-packets"]})
 
 
 def _probe_postgres() -> dict:
@@ -1496,11 +1786,11 @@ def compliance_checklist(_request):
 
 
 def compliance_roles(_request):
-    return JsonResponse({"results": ["Admin", "Investigator", "Analyst", "Viewer"]})
+    return JsonResponse({"results": [], "status": "disabled", "detail": "Trusted-LAN mode does not expose roles."})
 
 
 def security_posture(_request):
-    return JsonResponse({"encryptionAtRest": "ready", "rbac": "enabled", "auditLogs": "enabled", "standardsAlignment": "digital evidence workflow"})
+    return JsonResponse({"encryptionAtRest": "ready", "rbac": "disabled", "authentication": "disabled", "accessMode": "trusted-lan", "publicInternet": "not-supported", "sensorSecurity": "installation-shared-key", "auditLogs": "enabled", "standardsAlignment": "digital evidence workflow"})
 
 
 def access_logs(_request):

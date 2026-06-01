@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from django.db import transaction
@@ -63,6 +63,7 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             "captured_at": _dt(evidence_data.get("capturedAt")),
             "uploaded_by": actor.user,
             "status": EvidenceFile.Status.VERIFIED,
+            "retention_expires_at": datetime.now(timezone.utc) + timedelta(days=90),
         },
     )
     if actor.django_user_id:
@@ -85,6 +86,7 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
         },
     )
     indexed = index_analysis(analysis)
+    existing_job = ProcessingJob.objects.filter(id=analysis["jobId"]).first()
     job, _ = ProcessingJob.objects.update_or_create(
         id=analysis["jobId"],
         defaults={
@@ -101,6 +103,12 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             "started_at": _dt(analysis.get("createdAt")),
             "completed_at": datetime.now(timezone.utc),
             "stats": {"summary": analysis.get("summary", {}), "analysis": analysis, "indexed": indexed},
+            "processing_path": analysis.get("processingPath", "sync-fallback"),
+            "fallback_reason": analysis.get("fallbackReason", ""),
+            "last_progress_at": datetime.now(timezone.utc),
+            "completed_chunk_count": analysis.get("completedChunks", existing_job.completed_chunk_count if existing_job else 0),
+            "expected_chunk_count": analysis.get("expectedChunks", existing_job.expected_chunk_count if existing_job else 0),
+            "completeness_status": analysis.get("searchCompleteness", "complete"),
         },
     )
     _replace_records(case, analysis, evidence)

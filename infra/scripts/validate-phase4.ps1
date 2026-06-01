@@ -7,6 +7,16 @@ $caseId = "CYB-GJ-PHASE4-" + (Get-Date -Format "yyyyMMddHHmmss")
 
 Write-Host "Validating Phase 4 real-PCAP local workflow..." -ForegroundColor Cyan
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $health = Invoke-RestMethod "$api/health"
 if ($health.status -ne "ok") { throw "API health check failed." }
 Write-Host "[PASS] API health is ok"
@@ -39,7 +49,7 @@ $manifest = Invoke-RestMethod "$api/evidence/$($upload.id)/manifest"
 if (-not $manifest.manifestHash) { throw "Evidence manifest missing." }
 Write-Host "[PASS] encrypted evidence manifest exists"
 
-$job = Invoke-RestMethod "$api/jobs/$($upload.jobId)/status"
+$job = Wait-NetraJob $upload.jobId
 if ($job.status -ne "completed") { throw "Processing job should be completed." }
 Write-Host "[PASS] processing job completed"
 

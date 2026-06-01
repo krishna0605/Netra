@@ -278,10 +278,49 @@ export type SensorRecord = {
   agentVersion: string;
   captureEngine: string;
   captureEngineVersion?: string;
-  status: "online" | "stale" | "offline" | "warning";
+  status: "online" | "stale" | "offline" | "warning" | "capturing" | "disabled";
   lastHeartbeatAt?: string;
   heartbeatAgeSeconds?: number;
   interfaces: { index: string; name: string; label: string }[];
+  groupId?: number | null;
+  groupName?: string;
+  location?: string;
+  tags?: string[];
+  notes?: string;
+  enabled?: boolean;
+  currentCaptureJob?: string;
+  totalChunksUploaded?: number;
+  totalBytesUploaded?: number;
+};
+
+export type SensorGroupRecord = { id: number; name: string; description: string; color: string; sensorCount: number };
+
+export type CaptureScheduleRecord = {
+  id: number;
+  name: string;
+  sensorId: string;
+  sensorName: string;
+  enabled: boolean;
+  scheduleType: "one-time" | "daily" | "weekly";
+  startAt: string;
+  timezone: string;
+  durationSeconds: number;
+  packetLimit: number;
+  chunkIntervalSeconds: number;
+  interfaceName: string;
+  bpfFilter: string;
+  caseIdPrefix: string;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  lastJobId?: string;
+};
+
+export type CapacityRecord = {
+  status: string;
+  kafka: { lag: number; warningThreshold: number; criticalThreshold: number };
+  storage: { usedBytes: number; freeBytes: number; totalBytes: number; usedPercent: number };
+  search: { indexedDocuments: number; failedBulkRequests: number };
+  sensors: { total: number; online: number; capturing: number; offline: number };
 };
 
 export type CaptureJobRecord = {

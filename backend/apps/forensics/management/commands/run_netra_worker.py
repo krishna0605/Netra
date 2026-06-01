@@ -9,16 +9,19 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db.models import F
 from django.utils import timezone
 
 from common.analysis import _packet_from_row, _read_packets_with_tshark
+from common.async_pipeline import process_queued_evidence
 from common.detection import classify_detection
 from common.jobs import append_job_event
 from common.kafka import consume_events, publish_event
+from common.indexing import ensure_write_index, index_live_packets
 from common.operations import emit_operational_event
 from common.search import index_document, index_documents
 from common.vault import decrypt_file
-from apps.forensics.models import CaptureChunk, CaptureJob, DeadLetterEvent, ProcessingJob, WorkerHeartbeat, WorkerStageReceipt
+from apps.forensics.models import AnalysisChunk, CaptureChunk, CaptureJob, DeadLetterEvent, ProcessingJob, WorkerHeartbeat, WorkerStageReceipt
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +29,13 @@ logger = logging.getLogger(__name__)
 WORKER_TOPICS = {
     "capture": ["netra.capture.raw", "netra.capture.chunk.received"],
     "pcap-ingestion": ["netra.pcap.uploaded"],
-    "parser": ["netra.pcap.processing", "netra.pcap.uploaded", "netra.capture.chunk.received"],
+    "parser": ["netra.pcap.processing", "netra.pcap.uploaded", "netra.capture.chunk.received", "netra.analysis.chunk.ready"],
     "decoder": ["netra.packets.normalized"],
     "session": ["netra.packets.normalized"],
     "detection": ["netra.protocol.decoded", "netra.payload.findings", "netra.sessions.reconstructed"],
     "anomaly": ["netra.sessions.reconstructed", "netra.packets.normalized"],
     "report-export": ["netra.export.requests"],
+    "analysis-finalizer": ["netra.analysis.finalize"],
 }
 
 
@@ -59,6 +63,8 @@ class Command(BaseCommand):
                 for messages in records.values():
                     for message in messages:
                         self._process_with_retries(worker, message.value)
+                if records:
+                    consumer.commit()
         except KeyboardInterrupt:
             self.stdout.write("Worker stopped.")
         except Exception as exc:
@@ -118,6 +124,7 @@ class Command(BaseCommand):
             "detection": self._detection,
             "anomaly": self._anomaly,
             "report-export": self._report_export,
+            "analysis-finalizer": self._analysis_finalizer,
         }
         handlers[worker](payload)
 
@@ -127,10 +134,50 @@ class Command(BaseCommand):
         publish_event("netra.capture.status", {"type": "capture.status", "status": "observed", "source": payload})
 
     def _pcap_ingestion(self, payload: dict[str, Any]) -> None:
-        publish_event("netra.pcap.processing", {"type": "pcap.processing.started", **payload})
+        if payload.get("saved") and payload.get("jobId"):
+            process_queued_evidence(payload)
+            publish_event("netra.analysis.finalize", {"type": "analysis.finalize", "jobId": payload["jobId"], "caseId": payload.get("caseId"), "evidenceId": payload.get("evidenceId")}, key=payload["jobId"])
+        else:
+            publish_event("netra.pcap.processing", {"type": "pcap.processing.started", **payload})
 
     def _parser(self, payload: dict[str, Any]) -> None:
         self._touch_job(payload, "parser-worker observed uploaded evidence")
+        analysis_chunk_id = payload.get("analysisChunkId")
+        if analysis_chunk_id:
+            chunk = AnalysisChunk.objects.filter(id=analysis_chunk_id).select_related("processing_job").first()
+            if not chunk:
+                raise ValueError(f"Analysis chunk {analysis_chunk_id} was not found.")
+            handle = tempfile.NamedTemporaryFile(prefix=f"analysis-{chunk.id}-", suffix=".pcap", delete=False)
+            handle.close()
+            temporary_path = Path(handle.name)
+            try:
+                decrypt_file(chunk.encrypted_source_path, temporary_path)
+                packets = [_packet_from_row(row, index) for index, row in enumerate(_read_packets_with_tshark(temporary_path), start=1)]
+                documents = []
+                for packet in packets:
+                    document = {
+                        **packet,
+                        "id": f"{chunk.processing_job_id}-analysis-{chunk.sequence}-{packet['id']}",
+                        "caseId": chunk.processing_job.case_id,
+                        "evidenceId": chunk.processing_job.evidence_file_id,
+                        "jobId": chunk.processing_job_id,
+                        "analysisChunkId": chunk.id,
+                        "provisional": False,
+                    }
+                    documents.append((document["id"], document))
+                index_documents(ensure_write_index("packets"), documents)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            chunk.status = "parsed"
+            chunk.packet_count = len(packets)
+            chunk.parser_completed_at = timezone.now()
+            chunk.save(update_fields=["status", "packet_count", "parser_completed_at", "updated_at"])
+            ProcessingJob.objects.filter(id=chunk.processing_job_id).update(completed_chunk_count=F("completed_chunk_count") + 1)
+            emit_operational_event(
+                "analysis.chunk_parsed",
+                {"jobId": chunk.processing_job_id, "analysisChunkId": chunk.id, "sequence": chunk.sequence, "indexedPackets": len(packets)},
+            )
+            return
         chunk_id = payload.get("chunkId")
         if chunk_id:
             chunk = CaptureChunk.objects.filter(id=chunk_id).select_related("capture_job").first()
@@ -153,7 +200,7 @@ class Command(BaseCommand):
                         "provisional": True,
                     }
                     documents.append((document["id"], document))
-                index_documents("netra-packets-live-v1", documents)
+                index_live_packets(documents)
             finally:
                 temporary_path.unlink(missing_ok=True)
             protocol_counts = Counter(packet.get("protocol") or "UNKNOWN" for packet in packets)
@@ -258,7 +305,7 @@ class Command(BaseCommand):
                 }
                 for session in payload["sessions"]
             ]
-            index_documents("netra-sessions-live-v1", [(session["sessionId"], session) for session in sessions])
+            index_documents(ensure_write_index("sessions"), [(session["sessionId"], session) for session in sessions])
             publish_event("netra.sessions.reconstructed", {**payload, "type": "session.reconstructed", "sessions": sessions})
             return
         if not payload.get("packetId") or not payload.get("sourceIp") or not payload.get("destinationIp"):
@@ -297,6 +344,10 @@ class Command(BaseCommand):
     def _report_export(self, payload: dict[str, Any]) -> None:
         self._touch_job(payload, "report-export-worker observed export request")
         publish_event("netra.export.observed", {"type": "export.observed", "request": payload, "status": "observed"})
+
+    def _analysis_finalizer(self, payload: dict[str, Any]) -> None:
+        self._touch_job(payload, "analysis-finalizer observed completed chunk aggregation")
+        publish_event("netra.analysis.finalized", {"type": "analysis.finalized", **payload})
 
     def _touch_job(self, payload: dict[str, Any], detail: str) -> None:
         job_id = payload.get("jobId")

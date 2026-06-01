@@ -8,6 +8,16 @@ $caseId = "CYB-GJ-PHASE5-" + (Get-Date -Format "yyyyMMddHHmmss")
 
 Write-Host "Validating Phase 5 operational truth..." -ForegroundColor Cyan
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $health = $null
 for ($i = 1; $i -le 30; $i++) {
     try {
@@ -34,6 +44,7 @@ try {
     Remove-Item -LiteralPath $renamedPcap -Force -ErrorAction SilentlyContinue
 }
 Write-Host "[PASS] renamed PCAP uploads without filename coupling"
+Wait-NetraJob $upload.jobId | Out-Null
 
 $alerts = Invoke-RestMethod "$api/alerts?caseId=$caseId"
 $brute = $alerts.results | Where-Object { $_.attackClass -eq "Credential Brute Force" } | Select-Object -First 1

@@ -4,6 +4,7 @@ import platform
 import socket
 import time
 import re
+import shutil
 
 from . import __version__
 from .capture import execute_capture_command
@@ -14,7 +15,7 @@ from .uploader import SensorClient
 
 def run_sensor(config: SensorConfig) -> None:
     executable = discover_capture_engine()
-    client = SensorClient(config.server, config.shared_key)
+    client = SensorClient(config.server, config.shared_key, config.retry_initial_seconds, config.retry_max_seconds)
     interfaces = list_interfaces(executable)
     registration = client.register(
         {
@@ -29,23 +30,30 @@ def run_sensor(config: SensorConfig) -> None:
         }
     )
     sensor_id = registration["id"]
+    started_at = time.monotonic()
     print(f"Registered {config.name} as {sensor_id}")
     while True:
-        client.heartbeat(
-            sensor_id,
-            {
-                "status": "online",
-                "interfaces": interfaces,
-                "captureEngineVersion": capture_engine_version(executable),
-            },
-        )
-        command = client.next_command(sensor_id)
-        if command:
-            print(f"Starting bounded capture {command['jobId']}")
-            try:
+        command = None
+        try:
+            disk = shutil.disk_usage(".")
+            client.heartbeat(
+                sensor_id,
+                {
+                    "status": "online",
+                    "interfaces": interfaces,
+                    "captureEngineVersion": capture_engine_version(executable),
+                    "metadata": {"storageFreeBytes": disk.free, "uptimeSeconds": int(time.monotonic() - started_at)},
+                },
+            )
+            command = client.next_command(sensor_id)
+            if command:
+                print(f"Starting bounded capture {command['jobId']}")
                 execute_capture_command(client, sensor_id, executable, command)
-            except Exception as exc:
-                client.fail_capture(sensor_id, command["jobId"], str(exc))
-                client.heartbeat(sensor_id, {"status": "warning", "lastError": str(exc)})
-                print(f"Capture failed: {exc}")
+        except Exception as exc:
+            print(f"Sensor server unavailable or capture failed: {exc}")
+            if command:
+                try:
+                    client.fail_capture(sensor_id, command["jobId"], str(exc))
+                except Exception:
+                    pass
         time.sleep(config.poll_seconds)

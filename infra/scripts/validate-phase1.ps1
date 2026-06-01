@@ -18,6 +18,16 @@ $matrix = @(
 Write-Host "Validating Phase 1 golden PCAP matrix..."
 Write-Host "API: $api"
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $health = Invoke-RestMethod "$api/health"
 if (-not $health.packetTools.tshark) { throw "tshark is not available in backend health." }
 if (-not $health.packetTools.zeek) { throw "zeek is not available in backend health." }
@@ -38,11 +48,13 @@ foreach ($item in $matrix) {
     $failures += 1
     continue
   }
-  $actual = $response.analysis.topAttackClass
-  $risk = $response.riskLevel
-  $alerts = $response.analysis.alerts
-  $anomalies = $response.analysis.anomalies
-  $zeek = $response.analysis.zeek.status
+  Wait-NetraJob $response.jobId | Out-Null
+  $summary = Invoke-RestMethod "$api/dashboard/summary?caseId=$caseId"
+  $actual = $summary.topAttackClass
+  $risk = $summary.riskLevel
+  $alerts = $summary.alerts
+  $anomalies = $summary.anomalies
+  $zeek = $summary.zeek.status
   if ($actual -ne $item.Expected) {
     Write-Host "[FAIL] $($item.File) expected '$($item.Expected)' got '$actual' risk=$risk alerts=$alerts anomalies=$anomalies zeek=$zeek"
     $failures += 1

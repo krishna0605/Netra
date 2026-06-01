@@ -7,6 +7,16 @@ $caseId = "CYB-GJ-PHASE6-" + (Get-Date -Format "yyyyMMddHHmmss")
 
 Write-Host "Validating Phase 6 trusted-LAN no-login operation..." -ForegroundColor Cyan
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $deep = $null
 for ($i = 1; $i -le 30; $i++) {
   try {
@@ -33,7 +43,7 @@ if ($upload.error) { throw "Upload without auth headers failed: $($upload.error)
 if (-not $upload.id -or -not $upload.jobId) { throw "Upload response missing evidence or job ID." }
 Write-Host "[PASS] PCAP upload works without auth headers"
 
-$job = Invoke-RestMethod "$api/jobs/$($upload.jobId)/status"
+$job = Wait-NetraJob $upload.jobId
 if ($job.status -ne "completed") { throw "Upload processing job did not complete." }
 Write-Host "[PASS] processing job completed"
 

@@ -133,6 +133,8 @@ def mark_capture_running(job: CaptureJob) -> None:
         job.status = CaptureJob.Status.RUNNING
         job.started_at = django_timezone.now()
         job.save(update_fields=["status", "started_at", "updated_at"])
+        if job.sensor_id:
+            Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.CAPTURING, current_capture_job=job.id)
         emit_operational_event("capture.started", capture_job_payload(job), capture_job=job)
 
 
@@ -171,6 +173,7 @@ def ingest_capture_chunk(job: CaptureJob, upload, sequence: int, sensor: Sensor 
         packet_count=packet_count,
         byte_count=saved["size_bytes"],
         status=CaptureChunk.Status.PARSED,
+        retention_expires_at=django_timezone.now() + timedelta(days=7),
     )
     job.chunk_count += 1
     job.last_chunk_sequence = max(job.last_chunk_sequence, sequence)
@@ -179,6 +182,10 @@ def ingest_capture_chunk(job: CaptureJob, upload, sequence: int, sensor: Sensor 
     if job.packet_limit:
         job.progress = min(95, int(job.packets_captured * 100 / job.packet_limit))
     job.save(update_fields=["chunk_count", "last_chunk_sequence", "packets_captured", "bytes_captured", "progress", "updated_at"])
+    if sensor:
+        sensor.total_chunks_uploaded += 1
+        sensor.total_bytes_uploaded += saved["size_bytes"]
+        sensor.save(update_fields=["total_chunks_uploaded", "total_bytes_uploaded", "updated_at"])
     payload = capture_job_payload(job) | {"chunkId": chunk.id, "sequence": sequence, "chunkPackets": packet_count, "chunkBytes": chunk.byte_count}
     emit_operational_event("capture.chunk_received", payload, capture_job=job)
     publish_event("netra.capture.chunk.received", payload)
@@ -228,6 +235,8 @@ def finalize_capture(job: CaptureJob, actor: Actor | str = "Netra capture engine
         job.progress = 100
         job.completed_at = django_timezone.now()
         job.save(update_fields=["final_evidence_file", "status", "progress", "completed_at", "updated_at"])
+        if job.sensor_id:
+            Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.ONLINE, current_capture_job="")
         emit_operational_event("analysis.completed", capture_job_payload(job), capture_job=job)
         emit_operational_event("capture.completed", capture_job_payload(job), capture_job=job)
         publish_event("netra.capture.finalize", capture_job_payload(job))
@@ -237,6 +246,8 @@ def finalize_capture(job: CaptureJob, actor: Actor | str = "Netra capture engine
         job.error_message = str(exc)
         job.completed_at = django_timezone.now()
         job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
+        if job.sensor_id:
+            Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.WARNING, current_capture_job="")
         emit_operational_event("capture.failed", capture_job_payload(job), capture_job=job)
         raise
     finally:
@@ -317,6 +328,8 @@ def stop_capture(job: CaptureJob) -> dict[str, Any]:
         job.status = CaptureJob.Status.STOPPED
         job.completed_at = django_timezone.now()
         job.save(update_fields=["status", "completed_at", "updated_at"])
+        if job.sensor_id:
+            Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.ONLINE, current_capture_job="")
         emit_operational_event("capture.stopped", capture_job_payload(job), capture_job=job)
     return capture_job_payload(job)
 
@@ -334,6 +347,11 @@ def heartbeat_state(last_seen: datetime | None) -> str:
 
 def sensor_payload(sensor: Sensor) -> dict[str, Any]:
     state = heartbeat_state(sensor.last_heartbeat_at)
+    status = sensor.status
+    if not sensor.enabled:
+        status = "disabled"
+    elif status not in {"capturing", "warning"}:
+        status = "online" if state == "healthy" else state
     return {
         "id": sensor.id,
         "name": sensor.name,
@@ -342,10 +360,19 @@ def sensor_payload(sensor: Sensor) -> dict[str, Any]:
         "agentVersion": sensor.agent_version,
         "captureEngine": sensor.capture_engine,
         "captureEngineVersion": sensor.capture_engine_version,
-        "status": "online" if state == "healthy" else state,
+        "status": status,
         "lastHeartbeatAt": sensor.last_heartbeat_at.isoformat() if sensor.last_heartbeat_at else None,
         "interfaces": sensor.interfaces_json,
         "metadata": sensor.metadata_json,
+        "groupId": sensor.group_id,
+        "groupName": sensor.group.name if sensor.group_id else "",
+        "location": sensor.location,
+        "tags": sensor.tags_json,
+        "notes": sensor.notes,
+        "enabled": sensor.enabled,
+        "currentCaptureJob": sensor.current_capture_job,
+        "totalChunksUploaded": sensor.total_chunks_uploaded,
+        "totalBytesUploaded": sensor.total_bytes_uploaded,
     }
 
 

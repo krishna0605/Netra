@@ -4,6 +4,7 @@ from uuid import uuid4
 from django.conf import settings
 
 from common.hashing import sha256_file
+from common.storage_provider import storage_uri
 from common.vault import encrypt_file, save_encrypted_upload
 
 
@@ -28,6 +29,7 @@ def save_uploaded_file(upload, folder_key: str = "pcap") -> dict:
     safe_name = Path(upload.name).name
     stored_name = f"{uuid4().hex}-{safe_name}"
     saved = save_encrypted_upload(upload, folder, stored_name)
+    saved["stored_path"] = storage_uri(saved["stored_path"])
     return {
         "filename": safe_name,
         **saved,
@@ -45,7 +47,7 @@ def write_text_artifact(content: str, folder_key: str, filename: str) -> dict:
     plain_target.unlink(missing_ok=True)
     return {
         "filename": filename,
-        "stored_path": str(encrypted_target),
+        "stored_path": storage_uri(encrypted_target),
         "size_bytes": encrypted_target.stat().st_size,
         "sha256": plaintext_sha,
         "encrypted_sha256": sha256_file(encrypted_target),

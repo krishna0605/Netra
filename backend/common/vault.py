@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 
 from common.hashing import sha256_file, sha256_text
+from common.storage_provider import resolve_storage_path
 
 
 PCAP_EXTENSIONS = {".pcap", ".pcapng"}
@@ -55,7 +56,7 @@ def encrypt_file(source: str | Path, target: str | Path) -> None:
 
 
 def decrypt_file(source: str | Path, target: str | Path) -> None:
-    source_path = Path(source)
+    source_path = resolve_storage_path(source)
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on":
@@ -65,7 +66,7 @@ def decrypt_file(source: str | Path, target: str | Path) -> None:
 
 
 def read_encrypted_or_plain(source: str | Path) -> bytes:
-    source_path = Path(source)
+    source_path = resolve_storage_path(source)
     content = source_path.read_bytes()
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or source_path.suffix != ".enc":
         return content

@@ -74,6 +74,7 @@ Useful commands:
 ```powershell
 npm run netra:start:ops
 npm run netra:start:lan
+npm run netra:start:fleet
 npm run netra:logs
 npm run netra:stop
 npm run netra:validate
@@ -186,6 +187,7 @@ The UI receives persisted operational events over SSE with polling fallback. Cap
 chunks, final evidence, reports, and exports are encrypted at rest.
 
 See [Phase 5 Laptop Operations](docs/phase5-operations.md).
+See [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md).
 
 ## Current Limitations
 
@@ -207,3 +209,4 @@ See [Phase 5 Laptop Operations](docs/phase5-operations.md).
 - [PCAP Analysis Guide](docs/pcap-analysis-guide.md)
 - [Zeek Setup Guide](docs/zeek-setup-guide.md)
 - [Worker Processes](docs/worker-processes.md)
+- [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md)

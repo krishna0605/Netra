@@ -44,4 +44,12 @@ def job_status_payload(job: ProcessingJob) -> dict[str, Any]:
         "events": job.events or [],
         "startedAt": job.started_at.isoformat() if job.started_at else None,
         "completedAt": job.completed_at.isoformat() if job.completed_at else None,
+        "processingPath": job.processing_path,
+        "fallbackAvailable": True,
+        "fallbackUsed": job.processing_path == "sync-fallback",
+        "fallbackReason": job.fallback_reason,
+        "completedChunks": job.completed_chunk_count,
+        "expectedChunks": job.expected_chunk_count,
+        "searchCompleteness": job.completeness_status,
+        "lastProgressAt": job.last_progress_at.isoformat() if job.last_progress_at else None,
     }

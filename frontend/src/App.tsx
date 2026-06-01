@@ -91,7 +91,10 @@ import type {
   Severity,
   SensorRecord,
   CaptureJobRecord,
+  CaptureScheduleRecord,
+  CapacityRecord,
   OperationalEventRecord,
+  SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
 import { cn, formatNumber } from "./lib/utils";
@@ -1475,6 +1478,9 @@ function AppShell() {
               <Route path="integrations" element={<IntegrationsPage />} />
               <Route path="compliance" element={<CompliancePage />} />
               <Route path="system" element={<SystemPage />} />
+              <Route path="sensors" element={<SensorsPage />} />
+              <Route path="schedules" element={<SchedulesPage />} />
+              <Route path="retention" element={<RetentionPage />} />
             </Routes>
           </div>
         </div>
@@ -1489,7 +1495,7 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
     { label: t("capture"), items: [[Upload, t("evidenceIntake"), "/app/upload"], [Database, t("packetExplorer"), "/app/packets"], [History, t("sessions"), "/app/sessions"]] },
     { label: t("analysis"), items: [[Activity, t("dashboard"), "/app/dashboard"], [Fingerprint, t("protocolDecoder"), "/app/decoder"], [Eye, t("payloadInspection"), "/app/payloads"], [AlertTriangle, t("threatDetection"), "/app/detection"], [Radio, t("aiAnomaly"), "/app/ai-anomaly"], [Network, t("networkGraph"), "/app/graph"]] },
     { label: t("investigation"), items: [[FileSearch, t("cases"), "/app/cases"], [FileText, t("reports"), `/app/reports/${activeCaseId ?? "new"}`], [Download, t("exportCenter"), "/app/exports"]] },
-    { label: t("governance"), items: [[Database, t("integrations"), "/app/integrations"], [ClipboardCheck, t("compliance"), "/app/compliance"], [Activity, "System", "/app/system"]] },
+    { label: t("governance"), items: [[Radio, "Sensor Fleet", "/app/sensors"], [History, "Schedules", "/app/schedules"], [Database, "Retention", "/app/retention"], [Database, t("integrations"), "/app/integrations"], [ClipboardCheck, t("compliance"), "/app/compliance"], [Activity, "System", "/app/system"]] },
   ] as const;
   return (
     <>
@@ -1689,6 +1695,12 @@ function UploadPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Upload failed");
       setActiveCaseId(payload.caseId);
+      if (payload.status === "queued") {
+        setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
+        toast.success("Evidence encrypted and queued for async worker analysis.");
+        void followUploadJob(payload.jobId);
+        return;
+      }
       await reloadAnalysis();
       setUploadResult({ topClass: payload.detectedAttackClasses?.[0], risk: payload.riskLevel, hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
       toast.success(t("evidenceToast"));
@@ -1697,6 +1709,25 @@ function UploadPage() {
     } finally {
       setProcessing(false);
     }
+  }
+
+  async function followUploadJob(jobId: string) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      const job = await apiGet<{ status: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
+      if (!job) continue;
+      setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
+      if (job.status === "completed") {
+        await reloadAnalysis();
+        toast.success("Async evidence analysis completed.");
+        return;
+      }
+      if (job.status === "failed") {
+        toast.error("Async evidence analysis failed. Recovery fallback is available in the job record.");
+        return;
+      }
+    }
+    toast.error("Async analysis is still queued. Check System Monitor for worker health.");
   }
 
   async function startReplay() {
@@ -2256,13 +2287,116 @@ function ExportCenterPage() {
   );
 }
 
+function SensorsPage() {
+  const [sensors, setSensors] = useState<SensorRecord[]>([]);
+  const [groups, setGroups] = useState<SensorGroupRecord[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const load = useCallback(() => {
+    apiGet<{ results: SensorRecord[] }>("/sensors").then((payload) => setSensors(payload.results)).catch(() => setSensors([]));
+    apiGet<{ results: SensorGroupRecord[] }>("/sensor-groups").then((payload) => setGroups(payload.results)).catch(() => setGroups([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function createGroup() {
+    const response = await fetch(`${API_BASE}/sensor-groups`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: groupName }) });
+    if (!response.ok) toast.error("Sensor group could not be created.");
+    else { setGroupName(""); load(); }
+  }
+  async function toggle(sensor: SensorRecord) {
+    await fetch(`${API_BASE}/sensors/${sensor.id}/${sensor.enabled === false ? "enable" : "disable"}`, { method: "POST", headers: netraHeaders() });
+    load();
+  }
+  return (
+    <PageFrame title="Sensor Fleet" description="Coordinate bounded Windows and Linux capture sensors across the trusted LAN.">
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricTile label="Sensors" value={`${sensors.length}`} detail="Registered fleet members" />
+        <MetricTile label="Online" value={`${sensors.filter((row) => row.status === "online").length}`} detail="Heartbeat within 30 seconds" />
+        <MetricTile label="Capturing" value={`${sensors.filter((row) => row.status === "capturing").length}`} detail="Active bounded jobs" />
+        <MetricTile label="Groups" value={`${groups.length}`} detail="Operational locations" />
+      </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <h2 className="text-xl font-black text-strong">Create sensor group</h2>
+        <div className="mt-4 flex max-w-xl gap-3"><Input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Office LAN" /><Button onClick={createGroup} disabled={!groupName.trim()}>Create</Button></div>
+      </div>
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[920px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Sensor</th><th>Group</th><th>Location</th><th>Status</th><th>Heartbeat</th><th>Uploaded</th><th>Action</th></tr></thead>
+            <tbody>{(sensors.length ? sensors : [{ id: "none", name: "No sensors registered", hostname: "-", platform: "-", agentVersion: "-", captureEngine: "-", status: "offline", interfaces: [] } as SensorRecord]).map((sensor) => <tr key={sensor.id} className="border-b border-[var(--border)]"><td className="py-3"><div className="font-bold text-strong">{sensor.name}</div><div className="text-xs text-muted">{sensor.hostname}</div></td><td>{sensor.groupName || "-"}</td><td>{sensor.location || "-"}</td><td><Badge>{sensor.status}</Badge></td><td>{sensor.lastHeartbeatAt ?? "-"}</td><td>{formatNumber(sensor.totalBytesUploaded ?? 0)} B</td><td>{sensor.id !== "none" && <Button size="sm" variant="secondary" onClick={() => toggle(sensor)}>{sensor.enabled === false ? "Enable" : "Disable"}</Button>}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </PageFrame>
+  );
+}
+
+function SchedulesPage() {
+  const [schedules, setSchedules] = useState<CaptureScheduleRecord[]>([]);
+  const [sensors, setSensors] = useState<SensorRecord[]>([]);
+  const [name, setName] = useState("Office bounded capture");
+  const [sensorId, setSensorId] = useState("");
+  const [startAt, setStartAt] = useState(new Date(Date.now() + 10 * 60 * 1000).toISOString().slice(0, 16));
+  const load = useCallback(() => {
+    apiGet<{ results: CaptureScheduleRecord[] }>("/capture-schedules").then((payload) => setSchedules(payload.results)).catch(() => setSchedules([]));
+    apiGet<{ results: SensorRecord[] }>("/sensors").then((payload) => { setSensors(payload.results); setSensorId((current) => current || payload.results[0]?.id || ""); }).catch(() => setSensors([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function createSchedule() {
+    const sensor = sensors.find((row) => row.id === sensorId);
+    const response = await fetch(`${API_BASE}/capture-schedules`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name, sensorId, scheduleType: "one-time", startAt: new Date(startAt).toISOString(), durationSeconds: 60, packetLimit: 10000, chunkIntervalSeconds: 5, interfaceName: sensor?.interfaces[0]?.name || "", bpfFilter: "", caseIdPrefix: "CYB-GJ-SCHEDULED" }) });
+    const payload = await response.json();
+    if (!response.ok) toast.error(payload.error ?? "Schedule could not be created.");
+    else { toast.success("Bounded capture schedule saved."); load(); }
+  }
+  return (
+    <PageFrame title="Capture Schedules" description="Queue predictable one-time, daily, or weekly bounded capture windows.">
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Schedule name" value={name} onChange={setName} />
+          <SelectField label="Sensor" value={sensorId || "none"} values={sensors.length ? sensors.map((row) => row.id) : ["none"]} onChange={(value) => setSensorId(value === "none" ? "" : value)} />
+          <Field label="Start time" value={startAt} onChange={setStartAt} />
+        </div>
+        <Button className="mt-4" onClick={createSchedule} disabled={!sensorId}>Create one-time schedule</Button>
+      </div>
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="overflow-x-auto p-4"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Name</th><th>Sensor</th><th>Type</th><th>Next run</th><th>Bounds</th><th>Status</th></tr></thead><tbody>{schedules.map((row) => <tr key={row.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{row.name}</td><td>{row.sensorName}</td><td>{row.scheduleType}</td><td>{row.nextRunAt ?? "-"}</td><td>{row.durationSeconds}s / {formatNumber(row.packetLimit)} packets</td><td><Badge>{row.enabled ? "enabled" : "disabled"}</Badge></td></tr>)}</tbody></table></div>
+      </div>
+    </PageFrame>
+  );
+}
+
+function RetentionPage() {
+  const [policy, setPolicy] = useState<{ highVolumeSearchDays: number; evidenceDays: number; captureChunkDays: number } | null>(null);
+  const [preview, setPreview] = useState<{ candidates?: { resourceType: string; resourceId: string; caseId: string; status: string }[]; bytesReclaimed?: number } | null>(null);
+  useEffect(() => { apiGet<typeof policy>("/retention/policy").then(setPolicy).catch(() => undefined); }, []);
+  async function run(path: "preview" | "execute") {
+    const response = await fetch(`${API_BASE}/retention/${path}`, { method: "POST", headers: netraHeaders() });
+    const payload = await response.json();
+    if (!response.ok) toast.error("Retention operation failed.");
+    else { setPreview(payload); toast.success(path === "preview" ? "Cleanup preview ready." : "Safe chunk cleanup completed."); }
+  }
+  return (
+    <PageFrame title="Retention & Storage" description="Preview cleanup, preserve immutable evidence, and keep legal holds visible.">
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricTile label="Search metadata" value={`${policy?.highVolumeSearchDays ?? 30} days`} detail="Elasticsearch lifecycle window" />
+        <MetricTile label="Capture chunks" value={`${policy?.captureChunkDays ?? 7} days`} detail="Removed only after final evidence exists" />
+        <MetricTile label="Immutable evidence" value={`${policy?.evidenceDays ?? 90} days`} detail="Explicit approval required before purge" />
+      </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap gap-3"><Button onClick={() => run("preview")}>Preview cleanup</Button><Button variant="secondary" onClick={() => run("execute")}>Run safe cleanup</Button></div>
+        <div className="mt-5 grid gap-2">{preview?.candidates?.map((row) => <div key={`${row.resourceType}-${row.resourceId}`} className="rounded-xl border border-[var(--border)] p-3 text-sm"><span className="font-bold text-strong">{row.resourceType}</span> {row.resourceId} <Badge>{row.status}</Badge></div>) ?? <p className="text-sm text-muted">Generate a preview to inspect retention candidates.</p>}</div>
+      </div>
+    </PageFrame>
+  );
+}
+
 function SystemPage() {
   const [health, setHealth] = useState<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; publicInternet: string; actor?: string; role?: string } } | null>(null);
   const [database, setDatabase] = useState<{ mode: string; host: string; port: string; name: string; user: string; tables: number; forensicsTables: string[]; access?: { mode: string; label: string; authentication: string; publicInternet: string } } | null>(null);
   const [metrics, setMetrics] = useState<Record<string, number>>({});
   const [deadLetters, setDeadLetters] = useState<{ id: string; workerName: string; caseId: string; error: string; status: string }[]>([]);
-  const [workers, setWorkers] = useState<{ name: string; status: string; lastSeen?: string; currentJobId?: string }[]>([]);
+  const [workers, setWorkers] = useState<{ name: string; status: string; lastSeen?: string; currentJobId?: string; replicaCount?: number }[]>([]);
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
+  const [capacity, setCapacity] = useState<CapacityRecord | null>(null);
   useEffect(() => {
     function refresh() {
       apiGet<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; publicInternet: string; actor?: string; role?: string } }>("/system/health/deep").then(setHealth).catch(() => undefined);
@@ -2271,6 +2405,7 @@ function SystemPage() {
       apiGet<{ results: typeof deadLetters }>("/system/dead-letter").then((payload) => setDeadLetters(payload.results)).catch(() => undefined);
       apiGet<{ results: typeof workers }>("/system/workers").then((payload) => setWorkers(payload.results)).catch(() => undefined);
       apiGet<{ results: SensorRecord[] }>("/system/sensors").then((payload) => setSensors(payload.results)).catch(() => undefined);
+      apiGet<CapacityRecord>("/system/capacity").then(setCapacity).catch(() => undefined);
     }
     refresh();
     const interval = window.setInterval(refresh, 10000);
@@ -2304,6 +2439,15 @@ function SystemPage() {
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         {Object.entries(metrics).map(([key, value]) => <MetricTile key={key} label={key} value={formatNumber(value)} detail="Current platform metric" />)}
       </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <h2 className="text-xl font-black text-strong">Fleet capacity</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <MetadataRow label="Capacity" value={capacity?.status ?? "-"} />
+          <MetadataRow label="Disk usage" value={`${capacity?.storage.usedPercent ?? 0}%`} />
+          <MetadataRow label="Kafka lag" value={`${capacity?.kafka.lag ?? 0}`} />
+          <MetadataRow label="Active captures" value={`${capacity?.sensors.capturing ?? 0}`} />
+        </div>
+      </div>
       <div className="surface-solid overflow-hidden rounded-[1.5rem]">
         <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">Native sensors</h3></div>
         <div className="overflow-x-auto p-4">
@@ -2317,8 +2461,8 @@ function SystemPage() {
         <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">Worker heartbeats</h3></div>
         <div className="overflow-x-auto p-4">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Worker</th><th>Status</th><th>Current job</th><th>Last heartbeat</th></tr></thead>
-            <tbody>{workers.map((item) => <tr key={item.name} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.name}</td><td><Badge>{item.status}</Badge></td><td>{item.currentJobId || "-"}</td><td>{item.lastSeen ?? "-"}</td></tr>)}</tbody>
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Worker</th><th>Status</th><th>Replicas</th><th>Current job</th><th>Last heartbeat</th></tr></thead>
+            <tbody>{workers.map((item) => <tr key={item.name} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.name}</td><td><Badge>{item.status}</Badge></td><td>{item.replicaCount ?? 0}</td><td>{item.currentJobId || "-"}</td><td>{item.lastSeen ?? "-"}</td></tr>)}</tbody>
           </table>
         </div>
       </div>

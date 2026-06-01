@@ -7,6 +7,16 @@ $caseId = "CYB-GJ-PHASE2-HYDRA"
 
 Write-Host "Validating Phase 2 persistence, search, audit, and trusted-LAN workflows..."
 
+function Wait-NetraJob([string]$jobId) {
+  for ($i = 1; $i -le 120; $i++) {
+    $job = Invoke-RestMethod "$api/jobs/$jobId/status"
+    if ($job.status -eq "completed") { return $job }
+    if ($job.status -eq "failed") { throw "Processing job $jobId failed." }
+    Start-Sleep -Seconds 2
+  }
+  throw "Processing job $jobId did not complete in time."
+}
+
 $health = Invoke-RestMethod "$api/health"
 if (-not $health.packetTools.tshark) { throw "tshark is unavailable." }
 if (-not $health.packetTools.zeek) { throw "zeek is unavailable." }
@@ -14,12 +24,14 @@ if (-not $health.packetTools.zeek) { throw "zeek is unavailable." }
 $uploadJson = curl.exe -s -F "caseId=$caseId" -F "file=@$pcap" "$api/evidence/upload"
 $upload = $uploadJson | ConvertFrom-Json
 if ($upload.error) { throw "Upload failed: $($upload.error)" }
-if ($upload.analysis.topAttackClass -ne "Credential Brute Force") { throw "Unexpected class: $($upload.analysis.topAttackClass)" }
 Write-Host "[PASS] upload persisted job $($upload.jobId)"
 
-$job = Invoke-RestMethod "$api/jobs/$($upload.jobId)/status"
+$job = Wait-NetraJob $upload.jobId
 if ($job.status -ne "completed" -or $job.progress -ne 100) { throw "Job did not complete." }
 Write-Host "[PASS] job status completed"
+
+$summary = Invoke-RestMethod "$api/dashboard/summary?caseId=$caseId"
+if ($summary.topAttackClass -ne "Credential Brute Force") { throw "Unexpected class: $($summary.topAttackClass)" }
 
 $cases = Invoke-RestMethod "$api/cases"
 if (-not ($cases.results | Where-Object { $_.id -eq $caseId })) { throw "Persisted case missing from /cases." }

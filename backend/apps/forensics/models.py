@@ -30,6 +30,8 @@ class Case(TimeStampedModel):
     report_status = models.CharField(max_length=32, default="draft")
     source_location = models.CharField(max_length=255, blank=True)
     remarks = models.TextField(blank=True)
+    legal_hold = models.BooleanField(default=False)
+    legal_hold_reason = models.TextField(blank=True)
 
     def __str__(self) -> str:
         return self.id
@@ -87,6 +89,8 @@ class EvidenceFile(TimeStampedModel):
     captured_at = models.DateTimeField(null=True, blank=True)
     uploaded_by = models.CharField(max_length=160)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.VERIFIED)
+    retention_expires_at = models.DateTimeField(null=True, blank=True)
+    legal_hold = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         return self.filename
@@ -149,12 +153,27 @@ class CaptureJob(TimeStampedModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     final_evidence_file = models.ForeignKey(EvidenceFile, null=True, blank=True, related_name="capture_sources", on_delete=models.SET_NULL)
 
+    class Meta:
+        indexes = [models.Index(fields=["sensor", "status", "created_at"], name="netra_cap_sensor_stat_idx")]
+
+
+class SensorGroup(TimeStampedModel):
+    name = models.CharField(max_length=160, unique=True)
+    description = models.TextField(blank=True)
+    color = models.CharField(max_length=20, default="#2563eb")
+
+    def __str__(self) -> str:
+        return self.name
+
 
 class Sensor(TimeStampedModel):
     class Status(models.TextChoices):
         ONLINE = "online", "Online"
         STALE = "stale", "Stale"
         OFFLINE = "offline", "Offline"
+        DISABLED = "disabled", "Disabled"
+        CAPTURING = "capturing", "Capturing"
+        WARNING = "warning", "Warning"
 
     id = models.CharField(max_length=80, primary_key=True)
     name = models.CharField(max_length=160)
@@ -167,6 +186,21 @@ class Sensor(TimeStampedModel):
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
     interfaces_json = models.JSONField(default=list, blank=True)
     metadata_json = models.JSONField(default=dict, blank=True)
+    group = models.ForeignKey(SensorGroup, null=True, blank=True, related_name="sensors", on_delete=models.SET_NULL)
+    location = models.CharField(max_length=255, blank=True)
+    tags_json = models.JSONField(default=list, blank=True)
+    notes = models.TextField(blank=True)
+    enabled = models.BooleanField(default=True)
+    last_command_at = models.DateTimeField(null=True, blank=True)
+    current_capture_job = models.CharField(max_length=80, blank=True)
+    total_chunks_uploaded = models.PositiveIntegerField(default=0)
+    total_bytes_uploaded = models.BigIntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "last_heartbeat_at"], name="netra_sensor_health_idx"),
+            models.Index(fields=["group", "status"], name="netra_sensor_group_stat_idx"),
+        ]
 
 
 class CaptureChunk(TimeStampedModel):
@@ -187,9 +221,67 @@ class CaptureChunk(TimeStampedModel):
     captured_from = models.DateTimeField(null=True, blank=True)
     captured_to = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.RECEIVED)
+    retention_expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("capture_job", "sequence")
+        indexes = [models.Index(fields=["created_at", "status"], name="netra_chunk_created_stat_idx")]
+
+
+class SensorCommand(TimeStampedModel):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        CLAIMED = "claimed", "Claimed"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    sensor = models.ForeignKey(Sensor, related_name="commands", on_delete=models.CASCADE)
+    capture_job = models.ForeignKey(CaptureJob, null=True, blank=True, related_name="sensor_commands", on_delete=models.SET_NULL)
+    command_type = models.CharField(max_length=80)
+    payload_json = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.QUEUED)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["sensor", "status", "issued_at"], name="netra_sensor_cmd_stat_idx")]
+
+
+class SensorHealthSnapshot(TimeStampedModel):
+    sensor = models.ForeignKey(Sensor, related_name="health_snapshots", on_delete=models.CASCADE)
+    status = models.CharField(max_length=24)
+    heartbeat_age_seconds = models.PositiveIntegerField(default=0)
+    capture_engine = models.CharField(max_length=160, blank=True)
+    interface_count = models.PositiveIntegerField(default=0)
+    current_job_id = models.CharField(max_length=80, blank=True)
+    metadata_json = models.JSONField(default=dict, blank=True)
+
+
+class CaptureSchedule(TimeStampedModel):
+    class ScheduleType(models.TextChoices):
+        ONE_TIME = "one-time", "One time"
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
+
+    name = models.CharField(max_length=160)
+    sensor = models.ForeignKey(Sensor, related_name="capture_schedules", on_delete=models.CASCADE)
+    enabled = models.BooleanField(default=True)
+    schedule_type = models.CharField(max_length=24, choices=ScheduleType.choices)
+    start_at = models.DateTimeField()
+    timezone = models.CharField(max_length=80, default="Asia/Kolkata")
+    weekdays_json = models.JSONField(default=list, blank=True)
+    duration_seconds = models.PositiveIntegerField(default=60)
+    packet_limit = models.PositiveIntegerField(default=10000)
+    chunk_interval_seconds = models.PositiveIntegerField(default=5)
+    interface_name = models.CharField(max_length=255)
+    bpf_filter = models.CharField(max_length=255, blank=True)
+    case_id_prefix = models.CharField(max_length=80, default="CYB-GJ-SCHEDULED")
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    last_job = models.ForeignKey(CaptureJob, null=True, blank=True, related_name="schedule_runs", on_delete=models.SET_NULL)
 
 
 class OperationalEvent(TimeStampedModel):
@@ -199,7 +291,10 @@ class OperationalEvent(TimeStampedModel):
     payload_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        indexes = [models.Index(fields=["capture_job", "id"], name="netra_ops_job_id_idx")]
+        indexes = [
+            models.Index(fields=["capture_job", "id"], name="netra_ops_job_id_idx"),
+            models.Index(fields=["created_at"], name="netra_ops_created_idx"),
+        ]
 
 
 class WorkerHeartbeat(TimeStampedModel):
@@ -212,6 +307,7 @@ class WorkerHeartbeat(TimeStampedModel):
 
     class Meta:
         unique_together = ("worker_name", "instance_id")
+        indexes = [models.Index(fields=["worker_name", "last_seen_at"], name="netra_worker_seen_idx")]
 
 
 class WorkerStageReceipt(TimeStampedModel):
@@ -242,9 +338,49 @@ class ProcessingJob(TimeStampedModel):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True)
+    processing_path = models.CharField(max_length=32, default="sync-fallback")
+    fallback_reason = models.TextField(blank=True)
+    stage_deadline_at = models.DateTimeField(null=True, blank=True)
+    last_progress_at = models.DateTimeField(null=True, blank=True)
+    source_capture_job = models.ForeignKey(CaptureJob, null=True, blank=True, related_name="processing_jobs", on_delete=models.SET_NULL)
+    expected_chunk_count = models.PositiveIntegerField(default=0)
+    completed_chunk_count = models.PositiveIntegerField(default=0)
+    completeness_status = models.CharField(max_length=40, default="complete")
 
     class Meta:
-        indexes = [models.Index(fields=["case", "status"], name="netra_job_case_status_idx")]
+        indexes = [
+            models.Index(fields=["case", "status"], name="netra_job_case_status_idx"),
+            models.Index(fields=["status", "updated_at"], name="netra_job_status_upd_idx"),
+            models.Index(fields=["case", "created_at"], name="netra_job_case_created_idx"),
+        ]
+
+
+class AnalysisChunk(TimeStampedModel):
+    processing_job = models.ForeignKey(ProcessingJob, related_name="analysis_chunks", on_delete=models.CASCADE)
+    sequence = models.PositiveIntegerField()
+    encrypted_source_path = models.CharField(max_length=500)
+    plaintext_sha256 = models.CharField(max_length=64)
+    packet_count = models.PositiveIntegerField(default=0)
+    byte_count = models.BigIntegerField(default=0)
+    status = models.CharField(max_length=32, default="queued")
+    parser_completed_at = models.DateTimeField(null=True, blank=True)
+    decoder_completed_at = models.DateTimeField(null=True, blank=True)
+    session_completed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        unique_together = ("processing_job", "sequence")
+        indexes = [models.Index(fields=["status", "created_at"], name="netra_analysis_chunk_idx")]
+
+
+class AnalysisStageResult(TimeStampedModel):
+    processing_job = models.ForeignKey(ProcessingJob, related_name="stage_results", on_delete=models.CASCADE)
+    analysis_chunk = models.ForeignKey(AnalysisChunk, null=True, blank=True, related_name="stage_results", on_delete=models.CASCADE)
+    stage = models.CharField(max_length=80)
+    status = models.CharField(max_length=32)
+    payload_json = models.JSONField(default=dict, blank=True)
+    idempotency_key = models.CharField(max_length=255, unique=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
 
 class SessionSummary(TimeStampedModel):
@@ -413,6 +549,9 @@ class CustodyLedgerEvent(TimeStampedModel):
     previous_hash = models.CharField(max_length=64, blank=True)
     event_hash = models.CharField(max_length=64)
 
+    class Meta:
+        indexes = [models.Index(fields=["case", "created_at"], name="netra_custody_case_idx")]
+
 
 class AccessLog(TimeStampedModel):
     class Role(models.TextChoices):
@@ -430,6 +569,9 @@ class AccessLog(TimeStampedModel):
     case = models.ForeignKey(Case, null=True, blank=True, related_name="access_logs", on_delete=models.SET_NULL)
     result = models.CharField(max_length=32, default="allowed")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["created_at"], name="netra_access_created_idx")]
 
 
 class ComplianceControl(TimeStampedModel):
@@ -457,3 +599,38 @@ class DeadLetterEvent(TimeStampedModel):
     traceback_summary = models.TextField(blank=True)
     retry_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.NEW)
+
+
+class RetentionPolicy(TimeStampedModel):
+    name = models.CharField(max_length=160, unique=True)
+    high_volume_search_days = models.PositiveIntegerField(default=30)
+    evidence_days = models.PositiveIntegerField(default=90)
+    capture_chunk_days = models.PositiveIntegerField(default=7)
+    enabled = models.BooleanField(default=True)
+
+
+class RetentionRun(TimeStampedModel):
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    mode = models.CharField(max_length=32, default="preview")
+    status = models.CharField(max_length=32, default="running")
+    candidates_json = models.JSONField(default=list, blank=True)
+    deleted_json = models.JSONField(default=list, blank=True)
+    bytes_reclaimed = models.BigIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+
+
+class RetentionCandidate(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SKIPPED = "skipped", "Skipped"
+        DELETED = "deleted", "Deleted"
+        REQUIRES_APPROVAL = "requires-approval", "Requires approval"
+
+    resource_type = models.CharField(max_length=80)
+    resource_id = models.CharField(max_length=160)
+    case = models.ForeignKey(Case, null=True, blank=True, related_name="retention_candidates", on_delete=models.SET_NULL)
+    reason = models.TextField()
+    expires_at = models.DateTimeField()
+    legal_hold = models.BooleanField(default=False)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
