@@ -1,0 +1,74 @@
+name: netra
+
+services:
+  frontend:
+    ports: !override
+      - "0.0.0.0:8080:80"
+
+  backend:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment:
+      DJANGO_ALLOWED_HOSTS: "*"
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+      NETRA_SENSOR_SHARED_KEY: "${NETRA_SENSOR_SHARED_KEY:-netra-phase5-local-sensor-key}"
+
+  capture-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  parser-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  decoder-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  session-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  detection-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  anomaly-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  report-export-worker:
+    environment:
+      NETRA_ACCESS_MODE: trusted-lan
+      NETRA_DEV_ROLE_HEADERS: "0"
+      NETRA_TRUSTED_LAN_ACTOR: "Local Investigator"
+      NETRA_TRUSTED_LAN_ROLE: "LAN Operator"
+
+  elasticsearch:
+    ports: !override
+      - "127.0.0.1:9200:9200"
+
+  kafka:
+    ports: !override
+      - "127.0.0.1:9092:9092"

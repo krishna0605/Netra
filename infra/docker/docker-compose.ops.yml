@@ -1,0 +1,21 @@
+name: netra
+
+services:
+  frontend:
+    ports: !override
+      - "127.0.0.1:8080:80"
+
+  backend:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment:
+      NETRA_SENSOR_SHARED_KEY: "${NETRA_SENSOR_SHARED_KEY:-netra-phase5-local-sensor-key}"
+      NETRA_WORKER_MAX_RETRIES: "3"
+
+  elasticsearch:
+    ports: !override
+      - "127.0.0.1:9200:9200"
+
+  kafka:
+    ports: !override
+      - "127.0.0.1:9092:9092"

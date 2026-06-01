@@ -1,0 +1,9 @@
+{
+  "id": "rule-remote-command-execution",
+  "name": "Remote Command Execution",
+  "category": "Service Exploitation",
+  "attack_class": "Remote Command Execution",
+  "keywords": ["distcc", "backdoor", "rce", "command", "execution"],
+  "min_keyword_matches": 1,
+  "base_confidence": 86
+}

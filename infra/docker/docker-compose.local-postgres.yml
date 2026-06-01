@@ -1,0 +1,187 @@
+name: netra
+
+services:
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: sh -c "python manage.py migrate --run-syncdb && python manage.py runserver 0.0.0.0:8000"
+    environment:
+      DJANGO_DEBUG: "1"
+      DJANGO_SECRET_KEY: netra-development-only-secret-phase3-long-enough-for-jwt
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
+      POSTGRES_DB: netra
+      POSTGRES_USER: netra
+      POSTGRES_PASSWORD: netra
+      POSTGRES_HOST: host.docker.internal
+      POSTGRES_PORT: "${NETRA_LOCAL_POSTGRES_PORT:-5432}"
+      NETRA_DATABASE_MODE: local-postgres
+      NETRA_STORAGE_ROOT: /app/storage
+      NETRA_KAFKA_BOOTSTRAP: kafka:9092
+      NETRA_ELASTICSEARCH_URL: http://elasticsearch:9200
+      NETRA_PROCESSING_MODE: hybrid
+      NETRA_DEV_ROLE_HEADERS: "1"
+      NETRA_EVIDENCE_ENCRYPTION: "on"
+      NETRA_EVIDENCE_KEY: netra-phase3-development-evidence-key
+      NETRA_EVIDENCE_KEY_ID: dev-key-001
+      NETRA_MAX_UPLOAD_MB: "200"
+      NETRA_ENABLE_HOST_CAPTURE: "0"
+      NETRA_SENSOR_SHARED_KEY: "${NETRA_SENSOR_SHARED_KEY:-netra-phase5-local-sensor-key}"
+      NETRA_WORKER_MAX_RETRIES: "3"
+    ports:
+      - "8000:8000"
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      elasticsearch:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  capture-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker capture
+    environment: &backend-env
+      DJANGO_DEBUG: "1"
+      DJANGO_SECRET_KEY: netra-development-only-secret-phase3-long-enough-for-jwt
+      POSTGRES_DB: netra
+      POSTGRES_USER: netra
+      POSTGRES_PASSWORD: netra
+      POSTGRES_HOST: host.docker.internal
+      POSTGRES_PORT: "${NETRA_LOCAL_POSTGRES_PORT:-5432}"
+      NETRA_DATABASE_MODE: local-postgres
+      NETRA_STORAGE_ROOT: /app/storage
+      NETRA_KAFKA_BOOTSTRAP: kafka:9092
+      NETRA_ELASTICSEARCH_URL: http://elasticsearch:9200
+      NETRA_PROCESSING_MODE: hybrid
+      NETRA_DEV_ROLE_HEADERS: "1"
+      NETRA_EVIDENCE_ENCRYPTION: "on"
+      NETRA_EVIDENCE_KEY: netra-phase3-development-evidence-key
+      NETRA_EVIDENCE_KEY_ID: dev-key-001
+      NETRA_MAX_UPLOAD_MB: "200"
+      NETRA_ENABLE_HOST_CAPTURE: "0"
+      NETRA_SENSOR_SHARED_KEY: "${NETRA_SENSOR_SHARED_KEY:-netra-phase5-local-sensor-key}"
+      NETRA_WORKER_MAX_RETRIES: "3"
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  parser-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker parser
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  decoder-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker decoder
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  session-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker session
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  detection-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker detection
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  anomaly-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker anomaly
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  report-export-worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    command: python manage.py run_netra_worker report-export
+    environment: *backend-env
+    volumes:
+      - netra-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.1
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+
+volumes:
+  elasticsearch-data:
+  kafka-data:
+  netra-storage:

@@ -1,0 +1,9 @@
+{
+  "id": "rule-botnet-scanning",
+  "name": "IoT Botnet or High Fan-out Scanning",
+  "category": "Reconnaissance / Botnet",
+  "attack_class": "IoT Botnet / Scanning",
+  "keywords": ["mirai", "scan", "fanout", "telnet", "botnet"],
+  "min_keyword_matches": 1,
+  "base_confidence": 82
+}

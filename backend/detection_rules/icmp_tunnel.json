@@ -1,0 +1,9 @@
+{
+  "id": "rule-9050",
+  "name": "ICMP Payload Variance",
+  "category": "ICMP Tunnel",
+  "attack_class": "DNS Tunnel",
+  "keywords": ["icmp", "payload", "variance", "entropy", "covert"],
+  "min_keyword_matches": 2,
+  "base_confidence": 60
+}

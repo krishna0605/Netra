@@ -1,0 +1,9 @@
+{
+  "id": "rule-smb-netbios-lateral",
+  "name": "SMB / NetBIOS Lateral Movement",
+  "category": "Lateral Movement",
+  "attack_class": "SMB / NetBIOS Lateral Movement",
+  "keywords": ["smb", "netbios", "445", "139", "lateral"],
+  "min_keyword_matches": 1,
+  "base_confidence": 76
+}

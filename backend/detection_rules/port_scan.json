@@ -1,0 +1,9 @@
+{
+  "id": "rule-9041",
+  "name": "Horizontal TCP Sweep",
+  "category": "Port Scan",
+  "attack_class": "Port Scan",
+  "keywords": ["syn", "scan", "sweep", "445", "internal"],
+  "min_keyword_matches": 2,
+  "base_confidence": 62
+}

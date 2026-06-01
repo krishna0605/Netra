@@ -1,0 +1,62 @@
+{
+  "normal.pcap": {
+    "priority": "P0",
+    "expectedTopClass": "Normal Baseline",
+    "expectedSeverity": "low",
+    "story": "Benign traffic produces no critical findings"
+  },
+  "hydra_ssh.pcap": {
+    "priority": "P0",
+    "expectedTopClass": "Credential Brute Force",
+    "expectedSeverity": "high",
+    "story": "Repeated SSH authentication attempts"
+  },
+  "hydra_ftp.pcap": {
+    "priority": "P0",
+    "expectedTopClass": "Credential Brute Force",
+    "expectedSeverity": "high",
+    "story": "Repeated FTP authentication attempts"
+  },
+  "mirai.pcap": {
+    "priority": "P0",
+    "expectedTopClass": "IoT Botnet / Scanning",
+    "expectedSeverity": "critical",
+    "story": "Botnet-style scanning and fan-out"
+  },
+  "zeus.pcap": {
+    "priority": "P0",
+    "expectedTopClass": "Port Scan / Reconnaissance",
+    "expectedSeverity": "high",
+    "story": "Broad external destination fan-out requiring reconnaissance review"
+  },
+  "vsftpd.pcap": {
+    "priority": "P1",
+    "expectedTopClass": "Port Scan / Reconnaissance",
+    "expectedSeverity": "high",
+    "story": "High port fan-out requiring reconnaissance and service review"
+  },
+  "tomcat.pcap": {
+    "priority": "P1",
+    "expectedTopClass": "Web Service Exploitation",
+    "expectedSeverity": "high",
+    "story": "Tomcat/web service attack attempt"
+  },
+  "distcc_exec_backdoor.pcap": {
+    "priority": "P1",
+    "expectedTopClass": "Remote Command Execution",
+    "expectedSeverity": "critical",
+    "story": "Backdoor/RCE behavior"
+  },
+  "netbios_ssn.pcap": {
+    "priority": "P1",
+    "expectedTopClass": "Port Scan / Reconnaissance",
+    "expectedSeverity": "high",
+    "story": "High internal port fan-out with SMB evidence requiring lateral-movement review"
+  },
+  "smtp.pcap": {
+    "priority": "P2",
+    "expectedTopClass": "Suspicious SMTP Transfer",
+    "expectedSeverity": "medium",
+    "story": "Mail/data-transfer investigation"
+  }
+}

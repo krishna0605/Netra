@@ -1,0 +1,9 @@
+{
+  "id": "rule-9012",
+  "name": "Large Outbound Transfer",
+  "category": "Exfiltration",
+  "attack_class": "Exfiltration",
+  "keywords": ["outbound", "large", "transfer", "tls", "185.199.108.44"],
+  "min_keyword_matches": 2,
+  "base_confidence": 68
+}

@@ -1,0 +1,9 @@
+{
+  "id": "rule-9001",
+  "name": "DNS Tunnel High Entropy Query",
+  "category": "Covert Channels",
+  "attack_class": "DNS Tunnel",
+  "keywords": ["dns", "entropy", "subdomain", "relay-docs-sync", "txt"],
+  "min_keyword_matches": 2,
+  "base_confidence": 70
+}

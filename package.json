@@ -1,0 +1,27 @@
+{
+  "name": "netra-platform",
+  "private": true,
+  "scripts": {
+    "netra:start": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra.ps1",
+    "netra:logs": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/logs-netra.ps1",
+    "netra:stop": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/stop-netra.ps1",
+    "netra:validate": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-stack.ps1",
+    "netra:validate:phase1": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase1.ps1",
+    "netra:validate:phase2": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase2.ps1",
+    "netra:validate:phase3": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase3.ps1",
+    "netra:validate:phase4": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase4.ps1",
+    "netra:start:local-db": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra-local-postgres.ps1",
+    "netra:validate:local-db": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-local-postgres.ps1",
+    "netra:start:ops": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra-ops.ps1",
+    "netra:validate:phase5": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase5.ps1",
+    "netra:start:lan": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra-lan.ps1",
+    "netra:validate:phase6": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/validate-phase6.ps1",
+    "netra:sensor:install": "powershell -ExecutionPolicy Bypass -File ./sensor-agent/scripts/install-windows.ps1",
+    "netra:sensor:check": "powershell -ExecutionPolicy Bypass -File ./sensor-agent/scripts/run-windows.ps1 check",
+    "netra:sensor:interfaces": "powershell -ExecutionPolicy Bypass -File ./sensor-agent/scripts/run-windows.ps1 interfaces",
+    "netra:sensor:start": "powershell -ExecutionPolicy Bypass -File ./sensor-agent/scripts/run-windows.ps1 run",
+    "netra:backup": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/backup-netra.ps1",
+    "netra:restore": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/restore-netra.ps1",
+    "zeek:sample": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/run-zeek-sample.ps1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "rule-bruteforce-ssh-ftp",
+  "name": "SSH/FTP Credential Brute Force",
+  "category": "Credential Attack",
+  "attack_class": "Credential Brute Force",
+  "keywords": ["ssh", "ftp", "authentication", "repeated", "session"],
+  "min_keyword_matches": 2,
+  "base_confidence": 78
+}

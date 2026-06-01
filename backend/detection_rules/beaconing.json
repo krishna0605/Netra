@@ -1,0 +1,9 @@
+{
+  "id": "rule-9033",
+  "name": "Periodic Beacon Timing",
+  "category": "Malware C2",
+  "attack_class": "Beaconing",
+  "keywords": ["periodic", "beacon", "timing", "ja3", "cdn-safeupdate"],
+  "min_keyword_matches": 2,
+  "base_confidence": 64
+}

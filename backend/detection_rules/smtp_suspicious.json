@@ -1,0 +1,9 @@
+{
+  "id": "rule-smtp-suspicious",
+  "name": "Suspicious SMTP Transfer",
+  "category": "Data Transfer",
+  "attack_class": "Suspicious SMTP Transfer",
+  "keywords": ["smtp", "mail", "transfer", "25"],
+  "min_keyword_matches": 1,
+  "base_confidence": 70
+}
