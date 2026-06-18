@@ -125,6 +125,14 @@ def index_live_packets(documents: list[tuple[str, dict[str, Any]]]) -> int:
 
 
 def search_index(kind: str, case_id: str = "", query_text: str = "", fallback: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], str]:
+    from django.conf import settings
+
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        rows = fallback or []
+        if query_text:
+            needle = query_text.lower()
+            rows = [row for row in rows if needle in " ".join(str(value).lower() for value in row.values())]
+        return rows, "postgres"
     index = ALIASES.get(kind, ALIASES["packets"])
     filters = []
     if case_id:

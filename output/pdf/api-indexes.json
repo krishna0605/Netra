@@ -1,0 +1,10 @@
+{
+  "status": "ok",
+  "provider": "postgres",
+  "results": [
+    "forensics_processingjob.stats",
+    "forensics_sessionsummary",
+    "forensics_alert"
+  ],
+  "detail": "Elasticsearch disabled in Supabase mode."
+}

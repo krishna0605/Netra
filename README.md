@@ -28,6 +28,27 @@ storage/                 Local evidence layout notes; runtime contents are Git i
 
 ## One-command Startup
 
+For the current Supabase data-plane workflow, run:
+
+```powershell
+npm run netra:start:supabase
+```
+
+This starts the officer console and Django API against Supabase Auth, Supabase Postgres, Supabase Storage, and Supabase Queues. Local PostgreSQL, Kafka, and Elasticsearch are stopped in this mode. Supabase Queues use `pgmq`; the compatibility queue endpoint verifies a real send/read/archive cycle. Create officer users manually in Supabase Auth, then open:
+
+```txt
+http://localhost:8080/login
+```
+
+Use:
+
+```powershell
+npm run netra:bootstrap:supabase
+npm run netra:validate:supabase
+```
+
+to verify Supabase extensions, private Storage buckets, queues, login, upload, analysis, report, and export.
+
 Run from the repo root:
 
 ```powershell
@@ -191,6 +212,8 @@ See [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md).
 
 ## Current Limitations
 
+- Supabase Storage requires a current backend service-role key from the Supabase Dashboard. The publishable key is not enough for encrypted evidence upload.
+- Supabase Advisor reports RLS is disabled on Netra public tables. Do not enable RLS blindly; add explicit policies or move backend-only tables to a private schema before shared deployment.
 - The most reliable demo path remains stored PCAP upload. Replay and native bounded capture are operational additions.
 - Phase 4 intentionally removes automatic seeded data from normal startup.
 - Zeek is installed inside the backend container and is used during PCAP upload to generate structured forensic evidence.
@@ -205,6 +228,7 @@ See [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md).
 - [Detection Methods](docs/detection-methods.md)
 - [Forensic Workflow](docs/forensic-workflow.md)
 - [Deployment](docs/deployment.md)
+- [Supabase Mode](docs/supabase-migration.md)
 - [Local PostgreSQL Setup](docs/local-postgres-setup.md)
 - [PCAP Analysis Guide](docs/pcap-analysis-guide.md)
 - [Zeek Setup Guide](docs/zeek-setup-guide.md)

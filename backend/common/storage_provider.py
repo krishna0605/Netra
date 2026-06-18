@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,8 +69,182 @@ class LocalFilesystemStorageProvider:
         shutil.copyfile(self.resolve(source_uri), target)
         return target
 
+    def health_check(self) -> dict:
+        return {"status": "ok", "provider": "local-filesystem"}
 
-storage_provider = LocalFilesystemStorageProvider()
+
+class SupabaseStorageProvider(LocalFilesystemStorageProvider):
+    scheme = "supabase://"
+
+    FOLDER_BUCKETS = {
+        "pcaps": "SUPABASE_STORAGE_BUCKET_EVIDENCE",
+        "capture_chunks": "SUPABASE_STORAGE_BUCKET_CAPTURE_CHUNKS",
+        "analysis_chunks": "SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS",
+        "zeek": "SUPABASE_STORAGE_BUCKET_ZEEK_LOGS",
+        "logs": "SUPABASE_STORAGE_BUCKET_ZEEK_LOGS",
+        "reports": "SUPABASE_STORAGE_BUCKET_REPORTS",
+        "exports": "SUPABASE_STORAGE_BUCKET_EXPORTS",
+        "filtered_pcaps": "SUPABASE_STORAGE_BUCKET_EXPORTS",
+    }
+
+    def _base_url(self) -> str:
+        if not settings.SUPABASE_URL:
+            raise RuntimeError("SUPABASE_URL is required when NETRA_STORAGE_PROVIDER=supabase.")
+        return settings.SUPABASE_URL.rstrip("/")
+
+    def _service_key(self) -> str:
+        if not settings.SUPABASE_SERVICE_ROLE_KEY:
+            raise RuntimeError("Evidence storage is not configured: backend Supabase service-role key is missing.")
+        return settings.SUPABASE_SERVICE_ROLE_KEY
+
+    def _headers(self, content_type: str = "application/octet-stream") -> dict[str, str]:
+        key = self._service_key()
+        return {
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+            "Content-Type": content_type,
+        }
+
+    def _auth_headers(self) -> dict[str, str]:
+        key = self._service_key()
+        return {
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+        }
+
+    def _bucket_for_relative(self, relative: Path) -> str:
+        root_folder = relative.parts[0] if relative.parts else "pcaps"
+        setting_name = self.FOLDER_BUCKETS.get(root_folder, "SUPABASE_STORAGE_BUCKET_EVIDENCE")
+        return getattr(settings, setting_name)
+
+    def _parse_uri(self, storage_uri: str | Path) -> tuple[str, str]:
+        raw = str(storage_uri)
+        if not raw.startswith(self.scheme):
+            return self._bucket_for_relative(Path(raw).resolve().relative_to(settings.NETRA_STORAGE_ROOT.resolve())), Path(raw).name
+        remainder = raw.removeprefix(self.scheme)
+        bucket, _, object_name = remainder.partition("/")
+        if not bucket or not object_name:
+            raise ValueError(f"Invalid Supabase storage URI: {raw}")
+        return bucket, object_name
+
+    def _object_url(self, bucket: str, object_name: str) -> str:
+        quoted_bucket = urllib.parse.quote(bucket, safe="")
+        quoted_object = urllib.parse.quote(object_name, safe="/")
+        return f"{self._base_url()}/storage/v1/object/{quoted_bucket}/{quoted_object}"
+
+    def uri_for(self, path: str | Path) -> str:
+        target = Path(path).resolve()
+        root = settings.NETRA_STORAGE_ROOT.resolve()
+        relative = target.relative_to(root)
+        bucket = self._bucket_for_relative(relative)
+        object_name = relative.as_posix()
+        self._upload_file(bucket, object_name, target)
+        return f"{self.scheme}{bucket}/{object_name}"
+
+    def resolve(self, storage_uri: str | Path) -> Path:
+        raw = str(storage_uri)
+        if not raw.startswith(self.scheme):
+            return super().resolve(storage_uri)
+        bucket, object_name = self._parse_uri(raw)
+        cache_path = settings.NETRA_STORAGE_ROOT / ".supabase-cache" / bucket / object_name
+        if not cache_path.exists():
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(self._download_bytes(bucket, object_name))
+        return cache_path
+
+    def open_encrypted(self, storage_uri: str | Path, mode: str = "rb"):
+        if str(storage_uri).startswith(self.scheme) and "r" in mode:
+            bucket, object_name = self._parse_uri(storage_uri)
+            handle = tempfile.NamedTemporaryFile(delete=False)
+            handle.write(self._download_bytes(bucket, object_name))
+            handle.close()
+            return Path(handle.name).open(mode)
+        return super().open_encrypted(storage_uri, mode)
+
+    def stat(self, storage_uri: str | Path) -> StorageStat:
+        if not str(storage_uri).startswith(self.scheme):
+            return super().stat(storage_uri)
+        bucket, object_name = self._parse_uri(storage_uri)
+        content = self._download_bytes(bucket, object_name)
+        import hashlib
+
+        return StorageStat(size_bytes=len(content), sha256=hashlib.sha256(content).hexdigest())
+
+    def delete(self, storage_uri: str | Path) -> None:
+        if not str(storage_uri).startswith(self.scheme):
+            return super().delete(storage_uri)
+        bucket, object_name = self._parse_uri(storage_uri)
+        url = self._object_url(bucket, object_name)
+        request = urllib.request.Request(url, method="DELETE", headers=self._auth_headers())
+        self._request(request, expected={200, 204, 404})
+
+    def verify_hash(self, storage_uri: str | Path, expected_sha256: str) -> bool:
+        try:
+            return self.stat(storage_uri).sha256 == expected_sha256
+        except Exception:
+            return False
+
+    def copy_encrypted(self, source_uri: str | Path, destination: str | Path) -> Path:
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if str(source_uri).startswith(self.scheme):
+            bucket, object_name = self._parse_uri(source_uri)
+            target.write_bytes(self._download_bytes(bucket, object_name))
+            return target
+        return super().copy_encrypted(source_uri, destination)
+
+    def _upload_file(self, bucket: str, object_name: str, path: Path) -> None:
+        url = self._object_url(bucket, object_name)
+        request = urllib.request.Request(url, data=path.read_bytes(), method="POST", headers=self._headers())
+        request.add_header("x-upsert", "true")
+        self._request(request, expected={200, 201})
+
+    def _download_bytes(self, bucket: str, object_name: str) -> bytes:
+        url = self._object_url(bucket, object_name)
+        request = urllib.request.Request(url, method="GET", headers=self._headers())
+        return self._request(request, expected={200})
+
+    def health_check(self) -> dict:
+        request = urllib.request.Request(f"{self._base_url()}/storage/v1/bucket", method="GET", headers=self._headers("application/json"))
+        self._request(request, expected={200})
+        bucket = settings.SUPABASE_STORAGE_BUCKET_EVIDENCE
+        probe_name = f"health/netra-storage-probe-{uuid4().hex}.txt"
+        probe = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            probe.write(b"netra-storage-health")
+            probe.close()
+            self._upload_file(bucket, probe_name, Path(probe.name))
+            content = self._download_bytes(bucket, probe_name)
+            if content != b"netra-storage-health":
+                raise RuntimeError("Supabase Storage health probe returned unexpected content.")
+            self.delete(f"{self.scheme}{bucket}/{probe_name}")
+        finally:
+            Path(probe.name).unlink(missing_ok=True)
+        return {"status": "ok", "provider": "supabase-storage", "detail": "bucket list and encrypted artifact probe succeeded"}
+
+    def _request(self, request: urllib.request.Request, expected: set[int]) -> bytes:
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                content = response.read()
+                if response.status not in expected:
+                    raise RuntimeError(f"Supabase Storage returned HTTP {response.status}: {content[:200]!r}")
+                return content
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code in expected:
+                return detail.encode("utf-8")
+            if "signature verification failed" in detail.lower() or exc.code in {401, 403}:
+                raise RuntimeError("Evidence storage is not configured: backend Supabase service-role key is invalid or expired.") from exc
+            raise RuntimeError(f"Supabase Storage HTTP {exc.code}: {detail}") from exc
+
+
+def get_storage_provider():
+    if getattr(settings, "NETRA_STORAGE_PROVIDER", "local") == "supabase":
+        return SupabaseStorageProvider()
+    return LocalFilesystemStorageProvider()
+
+
+storage_provider = get_storage_provider()
 
 
 def resolve_storage_path(storage_uri: str | Path) -> Path:

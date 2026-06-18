@@ -1,0 +1,93 @@
+{
+  "status": "degraded",
+  "checkedAt": "2026-06-16T12:43:15.561541+05:30",
+  "checks": {
+    "postgres": {
+      "status": "ok",
+      "latencyMs": 1108.39
+    },
+    "elasticsearch": {
+      "status": "ok",
+      "provider": "postgres",
+      "detail": "Elasticsearch disabled in Supabase mode."
+    },
+    "kafka": {
+      "status": "ok",
+      "provider": "supabase-pgmq",
+      "detail": "pgmq send/read/archive probe succeeded",
+      "queue": "dead-letter",
+      "messageId": 23,
+      "depth": 0,
+      "queues": {
+        "alerts-created": 0,
+        "analysis-chunk-ready": 0,
+        "analysis-finalize": 0,
+        "anomaly-events": 0,
+        "capture-chunk-received": 0,
+        "dead-letter": 0,
+        "export-completed": 7,
+        "features-ready": 0,
+        "operational-events": 4,
+        "packets-normalized": 0,
+        "pcap-uploaded": 10,
+        "protocol-decoded": 0,
+        "report-export": 10,
+        "sessions-reconstructed": 0
+      }
+    },
+    "storage": {
+      "status": "ok",
+      "provider": "supabase-storage",
+      "detail": "bucket list and encrypted artifact probe succeeded",
+      "bucket": "netra-evidence"
+    },
+    "realtime": {
+      "status": "ok",
+      "provider": "supabase-realtime",
+      "missingTables": []
+    },
+    "encryption": {
+      "status": "ok",
+      "keyId": "supabase-dev-key-001"
+    },
+    "packetTools": {
+      "status": "ok",
+      "scapy": true,
+      "tshark": true,
+      "zeek": true
+    },
+    "workers": {
+      "status": "degraded",
+      "offline": [
+        "capture",
+        "pcap-ingestion",
+        "parser",
+        "decoder",
+        "session",
+        "detection",
+        "anomaly",
+        "analysis-finalizer",
+        "report-export",
+        "scheduler",
+        "retention"
+      ],
+      "stale": []
+    }
+  },
+  "database": {
+    "mode": "supabase",
+    "provider": "supabase",
+    "host": "aws-1-ap-northeast-1.pooler.supabase.com",
+    "port": 6543,
+    "name": "postgres",
+    "tables": 46
+  },
+  "access": {
+    "mode": "supabase-auth",
+    "label": "Supabase Auth",
+    "authentication": "supabase-auth",
+    "publicInternet": "not-configured",
+    "actor": "Local Investigator",
+    "role": "LAN Operator"
+  }
+}

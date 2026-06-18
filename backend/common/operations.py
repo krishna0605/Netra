@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.utils import timezone as django_timezone
 from scapy.all import PcapReader, PcapWriter
 
@@ -58,12 +58,16 @@ def validate_capture_bounds(duration_seconds: int, packet_limit: int, chunk_inte
 
 
 def ensure_capture_case(case_id: str, investigator: str = "Local Investigator") -> Case:
+    origin = Case.Origin.REPLAY if "REPLAY" in case_id.upper() else Case.Origin.SENSOR_CAPTURE
     case, _ = Case.objects.update_or_create(
         id=case_id,
         defaults={
             "title": f"Live evidence capture: {case_id}",
             "investigator": investigator,
             "status": Case.Status.OPEN,
+            "origin": origin,
+            "is_test": False,
+            "opened_at": datetime.now(timezone.utc),
             "source_location": "Netra sensor",
         },
     )
@@ -126,6 +130,29 @@ def capture_job_payload(job: CaptureJob) -> dict[str, Any]:
         "evidenceId": job.final_evidence_file_id or "",
         "finalEvidenceId": job.final_evidence_file_id or "",
     }
+
+
+def _mark_capture_failed(job: CaptureJob, message: str) -> None:
+    job.status = CaptureJob.Status.FAILED
+    job.error_message = message
+    job.completed_at = django_timezone.now()
+    job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
+    if job.sensor_id:
+        Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.WARNING, current_capture_job="")
+    emit_operational_event("capture.failed", capture_job_payload(job), capture_job=job)
+
+
+def expire_stale_replay(job: CaptureJob) -> bool:
+    if job.mode != CaptureJob.Mode.REPLAY or job.status != CaptureJob.Status.RUNNING:
+        return False
+    started_at = job.started_at or job.created_at
+    if not started_at:
+        return False
+    timeout_seconds = max(getattr(settings, "NETRA_REPLAY_TIMEOUT_SECONDS", 180), job.duration_seconds + 60)
+    if django_timezone.now() - started_at <= timedelta(seconds=timeout_seconds):
+        return False
+    _mark_capture_failed(job, f"Replay timed out after {timeout_seconds} seconds without finalizing evidence.")
+    return True
 
 
 def mark_capture_running(job: CaptureJob) -> None:
@@ -242,13 +269,7 @@ def finalize_capture(job: CaptureJob, actor: Actor | str = "Netra capture engine
         publish_event("netra.capture.finalize", capture_job_payload(job))
         return capture_job_payload(job)
     except Exception as exc:
-        job.status = CaptureJob.Status.FAILED
-        job.error_message = str(exc)
-        job.completed_at = django_timezone.now()
-        job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
-        if job.sensor_id:
-            Sensor.objects.filter(id=job.sensor_id).update(status=Sensor.Status.WARNING, current_capture_job="")
-        emit_operational_event("capture.failed", capture_job_payload(job), capture_job=job)
+        _mark_capture_failed(job, str(exc))
         raise
     finally:
         if analysis_path:
@@ -263,12 +284,17 @@ def start_replay(job: CaptureJob, encrypted_source: str, speed: str = "max") -> 
 
 
 def _run_replay(job_id: str, encrypted_source: str, speed: str) -> None:
+    close_old_connections()
     job = CaptureJob.objects.get(id=job_id)
     source_dir = Path(tempfile.mkdtemp(prefix=f"netra-replay-{job_id}-"))
     plain_source = source_dir / "source.pcap"
     try:
         decrypt_file(encrypted_source, plain_source)
         mark_capture_running(job)
+        if speed == "max":
+            _run_fast_replay(job, plain_source, source_dir)
+            finalize_capture(job)
+            return
         sequence = 0
         emitted_packets = 0
         chunk_writer = None
@@ -309,13 +335,26 @@ def _run_replay(job_id: str, encrypted_source: str, speed: str) -> None:
         finalize_capture(job)
     except Exception as exc:
         job.refresh_from_db()
-        job.status = CaptureJob.Status.FAILED
-        job.error_message = str(exc)
-        job.completed_at = django_timezone.now()
-        job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
-        emit_operational_event("capture.failed", capture_job_payload(job), capture_job=job)
+        _mark_capture_failed(job, str(exc))
     finally:
         shutil.rmtree(source_dir, ignore_errors=True)
+        close_old_connections()
+
+
+def _run_fast_replay(job: CaptureJob, plain_source: Path, source_dir: Path) -> None:
+    chunk_path = source_dir / "replay-00001.pcap"
+    result = subprocess.run(
+        ["tshark", "-r", str(plain_source), "-c", str(job.packet_limit), "-w", str(chunk_path)],
+        capture_output=True,
+        text=True,
+        timeout=max(60, min(180, getattr(settings, "NETRA_REPLAY_TIMEOUT_SECONDS", 180))),
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(result.stderr.strip() or "tshark could not create replay chunk")
+    if not chunk_path.exists() or chunk_path.stat().st_size == 0:
+        raise ValueError("Replay could not create a non-empty capture chunk.")
+    _ingest_replay_file(job, chunk_path, 1)
 
 
 def _ingest_replay_file(job: CaptureJob, path: Path, sequence: int) -> None:

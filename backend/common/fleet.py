@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
+from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 
@@ -21,6 +22,7 @@ from apps.forensics.models import (
     SensorCommand,
     SensorGroup,
 )
+from common.kafka import supabase_queue_depths
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, heartbeat_state
 from common.storage_provider import storage_provider
 
@@ -241,6 +243,16 @@ def capacity_payload() -> dict[str, Any]:
 
 
 def search_capacity_payload() -> dict[str, Any]:
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        from apps.forensics.models import Alert, ProcessingJob, SessionSummary
+
+        return {
+            "provider": "postgres",
+            "indexedDocuments": ProcessingJob.objects.count() + SessionSummary.objects.count() + Alert.objects.count(),
+            "failedBulkRequests": 0,
+            "available": True,
+            "detail": "Supabase/Postgres search is active; Elasticsearch is disabled.",
+        }
     try:
         from common.search import get_elasticsearch_client
 
@@ -251,6 +263,28 @@ def search_capacity_payload() -> dict[str, Any]:
 
 
 def kafka_lag_payload() -> dict[str, Any]:
+    if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq":
+        try:
+            queue_depths = supabase_queue_depths()
+            total = sum(queue_depths.values())
+            return {
+                "provider": "supabase-pgmq",
+                "lag": total,
+                "consumerGroups": queue_depths,
+                "brokerAvailable": True,
+                "warningThreshold": settings.NETRA_KAFKA_LAG_WARNING,
+                "criticalThreshold": settings.NETRA_KAFKA_LAG_CRITICAL,
+            }
+        except Exception as exc:
+            return {
+                "provider": "supabase-pgmq",
+                "lag": 0,
+                "consumerGroups": {},
+                "brokerAvailable": False,
+                "detail": str(exc),
+                "warningThreshold": settings.NETRA_KAFKA_LAG_WARNING,
+                "criticalThreshold": settings.NETRA_KAFKA_LAG_CRITICAL,
+            }
     groups = [
         "netra-capture",
         "netra-pcap-ingestion",

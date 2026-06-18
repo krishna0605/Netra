@@ -57,6 +57,10 @@ export type ZeekEvidence = {
 
 export type DashboardSummary = {
   packets: number;
+  observedPackets?: number;
+  indexedPackets?: number;
+  packetMetadataLimit?: number;
+  searchCompleteness?: "complete" | "truncated-search-index" | string;
   sessions: number;
   protocolsDecoded: number;
   payloadFindings: number;
@@ -88,10 +92,12 @@ export type EvidenceIntakeForm = {
   caseNumber: string;
   investigator: string;
   department: string;
-  evidenceType: "PCAP" | "Firewall Logs" | "DNS Logs" | "TLS Metadata" | "Mixed Evidence";
+  evidenceType: "Auto-detect" | "PCAP" | "Firewall Logs" | "DNS Logs" | "TLS Metadata" | "Mixed Evidence";
   sourceLocation: string;
-  priority: "Standard" | "Urgent" | "Critical";
+  priority: "" | "Standard" | "Urgent" | "Critical";
   remarks: string;
+  flags?: string[];
+  linkedCaseIds?: string[];
   sourceIp: string;
   destinationIp: string;
   protocol: string;
@@ -140,13 +146,32 @@ export type CaseRecord = {
   id: string;
   title: string;
   investigator: string;
+  department?: string;
   status: "open" | "reviewing" | "report-ready";
+  priority?: "Standard" | "Urgent" | "Critical" | "";
+  origin?: string;
+  isTest?: boolean;
+  openedAt?: string;
+  closedAt?: string;
+  sourceLocation?: string;
+  remarks?: string;
+  flags?: string[];
+  linkedCases?: CaseLinkRecord[];
   evidenceFileId: string;
+  evidenceFilename?: string;
   alertIds: string[];
   notes: string[];
   history: CaseHistoryEvent[];
   createdAt: string;
   reportStatus: "draft" | "ready";
+  riskLevel?: Severity;
+  topAttackClass?: AttackClass;
+  alertCount?: number;
+  packetCount?: number;
+  sessionCount?: number;
+  latestReportId?: string;
+  latestReportDownloadUrl?: string;
+  updatedAt?: string;
 };
 
 export type CaseHistoryEvent = {
@@ -155,6 +180,78 @@ export type CaseHistoryEvent = {
   actor: string;
   action: string;
   details: string;
+};
+
+export type CaseLinkRecord = {
+  id: string | number;
+  caseId: string;
+  caseTitle: string;
+  relationType: string;
+  notes?: string;
+};
+
+export type CaseChartsRecord = {
+  severity: { name: string; value: number }[];
+  attackClasses: { name: string; value: number }[];
+  protocols: { name: string; value: number }[];
+  topSources: { name: string; value: number }[];
+  topDestinations: { name: string; value: number }[];
+  timeline: { time: string; mb?: number; alerts?: number; value?: number }[];
+  packetSessionSummary: { packets: number; sessions: number; alerts: number; anomalies: number };
+  evidenceVerified: boolean;
+  dataQuality?: string;
+};
+
+export type CaseWorkspaceRecord = {
+  caseId: string;
+  snapshotVersion: string;
+  generatedAt: string;
+  source: string;
+  dataCompleteness: string;
+  workspace: {
+    case: CaseRecord;
+    evidence: EvidenceFile | null;
+    summary: DashboardSummary;
+    charts: CaseChartsRecord;
+    suspiciousActivity: {
+      alerts: AlertRecord[];
+      anomalies: AnomalyRecord[];
+      trafficPattern: { time: string; mb?: number; alerts?: number; packets?: number; anomalies?: number; value?: number }[];
+      explanation: string;
+    };
+    trafficEvidence: {
+      packetsPreview: PacketRecord[];
+      sessionsPreview: SessionRecord[];
+      protocols: DecodedProtocolRecord[];
+      payloadClues: PayloadFinding[];
+      communicationMap: { nodes?: unknown[]; edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] };
+    };
+    reports: {
+      latestReport: ReportRecord | null;
+      items: ReportRecord[];
+    };
+    custody: {
+      status: string;
+      verification: { verified: boolean; eventCount: number; latestHash: string };
+      eventCount: number;
+      latestHash: string;
+      eventsPreview: { id: string; timestamp: string; actor: string; action: string; eventHash: string; previousHash: string }[];
+    };
+    availableTabs: {
+      overview: boolean;
+      suspiciousActivity: boolean;
+      trafficEvidence: boolean;
+      timeline: boolean;
+      reports: boolean;
+      custody: boolean;
+    };
+    dataMessages: Record<string, string>;
+    generatedFrom?: {
+      jobId: string;
+      analysisCreatedAt: string;
+      schemaVersion: string;
+    };
+  };
 };
 
 export type TimelineEvent = {
@@ -206,6 +303,10 @@ export type PayloadFinding = {
   textPreview: string;
   hexPreview: string;
   extractedStrings: string[];
+  indicator?: string;
+  description?: string;
+  limitations?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type SessionRecord = {
@@ -249,6 +350,10 @@ export type AnomalyRecord = {
   hypothesis: string;
   topFeatures?: string[];
   recommendedAction?: string;
+  modelVersion?: string;
+  modelType?: string;
+  mlAnomalyScore?: number;
+  mlPrediction?: string;
 };
 
 export type ExportRecord = {
@@ -259,6 +364,25 @@ export type ExportRecord = {
   timestamp: string;
   hash: string;
   status: string;
+  downloadUrl?: string;
+};
+
+export type ReportRecord = {
+  id: string;
+  caseId: string;
+  caseTitle: string;
+  caseStatus: string;
+  openedAt: string;
+  closedAt: string;
+  title: string;
+  language: string;
+  format: string;
+  status: string;
+  generatedBy: string;
+  generatedAt: string;
+  sha256: string;
+  filename: string;
+  downloadUrl: string;
 };
 
 export type IntegrationRecord = {

@@ -1,0 +1,40 @@
+NETRA professional research PDF verification
+Generated: 2026-06-18
+Solution pages: 23
+Solution links: 177
+Solution outline entries: 36
+Solution bytes: 1732179
+Roadmap pages: 9
+Roadmap links: 32
+Roadmap outline entries: 9
+Roadmap bytes: 947522
+Mermaid figures: 8
+Referenced claims: CLM-001, CLM-002, CLM-003, CLM-004, CLM-005, CLM-006, CLM-007, CLM-008, CLM-009, CLM-010, CLM-011, CLM-012, CLM-013, CLM-014
+
+Form answer counts:
+Synopsis / Abstract: 140 words
+Literature Review / Existing Innovation & Technology: 185 words
+Your Approach to Solve the Problem: 185 words
+Tools & Technologies to be Used: 106 words
+Challenges / Risks in Implementing the Final Prototype: 136 words
+Possible Outcome of Your Work: 137 words
+Accomplishments to Date: 165 words
+
+Verified references:
+R1: https://csrc.nist.gov/pubs/sp/800/61/r3/final
+R2: https://csrc.nist.gov/pubs/sp/800/86/final
+R3: https://csrc.nist.gov/pubs/sp/800/92/final
+R4: https://www.rfc-editor.org/rfc/rfc3227
+R5: https://www.wireshark.org/docs/man-pages/tshark.html
+R6: https://docs.zeek.org/en/current/about.html
+R7: https://docs.suricata.io/en/latest/what-is-suricata.html
+R8: https://attack.mitre.org/datasources/DS0029/
+R9: https://www.unb.ca/cic/datasets/ids-2017.html
+R10: https://www.scitepress.org/Papers/2018/66398/
+R11: https://proceedings.neurips.cc/paper/2017/hash/8a20a8621978632d76c43dfd28b67767-Abstract.html
+R12: https://www.nist.gov/itl/ai-risk-management-framework
+R13: https://supabase.com/docs/guides/storage/security/access-control
+
+Embedded font check: PASS
+Secret and private-path scan: PASS
+Output size check: PASS

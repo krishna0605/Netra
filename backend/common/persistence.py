@@ -8,10 +8,39 @@ from django.utils.dateparse import parse_datetime
 
 from apps.forensics.models import Alert, AnomalyRecord, Case, CaseMembership, DetectionMatch, EvidenceFile, EvidenceManifest, Export, ProcessingJob, Report, SessionSummary, ZeekLogSummary
 from common.audit import Actor, add_history, log_access
+from common.case_workspace import refresh_case_workspace_snapshot
 from common.custody import record_custody_event
 from common.indexing import index_analysis
 from common.jobs import completed_steps
 from common.vault import build_manifest_payload
+
+
+VALIDATOR_CASE_PREFIXES = (
+    "CYB-GJ-PHASE",
+    "CYB-GJ-SUPABASE",
+    "CYB-GJ-READY",
+    "CYB-GJ-NORMALIZATION",
+    "CYB-GJ-TEST",
+)
+
+
+def is_validator_case(case_id: str, intake: dict[str, Any] | None = None) -> bool:
+    intake = intake or {}
+    origin = str(intake.get("origin", "")).lower()
+    if origin in {"validator", "system_test"}:
+        return True
+    if any(case_id.startswith(prefix) for prefix in VALIDATOR_CASE_PREFIXES):
+        return True
+    investigator = str(intake.get("investigator", "")).lower()
+    return "validator" in investigator or "readiness" in investigator
+
+
+def case_origin(case_id: str, intake: dict[str, Any] | None = None, default: str = Case.Origin.OFFICER_UPLOAD) -> str:
+    intake = intake or {}
+    explicit = intake.get("origin")
+    if explicit in {choice[0] for choice in Case.Origin.choices}:
+        return explicit
+    return Case.Origin.VALIDATOR if is_validator_case(case_id, intake) else default
 
 
 def analysis_for_case(case_id: str | None = None) -> dict[str, Any] | None:
@@ -46,8 +75,13 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             "investigator": intake.get("investigator") or case_data.get("investigator", actor.user),
             "department": intake.get("department") or "Gujarat Cyber Crime Cell",
             "priority": intake.get("priority") or "Standard",
+            "origin": case_origin(analysis["caseId"], intake),
+            "is_test": is_validator_case(analysis["caseId"], intake),
+            "opened_at": _dt(case_data.get("openedAt")) or datetime.now(timezone.utc),
+            "closed_at": _dt(case_data.get("closedAt")),
             "source_location": intake.get("sourceLocation", ""),
             "remarks": intake.get("remarks", ""),
+            "flags_json": intake.get("flags", []),
             "status": case_data.get("status", Case.Status.REVIEWING),
             "report_status": case_data.get("reportStatus", "ready"),
         },
@@ -58,6 +92,7 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             "case": case,
             "filename": evidence_data.get("filename", saved["filename"]),
             "stored_path": saved["stored_path"],
+            "evidence_type": (saved.get("normalization") or {}).get("normalizedType") or intake.get("evidenceType") or EvidenceFile.EvidenceType.PCAP,
             "size_bytes": saved["size_bytes"],
             "sha256": saved["sha256"],
             "captured_at": _dt(evidence_data.get("capturedAt")),
@@ -102,7 +137,7 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             ],
             "started_at": _dt(analysis.get("createdAt")),
             "completed_at": datetime.now(timezone.utc),
-            "stats": {"summary": analysis.get("summary", {}), "analysis": analysis, "indexed": indexed},
+            "stats": {"summary": analysis.get("summary", {}), "analysis": analysis, "indexed": indexed, "normalization": saved.get("normalization", {})},
             "processing_path": analysis.get("processingPath", "sync-fallback"),
             "fallback_reason": analysis.get("fallbackReason", ""),
             "last_progress_at": datetime.now(timezone.utc),
@@ -117,6 +152,7 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
     record_custody_event(case, "Netra vault", "Evidence encrypted", {"encryptedSha256": saved.get("encrypted_sha256", ""), "keyId": manifest_payload["keyId"]}, evidence, "EvidenceManifest", manifest_payload["id"])
     record_custody_event(case, "Netra analysis engine", "Analysis completed", {"jobId": analysis["jobId"], "summary": analysis.get("summary", {})}, evidence, "ProcessingJob", analysis["jobId"])
     log_access(actor, "evidence.upload", case=case, resource_type="EvidenceFile", resource_id=evidence.id)
+    refresh_case_workspace_snapshot(case, job=job, analysis=analysis)
     return job
 
 
@@ -235,6 +271,7 @@ def update_analysis_alert_status(match_or_alert_id: str, status: str, actor: Act
             add_history(case, actor, "Finding status changed", f"{match_or_alert_id} marked {status}.")
             record_custody_event(case, actor, "Finding status changed", {"findingId": match_or_alert_id, "status": status}, resource_type="Finding", resource_id=match_or_alert_id)
             log_access(actor, "finding.status", case=case, resource_type="Finding", resource_id=match_or_alert_id)
+            refresh_case_workspace_snapshot(case, job=job, analysis=analysis)
             return {"id": match_or_alert_id, "status": status, "caseId": case.id}
     return None
 
@@ -247,6 +284,7 @@ def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: 
     add_history(case, actor, "Report generated", f"{artifact['filename']} generated.", artifact["sha256"])
     record_custody_event(case, actor, "Report generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Report", resource_id=artifact["filename"])
     log_access(actor, "report.generate", case=case, resource_type="Report", resource_id=artifact["filename"])
+    refresh_case_workspace_snapshot(case)
 
 
 def record_export(case_id: str, export_id: str, export_type: str, artifact: dict[str, Any], actor: Actor) -> None:
@@ -257,6 +295,7 @@ def record_export(case_id: str, export_id: str, export_type: str, artifact: dict
     add_history(case, actor, "Evidence export generated", f"{artifact['filename']} generated.", artifact["sha256"])
     record_custody_event(case, actor, "Evidence export generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Export", resource_id=export_id)
     log_access(actor, "export.generate", case=case, resource_type="Export", resource_id=export_id)
+    refresh_case_workspace_snapshot(case)
 
 
 def _dt(value: str | None):

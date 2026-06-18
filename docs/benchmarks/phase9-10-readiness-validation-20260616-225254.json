@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-06-16T17:22:53.514295+00:00",
+  "mode": "legal",
+  "caseId": "CYB-GJ-READY-a5dd62e1",
+  "operations": null,
+  "legal": {
+    "checklist": {
+      "caseId": "CYB-GJ-READY-a5dd62e1",
+      "status": "ready-for-legal-review",
+      "legalHold": false,
+      "legalHoldReason": "",
+      "custodyVerification": {
+        "verified": true,
+        "eventCount": 3,
+        "rootHash": "fc10a64cd51b3d31372091f1c5f1f996042cae5bfc35a8923414d69b345eb8e0",
+        "latestHash": "5429525c19c40361681ca60e2f9e698a1f9b854ec726032c4d56dcd1c4e98c71",
+        "failures": []
+      },
+      "items": [
+        {
+          "name": "case-created",
+          "status": "complete",
+          "detail": "Case CYB-GJ-READY-a5dd62e1 exists with status report-ready."
+        },
+        {
+          "name": "evidence-present",
+          "status": "complete",
+          "detail": "1 evidence file(s) linked."
+        },
+        {
+          "name": "evidence-manifest",
+          "status": "complete",
+          "detail": "Each evidence file should have a manifest with plaintext/encrypted hashes."
+        },
+        {
+          "name": "custody-ledger-verified",
+          "status": "complete",
+          "detail": "3 custody event(s); latest hash 5429525c19c40361681ca60e2f9e698a1f9b854ec726032c4d56dcd1c4e98c71."
+        },
+        {
+          "name": "alert-review",
+          "status": "not-applicable",
+          "detail": "0 unresolved alert(s)."
+        },
+        {
+          "name": "report-generated",
+          "status": "complete",
+          "detail": "1 report(s) generated."
+        },
+        {
+          "name": "evidence-exported",
+          "status": "complete",
+          "detail": "1 export artifact(s) generated."
+        },
+        {
+          "name": "access-logged",
+          "status": "complete",
+          "detail": "1 access log row(s) for this case."
+        },
+        {
+          "name": "legal-hold",
+          "status": "optional",
+          "detail": "No legal hold is active."
+        }
+      ],
+      "unresolvedAlertIds": [],
+      "recommendedActions": [
+        "Case package is ready for supervisor/legal review. Export the audit bundle and preserve the latest custody hash."
+      ]
+    },
+    "failures": []
+  },
+  "passed": true,
+  "failures": []
+}
