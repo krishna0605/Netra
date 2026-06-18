@@ -86,12 +86,33 @@ def empty_analysis() -> dict[str, Any]:
 
 def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: str, saved: dict[str, Any]) -> dict[str, Any]:
     pcap_path = Path(pcap_path)
+    observed_packet_count = _count_observed_packets(pcap_path)
     rows = _read_packets_with_tshark(pcap_path)
+    observed_packet_count = observed_packet_count or len(rows)
+    search_completeness = "truncated-search-index" if observed_packet_count > len(rows) else "complete"
     packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
     packets = _apply_intake_filters(packets, saved.get("intake", {}))
+    indexed_packet_count = len(packets)
     sessions = _build_sessions(packets)
     zeek = run_zeek_analysis(pcap_path, job_id)
     features = extract_features(packets=packets, sessions=sessions, zeek=zeek, filename=saved["filename"])
+    normalization = saved.get("normalization") or {
+        "selectedType": "PCAP",
+        "detectedType": "PCAP",
+        "normalizedType": "PCAP",
+        "valid": True,
+        "confidence": 99,
+        "parser": "pcap",
+        "signals": ["legacy-pcap-upload"],
+    }
+    features.setdefault("summary", {}).update(
+        {
+            "evidenceType": normalization.get("normalizedType", "PCAP"),
+            "evidenceParser": normalization.get("parser", "pcap"),
+            "normalizationConfidence": normalization.get("confidence", 0),
+            "normalizationSignals": normalization.get("signals") or normalization.get("features", {}).get("sampleSignals", []),
+        }
+    )
     alerts, detection_matches = _build_detections(packets, sessions, features, zeek, saved["filename"])
     payload_findings = _build_payload_findings(packets, alerts)
     decoded_protocols = _build_protocols(packets, sessions, zeek)
@@ -116,6 +137,7 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "detectedAttackClasses": detected_classes,
         "toolStatus": tool_status,
         "zeek": zeek,
+        "normalization": normalization,
         "features": features,
         "chainOfCustody": chain_of_custody,
         "evidence": {
@@ -123,10 +145,16 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "filename": saved["filename"],
             "size": _format_bytes(saved["size_bytes"]),
             "sha256": saved["sha256"],
+            "plaintextSha256": saved.get("plaintext_sha256", saved["sha256"]),
+            "encryptedSha256": saved.get("encrypted_sha256", ""),
+            "keyId": settings.NETRA_EVIDENCE_KEY_ID,
+            "storageUri": saved.get("stored_path", ""),
             "uploadedAt": now,
             "capturedAt": packets[0]["timestamp"] if packets else now,
             "investigator": "Uploaded PCAP",
             "status": "verified" if packets else "failed",
+            "evidenceType": normalization.get("normalizedType", "PCAP"),
+            "normalization": normalization,
             "intake": saved.get("intake", {}),
         },
         "case": {
@@ -137,8 +165,9 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "evidenceFileId": evidence_id,
             "alertIds": [alert["id"] for alert in alerts],
             "notes": [
-                f"Parsed {len(packets)} packets and reconstructed {len(sessions)} sessions from real PCAP evidence.",
+                f"Parsed {len(packets)} indexed packet metadata row(s) and reconstructed {len(sessions)} sessions from real PCAP evidence.",
                 f"Top classification: {top_attack_class}. Zeek status: {zeek['status']}.",
+                f"Search completeness: {search_completeness}. Observed packets: {observed_packet_count}; indexed packet metadata rows: {indexed_packet_count}.",
             ],
             "history": [
                 {
@@ -169,8 +198,16 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "trafficTimeline": traffic_timeline,
         "protocolChartData": protocol_chart,
         "graph": graph,
+        "searchCompleteness": search_completeness,
+        "observedPackets": observed_packet_count,
+        "indexedPackets": indexed_packet_count,
+        "packetMetadataLimit": MAX_PACKETS,
         "summary": {
             "packets": len(packets),
+            "observedPackets": observed_packet_count,
+            "indexedPackets": indexed_packet_count,
+            "packetMetadataLimit": MAX_PACKETS,
+            "searchCompleteness": search_completeness,
             "sessions": len(sessions),
             "protocolsDecoded": len(decoded_protocols),
             "payloadFindings": len(payload_findings),
@@ -308,12 +345,22 @@ def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
         "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ipv6.src", "-e", "ip.dst", "-e", "ipv6.dst",
         "-e", "tcp.srcport", "-e", "udp.srcport", "-e", "tcp.dstport", "-e", "udp.dstport", "-e", "_ws.col.Protocol",
         "-e", "frame.len", "-e", "tcp.flags", "-e", "dns.qry.name", "-e", "tls.handshake.extensions_server_name",
-        "-e", "http.host", "-e", "_ws.col.Info",
+        "-e", "http.host", "-e", "http.request.method", "-e", "http.request.uri", "-e", "http.user_agent",
+        "-e", "http.content_type", "-e", "dns.qry.type", "-e", "smtp.req.command", "-e", "smtp.response.code",
+        "-e", "ftp.request.command", "-e", "ftp.request.arg", "-e", "ftp.response.code", "-e", "tls.handshake.version",
+        "-e", "tls.handshake.ciphersuite", "-e", "icmp.type", "-e", "icmp.code", "-e", "_ws.expert.message",
+        "-e", "_ws.col.Info",
     ]
     result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)
     if result.returncode != 0:
         raise ValueError(result.stderr.strip() or "tshark could not parse the PCAP")
-    fields = ["number", "time_epoch", "ip_src", "ipv6_src", "ip_dst", "ipv6_dst", "tcp_srcport", "udp_srcport", "tcp_dstport", "udp_dstport", "protocol", "size", "flags", "dns_query", "sni", "http_host", "info"]
+    fields = [
+        "number", "time_epoch", "ip_src", "ipv6_src", "ip_dst", "ipv6_dst", "tcp_srcport", "udp_srcport",
+        "tcp_dstport", "udp_dstport", "protocol", "size", "flags", "dns_query", "sni", "http_host",
+        "http_method", "http_uri", "http_user_agent", "http_content_type", "dns_query_type", "smtp_command",
+        "smtp_response_code", "ftp_command", "ftp_argument", "ftp_response_code", "tls_version", "tls_cipher_suite",
+        "icmp_type", "icmp_code", "expert_message", "info",
+    ]
     rows = []
     for line in result.stdout.splitlines():
         values = line.split("\t")
@@ -332,6 +379,7 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
     risk, severity, reason = _score_packet(protocol, destination_port, size, row)
     session_id = _session_id(source, destination, source_port, destination_port, protocol)
     preview = row["dns_query"] or row["sni"] or row["http_host"] or row["info"] or "metadata only"
+    dpi = _dpi_metadata(row, protocol, source_port, destination_port, size)
     return {
         "id": f"pkt-{index:05d}",
         "timestamp": _format_time(row["time_epoch"]),
@@ -350,9 +398,84 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
         "dnsQuery": row["dns_query"],
         "sni": row["sni"],
         "httpHost": row["http_host"],
-        "decodedSummary": reason,
+        "dpi": dpi,
+        "decodedSummary": _dpi_summary(protocol, dpi, reason),
         "relatedAlertId": None,
     }
+
+
+def _count_observed_packets(path: Path) -> int | None:
+    capinfos = shutil.which("capinfos")
+    if not capinfos:
+        return None
+    result = subprocess.run([capinfos, "-M", "-c", str(path)], check=False, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if "Number of packets" not in line:
+            continue
+        value = line.split(":", 1)[-1].strip().lower().replace(",", "")
+        parts = value.split()
+        if not parts:
+            continue
+        try:
+            count = float(parts[0])
+        except ValueError:
+            digits = "".join(ch for ch in value if ch.isdigit())
+            return int(digits) if digits else None
+        suffix = parts[1] if len(parts) > 1 else ""
+        if suffix.startswith("k"):
+            count *= 1_000
+        elif suffix.startswith("m"):
+            count *= 1_000_000
+        return int(count)
+    return None
+
+
+def _dpi_metadata(row: dict[str, str], protocol: str, source_port: int, destination_port: int, size: int) -> dict[str, Any]:
+    return {
+        "httpMethod": row.get("http_method", ""),
+        "httpUri": row.get("http_uri", ""),
+        "httpUserAgent": row.get("http_user_agent", ""),
+        "httpContentType": row.get("http_content_type", ""),
+        "dnsQueryType": row.get("dns_query_type", ""),
+        "smtpCommand": row.get("smtp_command", ""),
+        "smtpResponseCode": row.get("smtp_response_code", ""),
+        "ftpCommand": row.get("ftp_command", ""),
+        "ftpArgument": _redact_credential_argument(row.get("ftp_argument", ""), row.get("ftp_command", "")),
+        "ftpResponseCode": row.get("ftp_response_code", ""),
+        "tlsVersion": row.get("tls_version", ""),
+        "tlsCipherSuite": row.get("tls_cipher_suite", ""),
+        "icmpType": row.get("icmp_type", ""),
+        "icmpCode": row.get("icmp_code", ""),
+        "expertMessage": row.get("expert_message", ""),
+        "sourcePort": source_port,
+        "destinationPort": destination_port,
+        "packetSize": size,
+        "metadataOnly": protocol in {"TLS", "SSL", "HTTPS"} or destination_port == 443 or source_port == 443,
+    }
+
+
+def _redact_credential_argument(argument: str, command: str) -> str:
+    if command.upper() in {"PASS", "USER"} and argument:
+        return "[redacted]"
+    return argument[:120]
+
+
+def _dpi_summary(protocol: str, dpi: dict[str, Any], fallback: str) -> str:
+    if protocol == "DNS" and dpi.get("dnsQueryType"):
+        return f"DNS query metadata, type {dpi['dnsQueryType']}. {fallback}"
+    if protocol in {"HTTP", "HTTP2"} and (dpi.get("httpMethod") or dpi.get("httpUri")):
+        return f"HTTP {dpi.get('httpMethod') or 'request'} {dpi.get('httpUri') or '/'} observed from packet metadata."
+    if protocol == "FTP" and dpi.get("ftpCommand"):
+        return f"FTP command metadata observed: {dpi['ftpCommand']}."
+    if protocol == "SMTP" and (dpi.get("smtpCommand") or dpi.get("smtpResponseCode")):
+        return f"SMTP command/response metadata observed: {dpi.get('smtpCommand') or dpi.get('smtpResponseCode')}."
+    if protocol in {"TLS", "SSL", "HTTPS"}:
+        return "Encrypted session metadata only; Netra does not decrypt TLS payloads."
+    if protocol == "ICMP" and dpi.get("icmpType"):
+        return f"ICMP metadata type {dpi['icmpType']} code {dpi.get('icmpCode') or '0'}."
+    return fallback
 
 
 def _build_sessions(packets: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -575,24 +698,139 @@ def _build_payload_findings(packets: list[dict[str, Any]], alerts: list[dict[str
     alert_packet_ids = {packet_id for alert in alerts for packet_id in alert.get("evidencePacketIds", [])}
     findings = []
     for packet in packets:
-        if packet["riskScore"] < 70 and packet["id"] not in alert_packet_ids:
+        indicator = _payload_indicator(packet)
+        if packet["riskScore"] < 70 and packet["id"] not in alert_packet_ids and indicator["risk"] == "low":
             continue
+        risk = _max_severity(packet["severity"], indicator["risk"])
         findings.append({
             "id": f"pay-{len(findings) + 1:04d}",
             "packetId": packet["id"],
             "sessionId": packet["sessionId"],
             "protocol": packet["protocol"],
-            "payloadType": "Metadata-derived forensic finding",
-            "entropyScore": round(min(9.9, 2 + packet["riskScore"] / 14), 1),
-            "hiddenData": packet["protocol"] in {"DNS", "ICMP"},
-            "obfuscated": packet["protocol"] in {"DNS", "TLS", "SSL"},
-            "matchedPattern": packet["decodedSummary"],
-            "risk": packet["severity"],
+            "payloadType": indicator["payloadType"],
+            "entropyScore": indicator["entropyScore"],
+            "hiddenData": indicator["hiddenData"],
+            "obfuscated": indicator["obfuscated"],
+            "matchedPattern": indicator["matchedPattern"],
+            "risk": risk,
             "textPreview": packet["asciiPreview"],
             "hexPreview": packet["hexPreview"],
-            "extractedStrings": [value for value in [packet["sourceIp"], packet["destinationIp"], packet["protocol"], packet.get("relatedAlertId") or ""] if value],
+            "extractedStrings": [value for value in [packet["sourceIp"], packet["destinationIp"], packet["protocol"], packet.get("relatedAlertId") or "", *indicator["extractedStrings"]] if value],
+            "indicator": indicator["indicator"],
+            "description": indicator["description"],
+            "limitations": indicator["limitations"],
+            "metadata": indicator["metadata"],
         })
     return findings[:100]
+
+
+def _payload_indicator(packet: dict[str, Any]) -> dict[str, Any]:
+    protocol = packet["protocol"]
+    dpi = packet.get("dpi", {})
+    info = f"{packet.get('asciiPreview', '')} {dpi.get('expertMessage', '')}".lower()
+    dns_query = packet.get("dnsQuery") or ""
+    extracted = []
+    metadata: dict[str, Any] = {}
+    indicator = "metadata-review"
+    payload_type = "Metadata-derived forensic finding"
+    description = "Packet metadata is relevant to the current investigation and should be reviewed with related sessions."
+    hidden_data = False
+    obfuscated = False
+    risk = "low"
+
+    if protocol == "DNS" and dns_query:
+        longest_label = max((len(label) for label in dns_query.split(".")), default=0)
+        hidden_data = len(dns_query) > 80 or longest_label > 45
+        obfuscated = hidden_data or _looks_encoded(dns_query)
+        risk = "high" if hidden_data else "medium"
+        indicator = "dns-query-metadata"
+        payload_type = "DNS metadata clue"
+        description = "DNS query metadata can indicate tunneling when labels are unusually long or encoded-looking."
+        extracted = [dns_query[:160], str(dpi.get("dnsQueryType") or "")]
+        metadata = {"queryLength": len(dns_query), "longestLabel": longest_label, "queryType": dpi.get("dnsQueryType") or ""}
+    elif protocol in {"HTTP", "HTTP2"}:
+        method = dpi.get("httpMethod") or ""
+        uri = dpi.get("httpUri") or ""
+        user_agent = dpi.get("httpUserAgent") or ""
+        exploit_terms = ["cmd=", "exec", "../", "%2e%2e", "select%20", "union%20", "passwd", "shell", "jndi:"]
+        suspicious_uri = any(term in uri.lower() for term in exploit_terms)
+        risk = "high" if suspicious_uri else ("medium" if method in {"POST", "PUT"} else "low")
+        indicator = "http-request-metadata"
+        payload_type = "HTTP request metadata"
+        description = "HTTP request metadata is decoded where visible. Encrypted HTTPS payloads are not decrypted."
+        extracted = [method, uri[:160], user_agent[:120]]
+        metadata = {"method": method, "uri": uri[:240], "userAgent": user_agent[:160], "contentType": dpi.get("httpContentType") or ""}
+    elif protocol == "FTP":
+        command = (dpi.get("ftpCommand") or "").upper()
+        transfer_commands = {"RETR", "STOR", "APPE", "LIST", "NLST", "USER", "PASS"}
+        risk = "high" if command in {"USER", "PASS", "STOR", "RETR"} else ("medium" if command in transfer_commands else "low")
+        indicator = "ftp-command-metadata"
+        payload_type = "FTP command metadata"
+        description = "FTP command metadata can reveal authentication attempts or file transfer activity; credential arguments are redacted."
+        extracted = [command, str(dpi.get("ftpArgument") or "")]
+        metadata = {"command": command, "argument": dpi.get("ftpArgument") or "", "responseCode": dpi.get("ftpResponseCode") or ""}
+    elif protocol == "SMTP":
+        command = (dpi.get("smtpCommand") or "").upper()
+        risk = "medium" if command in {"MAIL", "RCPT", "DATA", "BDAT"} or "data fragment" in info else "low"
+        indicator = "smtp-transfer-metadata"
+        payload_type = "SMTP transfer metadata"
+        description = "SMTP metadata can show mail transfer behavior, but attachment and body review requires mail server logs or decoded content."
+        extracted = [command, str(dpi.get("smtpResponseCode") or "")]
+        metadata = {"command": command, "responseCode": dpi.get("smtpResponseCode") or ""}
+    elif protocol in {"TLS", "SSL", "HTTPS"}:
+        sni = packet.get("sni") or ""
+        obfuscated = not bool(sni)
+        risk = "medium" if obfuscated or packet["destinationPort"] not in {443, 8443} else "low"
+        indicator = "encrypted-traffic-metadata"
+        payload_type = "Encrypted traffic metadata"
+        description = "Only TLS handshake and flow metadata are available; Netra does not decrypt encrypted payloads."
+        extracted = [sni[:160], str(dpi.get("tlsVersion") or ""), str(dpi.get("tlsCipherSuite") or "")]
+        metadata = {"sni": sni, "tlsVersion": dpi.get("tlsVersion") or "", "cipherSuite": dpi.get("tlsCipherSuite") or "", "metadataOnly": True}
+    elif protocol == "ICMP":
+        hidden_data = packet["size"] >= 512
+        risk = "high" if packet["size"] >= 1000 else ("medium" if hidden_data else "low")
+        indicator = "icmp-size-metadata"
+        payload_type = "ICMP metadata clue"
+        description = "Large ICMP packets can be a covert-channel clue when unexpected in the environment."
+        extracted = [str(dpi.get("icmpType") or ""), str(dpi.get("icmpCode") or "")]
+        metadata = {"icmpType": dpi.get("icmpType") or "", "icmpCode": dpi.get("icmpCode") or "", "packetSize": packet["size"]}
+    elif "malformed" in info or "checksum" in info or "retransmission" in info:
+        risk = "medium"
+        indicator = "packet-expert-warning"
+        payload_type = "Packet expert warning"
+        description = "tshark expert metadata identified an abnormal packet condition requiring analyst review."
+        metadata = {"expertMessage": dpi.get("expertMessage") or ""}
+
+    entropy = round(min(9.9, 2 + packet["riskScore"] / 18 + (1.2 if hidden_data else 0) + (0.8 if obfuscated else 0)), 1)
+    return {
+        "indicator": indicator,
+        "payloadType": payload_type,
+        "entropyScore": entropy,
+        "hiddenData": hidden_data,
+        "obfuscated": obfuscated,
+        "matchedPattern": packet["decodedSummary"],
+        "risk": risk,
+        "description": description,
+        "limitations": "Metadata-level finding only. Netra does not decrypt TLS or guarantee full application payload reconstruction.",
+        "extractedStrings": extracted,
+        "metadata": metadata,
+    }
+
+
+def _looks_encoded(value: str) -> bool:
+    if len(value) < 24:
+        return False
+    compact = value.replace(".", "").replace("-", "")
+    if not compact:
+        return False
+    alnum_ratio = sum(ch.isalnum() for ch in compact) / len(compact)
+    digit_ratio = sum(ch.isdigit() for ch in compact) / len(compact)
+    return alnum_ratio > 0.95 and digit_ratio > 0.2
+
+
+def _max_severity(left: str, right: str) -> str:
+    order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    return left if order.get(left, 0) >= order.get(right, 0) else right
 
 
 def _build_protocols(packets: list[dict[str, Any]], sessions: list[dict[str, Any]], zeek: dict[str, Any]) -> list[dict[str, Any]]:
@@ -600,8 +838,12 @@ def _build_protocols(packets: list[dict[str, Any]], sessions: list[dict[str, Any
     suspicious_counts = Counter(packet["protocol"] for packet in packets if packet["riskScore"] >= 70)
     session_counts = Counter(session["protocol"] for session in sessions)
     top_destinations: dict[str, Counter[str]] = defaultdict(Counter)
+    protocol_clues: dict[str, Counter[str]] = defaultdict(Counter)
     for packet in packets:
         top_destinations[packet["protocol"]][packet["destinationIp"]] += 1
+        clue = _protocol_clue(packet)
+        if clue:
+            protocol_clues[packet["protocol"]][clue] += 1
     protocols = []
     zeek_summary = zeek.get("summary", {})
     zeek_protocol_counts = {"SSH": zeek_summary.get("sshSessions", 0), "DNS": zeek_summary.get("dnsQueries", 0), "HTTP": zeek_summary.get("httpRequests", 0), "TLS": zeek_summary.get("tlsSessions", 0)}
@@ -614,12 +856,42 @@ def _build_protocols(packets: list[dict[str, Any]], sessions: list[dict[str, Any
             "suspiciousCount": suspicious_counts[protocol],
             "status": "metadata-only" if protocol in {"TLS", "SSL"} else ("decoded" if zeek_count or protocol not in {"UNKNOWN"} else "partial"),
             "topDestination": top_destinations[protocol].most_common(1)[0][0] if top_destinations[protocol] else "unknown",
-            "detail": f"tshark parsed {count} packet(s). Zeek contributed {zeek_count} structured {protocol} event(s).",
+            "detail": _protocol_detail(protocol, count, zeek_count, protocol_clues[protocol]),
         })
     for protocol, count in zeek_protocol_counts.items():
         if count and protocol not in packet_counts:
             protocols.append({"protocol": protocol, "packetCount": 0, "sessionCount": count, "suspiciousCount": 0, "status": "decoded", "topDestination": "Zeek log", "detail": f"Zeek extracted {count} structured {protocol} event(s)."})
     return protocols
+
+
+def _protocol_clue(packet: dict[str, Any]) -> str:
+    protocol = packet["protocol"]
+    dpi = packet.get("dpi", {})
+    if protocol == "DNS" and packet.get("dnsQuery"):
+        return f"DNS query: {packet['dnsQuery'][:60]}"
+    if protocol in {"HTTP", "HTTP2"} and (dpi.get("httpMethod") or dpi.get("httpUri")):
+        return f"HTTP {dpi.get('httpMethod') or 'request'} {str(dpi.get('httpUri') or '/')[:60]}"
+    if protocol == "FTP" and dpi.get("ftpCommand"):
+        return f"FTP {dpi['ftpCommand']}"
+    if protocol == "SMTP" and (dpi.get("smtpCommand") or dpi.get("smtpResponseCode")):
+        return f"SMTP {dpi.get('smtpCommand') or dpi.get('smtpResponseCode')}"
+    if protocol in {"TLS", "SSL", "HTTPS"}:
+        return f"TLS SNI: {packet.get('sni') or 'not visible'}"
+    if protocol == "ICMP" and dpi.get("icmpType"):
+        return f"ICMP type {dpi['icmpType']}"
+    return ""
+
+
+def _protocol_detail(protocol: str, packet_count: int, zeek_count: int, clues: Counter[str]) -> str:
+    base = f"tshark parsed {packet_count} packet(s). Zeek contributed {zeek_count} structured {protocol} event(s)."
+    if protocol in {"TLS", "SSL", "HTTPS"}:
+        base += " Payload is encrypted; only handshake, SNI, port, timing, and flow metadata are reviewed."
+    elif protocol in {"DNS", "HTTP", "FTP", "SMTP", "ICMP"}:
+        base += " Netra extracted protocol metadata and suspicious clue indicators where visible."
+    if clues:
+        top = "; ".join(item for item, _ in clues.most_common(3))
+        base += f" Top metadata clues: {top}."
+    return base
 
 
 def _build_timeline(packets: list[dict[str, Any]], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -717,7 +989,9 @@ def build_report_html(analysis: dict[str, Any], language: str = "en") -> str:
     alerts = analysis.get("alerts", [])[:10]
     anomalies = analysis.get("anomalies", [])[:5]
     custody = analysis.get("chainOfCustody", [])
+    ledger = analysis.get("custodyLedger", {}).get("verification", {})
     zeek = analysis.get("zeek", {})
+    normalization = analysis.get("normalization") or evidence.get("normalization") or {}
     rows = "".join(f"<tr><td>{html.escape(alert['severity'])}</td><td>{html.escape(alert['attackClass'])}</td><td>{html.escape(alert['sourceIp'])}</td><td>{html.escape(alert['destination'])}</td><td>{alert['confidence']}%</td></tr>" for alert in alerts)
     anomaly_items = "".join(f"<li><strong>{html.escape(item['entity'])}</strong>: {html.escape(item['observed'])} vs {html.escape(item['baseline'])} ({item['confidence']}%)</li>" for item in anomalies)
     custody_items = "".join(f"<li>{html.escape(item['timestamp'])} - {html.escape(item['action'])} - {html.escape(item['hash'])}</li>" for item in custody)
@@ -729,13 +1003,15 @@ def build_report_html(analysis: dict[str, Any], language: str = "en") -> str:
 <body>
 <h1>Forensic Network Investigation Report</h1>
 <p><strong>Case:</strong> {html.escape(analysis.get('caseId', ''))} | <strong>Top class:</strong> {html.escape(analysis.get('topAttackClass', 'Normal Baseline'))} | <strong>Risk:</strong> {html.escape(analysis.get('riskLevel', 'low'))}</p>
-<section><h2>Evidence Metadata</h2><p>File: {html.escape(evidence.get('filename', ''))}<br>SHA-256: <code>{html.escape(evidence.get('sha256', ''))}</code><br>Uploaded: {html.escape(evidence.get('uploadedAt', ''))}</p></section>
+<section><h2>Evidence Metadata</h2><p>File: {html.escape(evidence.get('filename', ''))}<br>Plain SHA-256: <code>{html.escape(evidence.get('plaintextSha256') or evidence.get('sha256', ''))}</code><br>Encrypted SHA-256: <code>{html.escape(evidence.get('encryptedSha256', ''))}</code><br>Manifest hash: <code>{html.escape(evidence.get('manifestHash', ''))}</code><br>Key ID: {html.escape(evidence.get('keyId', ''))}<br>Uploaded: {html.escape(evidence.get('uploadedAt', ''))}</p></section>
+<section><h2>Evidence Normalization</h2><p>Selected type: {html.escape(str(normalization.get('selectedType', '')))}<br>Detected type: {html.escape(str(normalization.get('detectedType', '')))}<br>Normalized type: {html.escape(str(normalization.get('normalizedType', '')))}<br>Confidence: {html.escape(str(normalization.get('confidence', '')))}%<br>Parser used: {html.escape(str(normalization.get('parser', '')))}<br>Signals: {html.escape(', '.join(normalization.get('signals') or normalization.get('features', {}).get('sampleSignals', [])))}</p></section>
 <section><h2>Packet Capture Summary</h2><p>Packets: {summary.get('packets', 0)} | Sessions: {summary.get('sessions', 0)} | Alerts: {summary.get('alerts', 0)} | Anomalies: {summary.get('anomalies', 0)}</p></section>
 <section><h2>Tooling Status</h2><p>{html.escape(json.dumps(analysis.get('toolStatus', {})))}</p></section>
 <section><h2>Zeek Evidence</h2><p>Status: {html.escape(zeek.get('status', 'unknown'))}<br>{html.escape(zeek_summary)}<br>Logs: {html.escape(', '.join(zeek.get('logs', [])))}</p></section>
 <section><h2>Alerts and Attack Classification</h2><table><thead><tr><th>Severity</th><th>Class</th><th>Source</th><th>Destination</th><th>Confidence</th></tr></thead><tbody>{rows}</tbody></table></section>
 <section><h2>AI-assisted Anomaly Summary</h2><ul>{anomaly_items or '<li>No high-confidence anomaly recorded.</li>'}</ul></section>
 <section><h2>Chain of Custody</h2><ul>{custody_items}</ul></section>
+<section><h2>Tamper-Evident Ledger</h2><p>Verified: {html.escape(str(ledger.get('verified', False)))} | Events: {ledger.get('eventCount', 0)} | Latest hash: <code>{html.escape(ledger.get('latestHash', ''))}</code></p></section>
 <section><h2>Recommended Next Steps</h2><ol><li>Correlate alerts with endpoint, authentication, and server logs.</li><li>Preserve original PCAP and generated artifacts by hash.</li><li>Escalate confirmed high-risk findings to case investigators.</li></ol></section>
 </body></html>"""
 
@@ -749,8 +1025,17 @@ def build_evidence_bundle(analysis: dict[str, Any]) -> str:
         "riskLevel": analysis.get("riskLevel"),
         "alerts": analysis.get("alerts", []),
         "anomalies": analysis.get("anomalies", []),
+        "sessions": analysis.get("sessions", []),
+        "decodedProtocols": analysis.get("decodedProtocols", []),
+        "payloadFindings": analysis.get("payloadFindings", []),
+        "detectionMatches": analysis.get("detectionMatches", []),
+        "features": analysis.get("features", {}),
+        "normalization": analysis.get("normalization", {}),
+        "toolStatus": analysis.get("toolStatus", {}),
+        "graph": analysis.get("graph", {}),
         "zeek": analysis.get("zeek", {}),
         "chainOfCustody": analysis.get("chainOfCustody", []),
+        "custodyLedger": analysis.get("custodyLedger", {}),
     }, indent=2)
 
 

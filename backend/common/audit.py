@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -25,6 +26,53 @@ class Actor:
     role: str
     authenticated: bool = False
     django_user_id: int | None = None
+    email: str = ""
+    external_id: str = ""
+
+
+VALID_ROLES = {"Admin", "Investigator", "Analyst", "Viewer"}
+
+
+def _admin_exists() -> bool:
+    User = get_user_model()
+    return User.objects.filter(is_superuser=True).exists() or UserProfile.objects.filter(role="Admin").exists()
+
+
+def _role_from_supabase_claim(role: str) -> str:
+    return role if role in VALID_ROLES else "Investigator"
+
+
+def sync_supabase_actor(supabase_user) -> Actor:
+    """Map a verified Supabase user into Netra's local authorization profile.
+
+    Supabase Auth remains the identity provider. Netra's local UserProfile is
+    the server-side source of truth for app permissions, so user-editable
+    metadata never controls authorization.
+    """
+    User = get_user_model()
+    username = (getattr(supabase_user, "email", "") or getattr(supabase_user, "id", "")).strip().lower()
+    if not username:
+        return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+    user, _ = User.objects.get_or_create(username=username, defaults={"email": username})
+    display_name = getattr(supabase_user, "display_name", "") or username
+    initial_role = _role_from_supabase_claim(getattr(supabase_user, "role", "Investigator"))
+    profile, created = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={"role": initial_role, "display_name": display_name},
+    )
+    if created and not _admin_exists():
+        profile.role = "Admin"
+    if not profile.display_name or profile.display_name == user.username:
+        profile.display_name = display_name
+    profile.save(update_fields=["role", "display_name", "updated_at"])
+    return Actor(
+        user=profile.display_name or user.username,
+        role=profile.role,
+        authenticated=True,
+        django_user_id=user.id,
+        email=user.email or user.username,
+        external_id=getattr(supabase_user, "id", ""),
+    )
 
 
 def actor_from_request(request) -> Actor:
@@ -32,9 +80,17 @@ def actor_from_request(request) -> Actor:
         return Actor(user=settings.NETRA_TRUSTED_LAN_ACTOR, role=settings.NETRA_TRUSTED_LAN_ROLE, authenticated=True)
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+        if getattr(settings, "NETRA_AUTH_PROVIDER", "django") == "supabase":
+            from common.supabase_auth import verify_supabase_token
+
+            user = verify_supabase_token(token)
+            if user:
+                return sync_supabase_actor(user)
+            return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
         try:
             auth = JWTAuthentication()
-            validated = auth.get_validated_token(auth_header.split(" ", 1)[1])
+            validated = auth.get_validated_token(token)
             user = auth.get_user(validated)
             profile, _ = UserProfile.objects.get_or_create(
                 user=user,

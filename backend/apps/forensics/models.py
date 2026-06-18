@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class TimeStampedModel(models.Model):
@@ -17,9 +18,17 @@ class Case(TimeStampedModel):
         REPORT_READY = "report-ready", "Report ready"
 
     class Priority(models.TextChoices):
+        UNSET = "", "Unset"
         STANDARD = "Standard", "Standard"
         URGENT = "Urgent", "Urgent"
         CRITICAL = "Critical", "Critical"
+
+    class Origin(models.TextChoices):
+        OFFICER_UPLOAD = "officer_upload", "Officer upload"
+        SENSOR_CAPTURE = "sensor_capture", "Sensor capture"
+        REPLAY = "replay", "Replay"
+        VALIDATOR = "validator", "Validator"
+        SYSTEM_TEST = "system_test", "System test"
 
     id = models.CharField(max_length=64, primary_key=True)
     title = models.CharField(max_length=255)
@@ -28,8 +37,13 @@ class Case(TimeStampedModel):
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.OPEN)
     priority = models.CharField(max_length=32, choices=Priority.choices, default=Priority.STANDARD)
     report_status = models.CharField(max_length=32, default="draft")
+    origin = models.CharField(max_length=32, choices=Origin.choices, default=Origin.OFFICER_UPLOAD)
+    is_test = models.BooleanField(default=False)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
     source_location = models.CharField(max_length=255, blank=True)
     remarks = models.TextField(blank=True)
+    flags_json = models.JSONField(default=list, blank=True)
     legal_hold = models.BooleanField(default=False)
     legal_hold_reason = models.TextField(blank=True)
 
@@ -37,7 +51,26 @@ class Case(TimeStampedModel):
         return self.id
 
     class Meta:
-        indexes = [models.Index(fields=["status", "updated_at"], name="netra_case_status_upd_idx")]
+        indexes = [
+            models.Index(fields=["status", "updated_at"], name="netra_case_status_upd_idx"),
+            models.Index(fields=["is_test", "updated_at"], name="netra_case_test_upd_idx"),
+            models.Index(fields=["origin", "updated_at"], name="netra_case_origin_upd_idx"),
+        ]
+
+
+class CaseLink(TimeStampedModel):
+    source_case = models.ForeignKey(Case, related_name="outgoing_links", on_delete=models.CASCADE)
+    target_case = models.ForeignKey(Case, related_name="incoming_links", on_delete=models.CASCADE)
+    relation_type = models.CharField(max_length=80, default="manual_link")
+    notes = models.TextField(blank=True)
+    created_by = models.CharField(max_length=160, blank=True)
+
+    class Meta:
+        unique_together = ("source_case", "target_case", "relation_type")
+        indexes = [
+            models.Index(fields=["source_case", "created_at"], name="netra_caselink_src_idx"),
+            models.Index(fields=["target_case", "created_at"], name="netra_caselink_tgt_idx"),
+        ]
 
 
 class UserProfile(TimeStampedModel):
@@ -352,6 +385,20 @@ class ProcessingJob(TimeStampedModel):
             models.Index(fields=["case", "status"], name="netra_job_case_status_idx"),
             models.Index(fields=["status", "updated_at"], name="netra_job_status_upd_idx"),
             models.Index(fields=["case", "created_at"], name="netra_job_case_created_idx"),
+        ]
+
+
+class CaseAnalysisSnapshot(TimeStampedModel):
+    case = models.OneToOneField(Case, related_name="analysis_snapshot", on_delete=models.CASCADE)
+    processing_job = models.ForeignKey(ProcessingJob, null=True, blank=True, related_name="case_snapshots", on_delete=models.SET_NULL)
+    schema_version = models.CharField(max_length=40, default="case-workspace-v1")
+    snapshot_json = models.JSONField(default=dict, blank=True)
+    generated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["case", "generated_at"], name="netra_case_snap_case_gen_idx"),
+            models.Index(fields=["schema_version", "generated_at"], name="netra_case_snap_schema_idx"),
         ]
 
 

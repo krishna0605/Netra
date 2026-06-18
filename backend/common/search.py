@@ -7,12 +7,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_elasticsearch_client():
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        raise RuntimeError("Elasticsearch is disabled; Netra is using Postgres-backed search.")
     from elasticsearch import Elasticsearch
 
     return Elasticsearch(settings.NETRA_ELASTICSEARCH_URL)
 
 
 def index_document(index: str, document_id: str, document: dict[str, Any]) -> bool:
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        return True
     try:
         client = get_elasticsearch_client()
         client.index(index=index, id=document_id, document=document)
@@ -24,6 +28,8 @@ def index_document(index: str, document_id: str, document: dict[str, Any]) -> bo
 
 def index_documents(index: str, documents: list[tuple[str, dict[str, Any]]]) -> bool:
     if not documents:
+        return True
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
         return True
     try:
         from elasticsearch.helpers import bulk
@@ -37,6 +43,8 @@ def index_documents(index: str, documents: list[tuple[str, dict[str, Any]]]) -> 
 
 
 def search_documents(index: str, query: dict[str, Any], fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        return fallback
     try:
         client = get_elasticsearch_client()
         response = client.search(index=index, query=query, size=100)

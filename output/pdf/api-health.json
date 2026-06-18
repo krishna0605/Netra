@@ -1,0 +1,19 @@
+{
+  "status": "ok",
+  "service": "netra-backend",
+  "allowedStack": [
+    "Django",
+    "PostgreSQL",
+    "Elasticsearch",
+    "Apache Kafka",
+    "Scapy",
+    "tshark/Wireshark",
+    "Zeek",
+    "Scikit-learn"
+  ],
+  "packetTools": {
+    "scapy": true,
+    "tshark": true,
+    "zeek": true
+  }
+}

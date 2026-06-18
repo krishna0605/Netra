@@ -1,0 +1,23 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI", "primaryColor": "#EAF1F6", "primaryTextColor": "#17202A", "primaryBorderColor": "#2D5F88", "lineColor": "#2D5F88", "secondaryColor": "#F4F6F8", "tertiaryColor": "#FFFFFF", "clusterBkg": "#F7F9FB", "clusterBorder": "#9AA8B4"}}}%%
+flowchart TB
+  A["Packet capture"] --> B["Packet inspection tool"]
+  A --> C["Network security logs"]
+  A --> D["IDS alerts"]
+  B --> E["Manual notes"]
+  C --> E
+  D --> E
+  E --> F["Spreadsheet / screenshots"]
+  F --> G["Report template"]
+  G --> H["Supervisor review"]
+
+  X1["Evidence identity can become detached"] -. gap .-> E
+  X2["Findings use different schemas"] -. gap .-> F
+  X3["Custody and integrity are separate"] -. gap .-> G
+  X4["Model confidence may lack context"] -. gap .-> H
+
+  classDef source fill:#EAF1F6,stroke:#2D5F88,color:#17202A,stroke-width:1.5px;
+  classDef manual fill:#FFF7E8,stroke:#B7791F,color:#5A3A00,stroke-width:1.5px;
+  classDef gap fill:#FDECEC,stroke:#B54747,color:#6B1F1F,stroke-width:1.5px;
+  class A,B,C,D source;
+  class E,F,G,H manual;
+  class X1,X2,X3,X4 gap;

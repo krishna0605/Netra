@@ -11,7 +11,7 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 
 from common.hashing import sha256_file, sha256_text
-from common.storage_provider import resolve_storage_path
+from common.storage_provider import storage_provider
 
 
 PCAP_EXTENSIONS = {".pcap", ".pcapng"}
@@ -32,8 +32,6 @@ def fernet() -> Fernet:
 
 def validate_pcap_upload(upload) -> None:
     safe_name = Path(upload.name).name
-    if Path(safe_name).suffix.lower() not in PCAP_EXTENSIONS:
-        raise ValueError("Only .pcap and .pcapng files are accepted.")
     max_bytes = settings.NETRA_MAX_UPLOAD_MB * 1024 * 1024
     if upload.size and upload.size > max_bytes:
         raise OverflowError(f"Upload exceeds NETRA_MAX_UPLOAD_MB={settings.NETRA_MAX_UPLOAD_MB}.")
@@ -41,7 +39,11 @@ def validate_pcap_upload(upload) -> None:
     head = upload.read(4)
     if position is not None:
         upload.seek(position)
-    if head not in PCAP_MAGIC:
+    if head in PCAP_MAGIC:
+        return
+    if Path(safe_name).suffix.lower() not in PCAP_EXTENSIONS:
+        raise ValueError("Only valid PCAP/PCAPNG capture files are accepted for PCAP analysis.")
+    else:
         raise ValueError("File does not look like a valid PCAP/PCAPNG capture.")
 
 
@@ -56,19 +58,20 @@ def encrypt_file(source: str | Path, target: str | Path) -> None:
 
 
 def decrypt_file(source: str | Path, target: str | Path) -> None:
-    source_path = resolve_storage_path(source)
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on":
-        shutil.copyfile(source_path, target_path)
+        with storage_provider.open_encrypted(source, "rb") as handle:
+            target_path.write_bytes(handle.read())
         return
-    target_path.write_bytes(fernet().decrypt(source_path.read_bytes()))
+    with storage_provider.open_encrypted(source, "rb") as handle:
+        target_path.write_bytes(fernet().decrypt(handle.read()))
 
 
 def read_encrypted_or_plain(source: str | Path) -> bytes:
-    source_path = resolve_storage_path(source)
-    content = source_path.read_bytes()
-    if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or source_path.suffix != ".enc":
+    with storage_provider.open_encrypted(source, "rb") as handle:
+        content = handle.read()
+    if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or not str(source).endswith(".enc"):
         return content
     return fernet().decrypt(content)
 
@@ -94,6 +97,8 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
         "encryptionAlgorithm": "Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none",
         "keyId": settings.NETRA_EVIDENCE_KEY_ID,
     }
+    if saved.get("normalization"):
+        payload["normalization"] = saved["normalization"]
     payload["manifestHash"] = sha256_text(json.dumps(payload, sort_keys=True))
     return payload
 

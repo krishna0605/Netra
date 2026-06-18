@@ -1,0 +1,86 @@
+{
+  "checkedAt": "2026-06-16T17:22:35.845079+00:00",
+  "mode": "operations",
+  "caseId": "CYB-GJ-READY-344701f0",
+  "operations": {
+    "incidentReadiness": {
+      "status": "attention",
+      "checkedAt": "2026-06-16T17:22:35.845119+00:00",
+      "windowHours": 24,
+      "summary": {
+        "cases": 21,
+        "openCases": 4,
+        "evidenceFiles": 18,
+        "alerts": 32,
+        "failedJobs": 0,
+        "unresolvedDeadLetters": 1,
+        "deniedAccessLast24h": 6,
+        "operationalEventsLast24h": 49,
+        "readyReports": 11,
+        "readyExports": 19
+      },
+      "checks": [
+        {
+          "name": "database",
+          "status": "ready",
+          "detail": "46 tables visible."
+        },
+        {
+          "name": "audit-logging",
+          "status": "ready",
+          "detail": "134 access log row(s)."
+        },
+        {
+          "name": "custody-ledger",
+          "status": "ready",
+          "detail": "96 custody event(s)."
+        },
+        {
+          "name": "evidence-storage",
+          "status": "ready",
+          "detail": "18 evidence file row(s)."
+        },
+        {
+          "name": "reporting",
+          "status": "ready",
+          "detail": "11 ready report(s)."
+        },
+        {
+          "name": "exports",
+          "status": "ready",
+          "detail": "19 ready export(s)."
+        },
+        {
+          "name": "dead-letter-operations",
+          "status": "attention",
+          "detail": "1 unresolved dead-letter event(s)."
+        },
+        {
+          "name": "worker-heartbeats",
+          "status": "attention",
+          "detail": "57 stale/offline worker heartbeat(s)."
+        },
+        {
+          "name": "retention-runs",
+          "status": "ready",
+          "detail": "Latest run: completed."
+        }
+      ],
+      "recommendedActions": [
+        "Review dead-letter-operations: 1 unresolved dead-letter event(s).",
+        "Review worker-heartbeats: 57 stale/offline worker heartbeat(s)."
+      ]
+    },
+    "auditExportCounts": {
+      "accessLogs": 1,
+      "operationalEvents": 1,
+      "deadLetters": 0,
+      "reports": 1,
+      "exports": 1
+    },
+    "failures": []
+  },
+  "legal": null,
+  "passed": true,
+  "failures": []
+}

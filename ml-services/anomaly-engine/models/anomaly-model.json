@@ -1,0 +1,42 @@
+{
+  "version": "netra-anomaly-20260616180955",
+  "modelType": "RandomForestClassifier",
+  "trainedAt": "2026-06-16T18:09:55.573256+00:00",
+  "featureNames": [
+    "internalHostCount",
+    "externalHostCount",
+    "uniquePorts",
+    "maxDestinationFanout",
+    "maxPortFanout",
+    "largestSessionBytes",
+    "longestDnsQuery",
+    "averageDnsQueryLength",
+    "repeatedDnsDomainCount",
+    "icmpLargePacketCount",
+    "beaconPairs",
+    "sshConnectionCount",
+    "dnsQueryCount",
+    "hostRiskHintCount",
+    "serviceRiskHintCount"
+  ],
+  "trainingRows": 6,
+  "metrics": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "confusionMatrix": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        5
+      ]
+    ]
+  },
+  "limitations": [
+    "This model is trained on the available local benchmark manifest and is not independent legal certification.",
+    "Fallback explainable scoring remains active when the model artifact is unavailable."
+  ]
+}

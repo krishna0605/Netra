@@ -45,10 +45,32 @@ def write_text_artifact(content: str, folder_key: str, filename: str) -> dict:
     plaintext_sha = sha256_file(plain_target)
     encrypt_file(plain_target, encrypted_target)
     plain_target.unlink(missing_ok=True)
+    encrypted_size = encrypted_target.stat().st_size
+    encrypted_sha = sha256_file(encrypted_target)
     return {
         "filename": filename,
         "stored_path": storage_uri(encrypted_target),
-        "size_bytes": encrypted_target.stat().st_size,
+        "size_bytes": encrypted_size,
         "sha256": plaintext_sha,
-        "encrypted_sha256": sha256_file(encrypted_target),
+        "encrypted_sha256": encrypted_sha,
+    }
+
+
+def write_binary_artifact(content: bytes, folder_key: str, filename: str) -> dict:
+    ensure_storage_tree()
+    folder = settings.NETRA_STORAGE_ROOT / STORAGE_FOLDERS[folder_key]
+    plain_target = folder / filename
+    encrypted_target = folder / f"{filename}.enc"
+    plain_target.write_bytes(content)
+    plaintext_sha = sha256_file(plain_target)
+    encrypt_file(plain_target, encrypted_target)
+    plain_target.unlink(missing_ok=True)
+    encrypted_size = encrypted_target.stat().st_size
+    encrypted_sha = sha256_file(encrypted_target)
+    return {
+        "filename": filename,
+        "stored_path": storage_uri(encrypted_target),
+        "size_bytes": encrypted_size,
+        "sha256": plaintext_sha,
+        "encrypted_sha256": encrypted_sha,
     }

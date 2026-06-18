@@ -12,28 +12,34 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.core.cache import cache
 from django.db import connection
+from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
-from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission
-from common.analysis import analyze_pcap, build_alert_csv, build_evidence_bundle, build_report_html, empty_analysis
+from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
+from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission, sync_supabase_actor
+from common.analysis import analyze_pcap, empty_analysis
+from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
+from common.case_workspace import bump_case_list_cache_version, case_list_cache_version, workspace_for_case
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
+from common.evidence_normalization import normalize_evidence_upload
 from common.indexing import search_index
 from common.jobs import job_status_payload
-from common.kafka import publish_event
+from common.kafka import probe_supabase_queue, publish_event
 from common.pcap import available_packet_tools
-from common.persistence import analysis_for_case, latest_job_for_case, persist_analysis, record_export, record_report, update_analysis_alert_status
+from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export, update_analysis_alert_status
+from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload
 from common.hashing import sha256_file, sha256_text
 from common.fleet import backpressure_allows_new_capture, capacity_payload, ensure_default_retention_policy, execute_safe_retention, kafka_lag_payload, queue_schedule_run, retention_policy_payload, retention_preview, retention_run_payload, schedule_payload, sensor_group_payload
-from common.operations import capture_job_payload, create_capture_job, emit_operational_event, ensure_capture_case, finalize_capture, heartbeat_state, ingest_capture_chunk, mark_capture_running, sensor_key_valid, sensor_payload, start_replay, stop_capture, validate_capture_bounds, worker_payload
-from common.storage_provider import resolve_storage_path
+from common.operations import capture_job_payload, create_capture_job, emit_operational_event, ensure_capture_case, expire_stale_replay, finalize_capture, heartbeat_state, ingest_capture_chunk, mark_capture_running, sensor_key_valid, sensor_payload, start_replay, stop_capture, validate_capture_bounds, worker_payload
+from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
 from common.vault import fernet, read_encrypted_or_plain
 
@@ -74,15 +80,94 @@ def _results(key: str, request=None) -> list[dict]:
     return _analysis(request).get(key, [])
 
 
+def _is_probable_validator_case(case: Case) -> bool:
+    if case.is_test or case.origin in {Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST}:
+        return True
+    if any(case.id.startswith(prefix) for prefix in VALIDATOR_CASE_PREFIXES):
+        return True
+    investigator = (case.investigator or "").lower()
+    return "validator" in investigator or "readiness" in investigator
+
+
+def _visible_cases_queryset(request):
+    rows = Case.objects.order_by("-updated_at")
+    include_test = request.GET.get("includeTest") in {"1", "true", "yes"}
+    if not include_test:
+        test_query = Q(is_test=True) | Q(origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
+        for prefix in VALIDATOR_CASE_PREFIXES:
+            test_query |= Q(id__startswith=prefix)
+        rows = rows.exclude(test_query)
+    status = request.GET.get("status")
+    if status and status != "all":
+        rows = rows.filter(status=status)
+    priority = request.GET.get("priority")
+    if priority and priority != "all":
+        rows = rows.filter(priority=priority)
+    query_text = (request.GET.get("q") or "").strip()
+    if query_text:
+        rows = rows.filter(Q(id__icontains=query_text) | Q(title__icontains=query_text) | Q(investigator__icontains=query_text) | Q(source_location__icontains=query_text))
+    return rows
+
+
+def _report_dict(report: Report) -> dict:
+    filename = report.id.removesuffix(".enc")
+    return {
+        "id": report.id,
+        "caseId": report.case_id,
+        "caseTitle": report.case.title if report.case_id else "",
+        "caseStatus": report.case.status if report.case_id else "",
+        "openedAt": report.case.opened_at.isoformat() if report.case_id and report.case.opened_at else report.case.created_at.isoformat() if report.case_id else "",
+        "closedAt": report.case.closed_at.isoformat() if report.case_id and report.case.closed_at else "",
+        "title": f"{report.case_id} forensic report" if report.case_id else filename,
+        "language": report.language,
+        "format": "PDF" if filename.lower().endswith(".pdf") else "HTML",
+        "status": report.status,
+        "generatedBy": report.generated_by,
+        "generatedAt": report.created_at.isoformat(),
+        "sha256": report.sha256,
+        "filename": filename,
+        "downloadUrl": f"/api/reports/{report.id}/download",
+    }
+
+
 def _case_dict(case: Case) -> dict:
-    latest_job = latest_job_for_case(case.id)
+    snapshot = getattr(case, "analysis_snapshot", None)
+    snapshot_json = snapshot.snapshot_json if snapshot and isinstance(snapshot.snapshot_json, dict) else {}
+    snapshot_case = snapshot_json.get("case", {}) if isinstance(snapshot_json.get("case"), dict) else {}
+    snapshot_summary = snapshot_json.get("summary", {}) if isinstance(snapshot_json.get("summary"), dict) else {}
+    latest_job = None if snapshot_json else latest_job_for_case(case.id)
     analysis = latest_job.stats.get("analysis", {}) if latest_job else {}
+    latest_report = case.reports.order_by("-created_at").first()
+    evidence = case.evidence_files.order_by("-created_at").first()
+    packets = analysis.get("packets", [])
+    sessions = analysis.get("sessions", [])
+    links = [
+        {
+            "id": link.id,
+            "caseId": link.target_case_id,
+            "caseTitle": link.target_case.title,
+            "relationType": link.relation_type,
+            "notes": link.notes,
+        }
+        for link in case.outgoing_links.select_related("target_case").order_by("-created_at")[:20]
+    ]
     return {
         "id": case.id,
         "title": case.title,
         "investigator": case.investigator,
+        "department": case.department,
         "status": case.status,
+        "priority": case.priority,
+        "origin": case.origin,
+        "isTest": _is_probable_validator_case(case),
+        "openedAt": case.opened_at.isoformat() if case.opened_at else case.created_at.isoformat(),
+        "closedAt": case.closed_at.isoformat() if case.closed_at else "",
+        "sourceLocation": case.source_location,
+        "remarks": case.remarks,
+        "flags": case.flags_json if isinstance(case.flags_json, list) else [],
+        "linkedCases": links,
         "evidenceFileId": (latest_job.evidence_file_id if latest_job else ""),
+        "evidenceFilename": evidence.filename if evidence else "",
         "alertIds": [alert.get("id") for alert in analysis.get("alerts", [])],
         "notes": [event.details for event in case.history.order_by("-created_at")[:8]],
         "history": [
@@ -91,9 +176,52 @@ def _case_dict(case: Case) -> dict:
         ],
         "createdAt": case.created_at.isoformat(),
         "reportStatus": case.report_status,
-        "riskLevel": analysis.get("riskLevel", "low"),
-        "topAttackClass": analysis.get("topAttackClass", "Normal Baseline"),
-        "alertCount": len(analysis.get("alerts", [])),
+        "riskLevel": snapshot_summary.get("riskLevel") or snapshot_case.get("riskLevel") or analysis.get("riskLevel", "low"),
+        "topAttackClass": snapshot_summary.get("topAttackClass") or snapshot_case.get("topAttackClass") or analysis.get("topAttackClass", "Normal Baseline"),
+        "alertCount": snapshot_summary.get("alerts", len(analysis.get("alerts", []))),
+        "packetCount": snapshot_summary.get("packets", analysis.get("summary", {}).get("packets", len(packets))),
+        "sessionCount": snapshot_summary.get("sessions", analysis.get("summary", {}).get("sessions", len(sessions))),
+        "latestReportId": snapshot_case.get("latestReportId") or (latest_report.id if latest_report else ""),
+        "latestReportDownloadUrl": snapshot_case.get("latestReportDownloadUrl") or (f"/api/reports/{latest_report.id}/download" if latest_report else ""),
+        "updatedAt": case.updated_at.isoformat(),
+    }
+
+
+def _case_list_dict(case: Case) -> dict:
+    snapshot = getattr(case, "analysis_snapshot", None)
+    snapshot_json = snapshot.snapshot_json if snapshot and isinstance(snapshot.snapshot_json, dict) else {}
+    snapshot_case = snapshot_json.get("case", {}) if isinstance(snapshot_json.get("case"), dict) else {}
+    snapshot_summary = snapshot_json.get("summary", {}) if isinstance(snapshot_json.get("summary"), dict) else {}
+    latest_report = snapshot_case.get("latestReportId") or ""
+    return {
+        "id": case.id,
+        "title": case.title,
+        "investigator": case.investigator,
+        "department": case.department,
+        "status": case.status,
+        "priority": case.priority,
+        "origin": case.origin,
+        "isTest": _is_probable_validator_case(case),
+        "openedAt": case.opened_at.isoformat() if case.opened_at else case.created_at.isoformat(),
+        "closedAt": case.closed_at.isoformat() if case.closed_at else "",
+        "sourceLocation": case.source_location,
+        "remarks": case.remarks,
+        "flags": case.flags_json if isinstance(case.flags_json, list) else [],
+        "linkedCases": [],
+        "evidenceFileId": snapshot_case.get("evidenceFileId", ""),
+        "evidenceFilename": snapshot_case.get("evidenceFilename", ""),
+        "alertIds": snapshot_case.get("alertIds", []),
+        "notes": [],
+        "history": [],
+        "createdAt": case.created_at.isoformat(),
+        "reportStatus": case.report_status,
+        "riskLevel": snapshot_summary.get("riskLevel") or snapshot_case.get("riskLevel") or "low",
+        "topAttackClass": snapshot_summary.get("topAttackClass") or snapshot_case.get("topAttackClass") or "Normal Baseline",
+        "alertCount": snapshot_summary.get("alerts", 0),
+        "packetCount": snapshot_summary.get("packets", 0),
+        "sessionCount": snapshot_summary.get("sessions", 0),
+        "latestReportId": latest_report,
+        "latestReportDownloadUrl": snapshot_case.get("latestReportDownloadUrl", ""),
         "updatedAt": case.updated_at.isoformat(),
     }
 
@@ -155,6 +283,27 @@ def auth_login(request):
     payload = _json_body(request)
     email = payload.get("email") or payload.get("username")
     password = payload.get("password")
+    if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase":
+        from common.supabase_auth import supabase_password_login, verify_supabase_token
+
+        session = supabase_password_login(email, password)
+        if not session or not session.get("access_token"):
+            return JsonResponse({"error": "Invalid Supabase credentials"}, status=401)
+        supabase_user = verify_supabase_token(session["access_token"])
+        actor = sync_supabase_actor(supabase_user) if supabase_user else None
+        return JsonResponse(
+            {
+                "access": session["access_token"],
+                "refresh": session.get("refresh_token", ""),
+                "expiresIn": session.get("expires_in"),
+                "user": {
+                    "id": supabase_user.id if supabase_user else "",
+                    "email": supabase_user.email if supabase_user else email,
+                    "name": actor.user if actor else (supabase_user.display_name if supabase_user else email),
+                    "role": actor.role if actor else "Investigator",
+                },
+            }
+        )
     user = authenticate(request, username=email, password=password)
     if not user:
         return JsonResponse({"error": "Invalid credentials"}, status=401)
@@ -173,6 +322,13 @@ def auth_login(request):
 @require_http_methods(["POST"])
 def auth_refresh(request):
     payload = _json_body(request)
+    if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase":
+        from common.supabase_auth import supabase_refresh
+
+        session = supabase_refresh(payload.get("refresh", ""))
+        if not session or not session.get("access_token"):
+            return JsonResponse({"error": "Invalid refresh token"}, status=401)
+        return JsonResponse({"access": session["access_token"], "refresh": session.get("refresh_token", payload.get("refresh", "")), "expiresIn": session.get("expires_in")})
     try:
         refresh = RefreshToken(payload["refresh"])
         return JsonResponse({"access": str(refresh.access_token)})
@@ -256,23 +412,61 @@ def cases(request):
             defaults={
                 "title": payload.get("title") or f"Investigation {case_id}",
                 "investigator": payload.get("investigator") or actor.user,
-                "department": payload.get("department") or "Gujarat Cyber Crime Cell",
+                "department": payload.get("department") or "",
                 "priority": payload.get("priority") or "Standard",
+                "origin": payload.get("origin") if payload.get("origin") in {choice[0] for choice in Case.Origin.choices} else Case.Origin.OFFICER_UPLOAD,
+                "is_test": bool(payload.get("isTest", False)),
+                "opened_at": parse_datetime(payload.get("openedAt")) if payload.get("openedAt") else datetime.now(timezone.utc),
+                "closed_at": parse_datetime(payload.get("closedAt")) if payload.get("closedAt") else None,
                 "source_location": payload.get("sourceLocation", ""),
                 "remarks": payload.get("remarks", ""),
+                "flags_json": payload.get("flags", []),
             },
         )
         add_history(case, actor, "Case created", "Investigation case created from API.")
+        bump_case_list_cache_version()
         publish_event("netra.case.events", {"type": "case.created", "caseId": case_id, "payload": payload})
         return JsonResponse(_case_dict(case), status=201)
-    rows = [_case_dict(case) for case in Case.objects.order_by("-updated_at")[:100]]
-    if rows:
-        return JsonResponse({"results": rows})
-    return JsonResponse({"results": []})
+    cache_key = f"netra:cases:list:{case_list_cache_version()}:{request.GET.urlencode() or 'default'}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        return JsonResponse(cached)
+    rows = _visible_cases_queryset(request).select_related("analysis_snapshot")[:250]
+    payload = _paged([_case_list_dict(case) for case in rows], request)
+    payload["testHidden"] = request.GET.get("includeTest") not in {"1", "true", "yes"}
+    cache.set(cache_key, payload, timeout=45)
+    return JsonResponse(payload)
 
 
-def case_detail(_request, case_id: str):
+@csrf_exempt
+@require_http_methods(["GET", "PATCH"])
+def case_detail(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
+    if request.method == "PATCH":
+        if not case:
+            raise Http404("Case not found")
+        denied = require_permission(request, "review", case=case, resource_type="Case", resource_id=case_id)
+        if denied:
+            return denied
+        payload = _json_body(request)
+        for field, attr in {
+            "title": "title",
+            "investigator": "investigator",
+            "department": "department",
+            "status": "status",
+            "priority": "priority",
+            "sourceLocation": "source_location",
+            "remarks": "remarks",
+        }.items():
+            if field in payload:
+                setattr(case, attr, payload[field] or "")
+        if "flags" in payload and isinstance(payload["flags"], list):
+            case.flags_json = payload["flags"]
+        if "closedAt" in payload:
+            case.closed_at = parse_datetime(payload["closedAt"]) if payload["closedAt"] else None
+        case.save()
+        add_history(case, actor_from_request(request), "Case metadata updated", "Case details, flags, or status were updated.")
+        return JsonResponse(_case_dict(case))
     if case:
         return JsonResponse(_case_dict(case))
     analysis = _analysis(case_id=case_id)
@@ -303,10 +497,215 @@ def case_history(_request, case_id: str):
     return JsonResponse({"caseId": case_id, "results": case_data.get("history", [])})
 
 
+def case_light_summary(request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    summary = dashboard_summary_payload(case_id)
+    return JsonResponse({"case": _case_dict(case), "summary": summary})
+
+
+def case_workspace(_request, case_id: str):
+    cache_key = f"netra:case-workspace-response:{case_id}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        return JsonResponse(cached)
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    payload = workspace_for_case(case)
+    cache.set(cache_key, payload, timeout=60)
+    return JsonResponse(payload)
+
+
+def dashboard_summary_payload(case_id: str) -> dict:
+    analysis = _analysis(case_id=case_id)
+    return analysis["summary"] | {
+        "topAttackClass": analysis.get("topAttackClass", analysis["summary"].get("topAttackClass", "Normal Baseline")),
+        "riskLevel": analysis.get("riskLevel", analysis["summary"].get("riskLevel", "low")),
+        "toolStatus": analysis.get("toolStatus", analysis["summary"].get("toolStatus", available_packet_tools())),
+    }
+
+
+def case_charts(_request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if case and getattr(case, "analysis_snapshot", None):
+        charts = case.analysis_snapshot.snapshot_json.get("charts", {})
+        return JsonResponse(
+            {
+                "caseId": case_id,
+                "severity": charts.get("severity", []),
+                "attackClasses": charts.get("attackClasses", []),
+                "protocols": charts.get("protocols", []),
+                "topSources": charts.get("topSources", []),
+                "topDestinations": charts.get("topDestinations", []),
+                "timeline": charts.get("timeline", []),
+                "packetSessionSummary": charts.get("packetSessionSummary", {"packets": 0, "sessions": 0, "alerts": 0, "anomalies": 0}),
+                "evidenceVerified": charts.get("evidenceVerified", False),
+                "dataQuality": charts.get("dataQuality", "No data found in this evidence file."),
+            }
+        )
+    analysis = _analysis(case_id=case_id)
+    alerts = analysis.get("alerts", [])
+    packets = analysis.get("packets", [])
+    sessions = analysis.get("sessions", [])
+    anomalies = analysis.get("anomalies", [])
+
+    if not alerts:
+        alerts = [
+            {
+                "severity": row.severity,
+                "attackClass": row.attack_class,
+                "timestamp": row.event_timestamp.isoformat() if row.event_timestamp else row.created_at.isoformat(),
+            }
+            for row in Alert.objects.filter(case_id=case_id).order_by("-created_at")[:500]
+        ]
+    if not sessions:
+        sessions = [
+            {
+                "source": row.source,
+                "destination": row.destination,
+                "protocol": row.protocol,
+                "packetCount": row.packet_count,
+                "riskScore": row.risk_score,
+            }
+            for row in SessionSummary.objects.filter(case_id=case_id).order_by("-risk_score", "-packet_count")[:500]
+        ]
+    if not anomalies:
+        anomalies = [{"id": row.id} for row in AnomalyRecord.objects.filter(case_id=case_id)[:500]]
+
+    def counts(rows: list[dict], key: str, limit: int = 8):
+        values: dict[str, int] = {}
+        for row in rows:
+            value = str(row.get(key) or "unknown")
+            values[value] = values.get(value, 0) + 1
+        return [{"name": name, "value": count} for name, count in sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit]]
+
+    return JsonResponse(
+        {
+            "caseId": case_id,
+            "severity": counts(alerts, "severity"),
+            "attackClasses": counts(alerts, "attackClass"),
+            "protocols": analysis.get("protocolChartData") or counts(packets, "protocol") or counts(sessions, "protocol"),
+            "topSources": counts(packets, "sourceIp") or counts(sessions, "source"),
+            "topDestinations": counts(packets, "destinationIp") or counts(sessions, "destination"),
+            "timeline": analysis.get("trafficTimeline", []) or _alert_timeline(alerts),
+            "packetSessionSummary": {"packets": len(packets), "sessions": len(sessions), "alerts": len(alerts), "anomalies": len(anomalies)},
+            "evidenceVerified": bool((analysis.get("evidence") or {}).get("manifestHash")),
+        }
+    )
+
+
+def _alert_timeline(alerts: list[dict]) -> list[dict]:
+    buckets: dict[str, dict] = {}
+    for row in alerts:
+        raw_time = str(row.get("timestamp") or "")
+        label = raw_time[11:16] if "T" in raw_time else raw_time[:5] or "time"
+        bucket = buckets.setdefault(label, {"time": label, "alerts": 0, "mb": 0, "packets": 0})
+        bucket["alerts"] += 1
+    return list(buckets.values())[:24]
+
+
+def case_tab(request, case_id: str, tab_name: str):
+    mapping = {
+        "packets": lambda: packets(request),
+        "sessions": lambda: sessions(request),
+        "alerts": lambda: alerts(request),
+        "protocols": lambda: decoder_summary(request),
+        "payloads": lambda: payloads(request),
+        "graph": lambda: graph(request),
+        "timeline": lambda: JsonResponse({"results": _analysis(case_id=case_id).get("trafficTimeline", [])}),
+    }
+    if tab_name not in mapping:
+        raise Http404("Unknown case tab")
+    request.GET._mutable = True
+    request.GET["caseId"] = case_id
+    request.GET._mutable = False
+    return mapping[tab_name]()
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def case_flags(request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    denied = require_permission(request, "review", case=case, resource_type="Case", resource_id=case_id)
+    if denied:
+        return denied
+    payload = _json_body(request)
+    incoming = payload.get("flags", [])
+    if not isinstance(incoming, list):
+        incoming = [payload.get("flag", "")]
+    flags = list(dict.fromkeys([str(flag).strip() for flag in [*(case.flags_json or []), *incoming] if str(flag).strip()]))
+    case.flags_json = flags
+    case.save(update_fields=["flags_json", "updated_at"])
+    add_history(case, actor_from_request(request), "Case flags updated", ", ".join(flags) or "Flags cleared.")
+    return JsonResponse({"caseId": case.id, "flags": flags})
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def case_flag_detail(request, case_id: str, flag: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    denied = require_permission(request, "review", case=case, resource_type="Case", resource_id=case_id)
+    if denied:
+        return denied
+    case.flags_json = [item for item in (case.flags_json or []) if item != flag]
+    case.save(update_fields=["flags_json", "updated_at"])
+    add_history(case, actor_from_request(request), "Case flag removed", flag)
+    return JsonResponse({"caseId": case.id, "flags": case.flags_json})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def case_links(request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    denied = require_permission(request, "review", case=case, resource_type="Case", resource_id=case_id)
+    if denied:
+        return denied
+    payload = _json_body(request)
+    target = Case.objects.filter(id=payload.get("targetCaseId")).first()
+    if not target:
+        return JsonResponse({"error": "Related case not found."}, status=404)
+    if target.id == case.id:
+        return JsonResponse({"error": "A case cannot be linked to itself."}, status=400)
+    relation_type = payload.get("relationType") or "manual_link"
+    link, _ = CaseLink.objects.update_or_create(
+        source_case=case,
+        target_case=target,
+        relation_type=relation_type,
+        defaults={"notes": payload.get("notes", ""), "created_by": actor_from_request(request).user},
+    )
+    add_history(case, actor_from_request(request), "Related case linked", f"{target.id} ({relation_type})")
+    return JsonResponse({"id": link.id, "caseId": target.id, "caseTitle": target.title, "relationType": link.relation_type, "notes": link.notes}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def case_link_detail(request, case_id: str, link_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    denied = require_permission(request, "review", case=case, resource_type="Case", resource_id=case_id)
+    if denied:
+        return denied
+    CaseLink.objects.filter(id=link_id, source_case=case).delete()
+    add_history(case, actor_from_request(request), "Related case unlinked", str(link_id))
+    return JsonResponse({"caseId": case.id, "removed": link_id})
+
+
 def custody_ledger(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
+    denied = require_permission(request, "compliance", case=case, resource_type="CustodyLedger", resource_id=case_id)
+    if denied:
+        return denied
     rows = [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")]
     payload = _paged(rows, request)
     payload["caseId"] = case_id
@@ -320,15 +719,21 @@ def custody_verify(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
+    denied = require_permission(request, "compliance", case=case, resource_type="CustodyLedger", resource_id=case_id)
+    if denied:
+        return denied
     result = verify_case_ledger(case)
     record_custody_event(case, actor_from_request(request), "Custody ledger verified", result, resource_type="Case", resource_id=case_id)
     return JsonResponse(result)
 
 
-def custody_export(_request, case_id: str):
+def custody_export(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
+    denied = require_permission(request, "compliance", case=case, resource_type="CustodyLedger", resource_id=case_id)
+    if denied:
+        return denied
     payload = {"caseId": case_id, "verification": verify_case_ledger(case), "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("created_at", "id")]}
     return JsonResponse(payload)
 
@@ -388,6 +793,79 @@ def link_stub(request, case_id: str):
     return JsonResponse({"caseId": case_id, "linked": payload}, status=201)
 
 
+def _storage_configuration_response() -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "Evidence storage is not configured.",
+            "detail": "Ask the operator to update the Supabase service-role key and bootstrap the private evidence buckets from Technical Status.",
+        },
+        status=503,
+    )
+
+
+def _storage_failure_response() -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "Evidence storage failed.",
+            "detail": "Ask the operator to check Supabase Storage on the Technical Status page before trying again.",
+        },
+        status=503,
+    )
+
+
+def _normalization_error_response(normalization: dict) -> JsonResponse:
+    code = normalization.get("code", "")
+    detected = normalization.get("detectedType", "Unknown")
+    selected = normalization.get("selectedType", "Auto-detect")
+    if code == "unsupported_evidence_extension":
+        return JsonResponse(
+            {
+                "error": "Unsupported evidence file type.",
+                **normalization,
+            },
+            status=400,
+        )
+    if code == "invalid_pcap" or (detected == "Unknown" and normalization.get("features", {}).get("magicType") == "invalid-pcap"):
+        return JsonResponse(
+            {
+                "error": "File does not look like a valid PCAP/PCAPNG capture.",
+                "code": "invalid_pcap",
+                **normalization,
+            },
+            status=422,
+        )
+    if code == "evidence_type_mismatch" or (detected != "Unknown" and selected != "Auto-detect" and selected != detected):
+        return JsonResponse(
+            {
+                "error": "Invalid evidence type for selected file.",
+                "code": "evidence_type_mismatch",
+                **normalization,
+            },
+            status=422,
+        )
+    return JsonResponse(
+        {
+            "error": "Unsupported or unrecognized evidence file.",
+            "code": "evidence_type_unrecognized",
+            **normalization,
+        },
+        status=422,
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def evidence_normalize_preview(request):
+    denied = require_permission(request, "upload", resource_type="EvidenceFile")
+    if denied:
+        return denied
+    upload = request.FILES.get("file")
+    if not upload:
+        return JsonResponse({"error": "file is required"}, status=400)
+    normalization = normalize_evidence_upload(upload, request.POST.get("evidenceType")).to_dict()
+    return JsonResponse(normalization)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def evidence_upload(request):
@@ -399,6 +877,19 @@ def evidence_upload(request):
     case_id = request.POST.get("caseId") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:4].upper()}"
     if not upload:
         return JsonResponse({"error": "file is required"}, status=400)
+    normalization_result = normalize_evidence_upload(upload, request.POST.get("evidenceType"))
+    normalization = normalization_result.to_dict()
+    if not normalization_result.valid:
+        return _normalization_error_response(normalization)
+    if normalization_result.normalized_type != EvidenceFile.EvidenceType.PCAP:
+        return JsonResponse(
+            {
+                "error": f"{normalization_result.normalized_type} normalization is available, but analysis for this evidence type is not enabled in the officer upload flow yet.",
+                "code": "evidence_type_not_analyzable",
+                **normalization,
+            },
+            status=422,
+        )
     try:
         saved = save_uploaded_file(upload, "pcap")
     except OverflowError as exc:
@@ -407,12 +898,26 @@ def evidence_upload(request):
         message = str(exc)
         status = 422 if "valid PCAP" in message else 400
         return JsonResponse({"error": message}, status=status)
+    except RuntimeError as exc:
+        if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
+            return _storage_configuration_response()
+        return _storage_failure_response()
+    try:
+        intake_flags = json.loads(request.POST.get("flags") or "[]")
+        if not isinstance(intake_flags, list):
+            intake_flags = []
+    except json.JSONDecodeError:
+        intake_flags = []
     saved["intake"] = {
         "investigator": (request.POST.get("investigator") or actor.user).strip(),
-        "department": (request.POST.get("department") or "Gujarat Cyber Crime Cell").strip(),
+        "department": (request.POST.get("department") or "").strip(),
+        "selectedEvidenceType": normalization_result.selected_type,
+        "evidenceType": normalization_result.normalized_type,
         "sourceLocation": (request.POST.get("sourceLocation") or "").strip(),
         "priority": (request.POST.get("priority") or "Standard").strip(),
         "remarks": (request.POST.get("remarks") or "").strip(),
+        "flags": [str(flag).strip() for flag in intake_flags if str(flag).strip()],
+        "origin": Case.Origin.OFFICER_UPLOAD,
         "sourceIp": (request.POST.get("sourceIp") or "").strip(),
         "destinationIp": (request.POST.get("destinationIp") or "").strip(),
         "protocol": (request.POST.get("protocol") or "").strip().upper(),
@@ -421,6 +926,7 @@ def evidence_upload(request):
         "packetLimit": (request.POST.get("packetLimit") or "").strip(),
         "bpfFilter": (request.POST.get("bpfFilter") or "").strip(),
     }
+    saved["normalization"] = normalization
     evidence_id = f"ev-{uuid4().hex[:8]}"
     job_id = f"job-{uuid4().hex[:8]}"
     public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
@@ -480,8 +986,8 @@ def evidence_verify_integrity(request, evidence_id: str):
     manifest = getattr(evidence, "manifest", None)
     if not manifest:
         return JsonResponse({"verified": False, "error": "manifest missing"}, status=404)
-    path = resolve_storage_path(evidence.stored_path)
-    encrypted_hash = sha256_file(path) if path.exists() else ""
+    stat = storage_provider.stat(evidence.stored_path)
+    encrypted_hash = stat.sha256
     encrypted_verified = bool(encrypted_hash and encrypted_hash == manifest.encrypted_sha256)
     canonical_manifest = {key: value for key, value in manifest.manifest_json.items() if key != "manifestHash"}
     calculated_manifest_hash = sha256_text(json.dumps(canonical_manifest, sort_keys=True))
@@ -587,6 +1093,10 @@ def capture_replay_start(request):
         Path(saved["analysis_path"]).unlink(missing_ok=True)
     except (OverflowError, TypeError, ValueError) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+    except RuntimeError as exc:
+        if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
+            return _storage_configuration_response()
+        return _storage_failure_response()
     case_id = request.POST.get("caseId") or f"CYB-GJ-REPLAY-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     case = ensure_capture_case(case_id)
     job = create_capture_job(case=case, mode=CaptureJob.Mode.REPLAY, duration_seconds=duration, packet_limit=packet_limit, chunk_interval_seconds=chunk_interval, source_label=f"Replay: {upload.name}")
@@ -608,6 +1118,8 @@ def capture_replay_status(_request, job_id: str):
     job = CaptureJob.objects.filter(id=job_id).first()
     if not job:
         raise Http404("Replay job not found")
+    if expire_stale_replay(job):
+        job.refresh_from_db()
     return JsonResponse(capture_job_payload(job))
 
 
@@ -735,6 +1247,10 @@ def sensor_chunk_upload(request, sensor_id: str):
         chunk = ingest_capture_chunk(job, upload, sequence, sensor=sensor)
     except (OverflowError, TypeError, ValueError) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+    except RuntimeError as exc:
+        if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
+            return _storage_configuration_response()
+        return _storage_failure_response()
     return JsonResponse({"chunkId": chunk.id, **capture_job_payload(job)}, status=201)
 
 
@@ -751,7 +1267,16 @@ def sensor_capture_complete(request, sensor_id: str, job_id: str):
         SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.COMPLETED, completed_at=datetime.now(timezone.utc))
         return JsonResponse(response)
     except ValueError as exc:
+        SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.FAILED, completed_at=datetime.now(timezone.utc), error_message=str(exc))
         return JsonResponse({"error": str(exc)}, status=422)
+    except RuntimeError as exc:
+        SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.FAILED, completed_at=datetime.now(timezone.utc), error_message=str(exc))
+        if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
+            return _storage_configuration_response()
+        return _storage_failure_response()
+    except Exception as exc:
+        SensorCommand.objects.filter(sensor_id=sensor_id, capture_job_id=job_id).update(status=SensorCommand.Status.FAILED, completed_at=datetime.now(timezone.utc), error_message=str(exc))
+        return JsonResponse({"error": "Capture finalization failed.", "detail": str(exc)}, status=500)
 
 
 @csrf_exempt
@@ -965,10 +1490,30 @@ def case_legal_hold(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
+    denied = require_permission(request, "compliance", case=case, resource_type="Case", resource_id=case.id)
+    if denied:
+        return denied
+    actor = actor_from_request(request)
     case.legal_hold = request.method == "POST"
     case.legal_hold_reason = _json_body(request).get("reason", "") if request.method == "POST" else ""
     case.save(update_fields=["legal_hold", "legal_hold_reason", "updated_at"])
+    action = "Legal hold enabled" if case.legal_hold else "Legal hold removed"
+    add_history(case, actor, action, case.legal_hold_reason or "No reason supplied.")
+    record_custody_event(case, actor, action, {"legalHold": case.legal_hold, "reason": case.legal_hold_reason}, resource_type="Case", resource_id=case.id)
+    log_access(actor, "case.legal_hold" if case.legal_hold else "case.legal_hold.remove", case=case, resource_type="Case", resource_id=case.id)
     return JsonResponse({"caseId": case.id, "legalHold": case.legal_hold, "reason": case.legal_hold_reason})
+
+
+def case_legal_review_checklist(request, case_id: str):
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
+    denied = require_permission(request, "compliance", case=case, resource_type="Case", resource_id=case.id)
+    if denied:
+        return denied
+    actor = actor_from_request(request)
+    log_access(actor, "case.legal_review.checklist", case=case, resource_type="Case", resource_id=case.id)
+    return JsonResponse(legal_review_checklist(case))
 
 
 def operational_events(request):
@@ -1050,6 +1595,7 @@ def job_events(_request, job_id: str):
 
 def system_workers(_request):
     expected = ["capture", "pcap-ingestion", "parser", "decoder", "session", "detection", "anomaly", "analysis-finalizer", "report-export", "scheduler", "retention"]
+    worker_mode = "enabled" if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) else "disabled"
     latest = {}
     by_worker = {}
     for row in WorkerHeartbeat.objects.order_by("worker_name", "-last_seen_at"):
@@ -1058,6 +1604,17 @@ def system_workers(_request):
     results = []
     for worker in expected:
         row = latest.get(worker)
+        if worker_mode == "disabled" and getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+            results.append({
+                "name": worker,
+                "status": "disabled",
+                "lastSeen": row.last_seen_at.isoformat() if row else None,
+                "currentJobId": "",
+                "details": (row.details_json if row else {}) | {"reason": "Supabase worker containers are disabled for lightweight synchronous demo mode."},
+                "replicaCount": 0,
+                "replicas": [],
+            })
+            continue
         if not row:
             results.append({"name": worker, "status": "offline", "lastSeen": None, "currentJobId": "", "details": {}, "replicaCount": 0, "replicas": []})
             continue
@@ -1067,7 +1624,7 @@ def system_workers(_request):
             if heartbeat_state(instance.last_seen_at) in {"healthy", "stale"}
         ]
         results.append(worker_payload(row, worker) | {"replicaCount": sum(1 for instance in replicas if instance["status"] == "healthy"), "replicas": replicas})
-    return JsonResponse({"processingMode": settings.NETRA_PROCESSING_MODE, "results": results})
+    return JsonResponse({"processingMode": settings.NETRA_PROCESSING_MODE, "queueProvider": getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka"), "workerMode": worker_mode, "results": results})
 
 
 def system_health_deep(_request):
@@ -1076,13 +1633,17 @@ def system_health_deep(_request):
         "elasticsearch": _probe_elasticsearch(),
         "kafka": _probe_kafka(),
         "storage": _probe_storage(),
+        "realtime": _probe_realtime(),
         "encryption": _probe_encryption(),
+        "security": _probe_security(),
+        "evidenceNormalization": _probe_evidence_normalization(),
         "packetTools": _probe_packet_tools(),
         "workers": _probe_workers(),
     }
     status = "ok" if all(value["status"] == "ok" for value in checks.values()) else "degraded"
     db = {
         "mode": getattr(settings, "NETRA_DATABASE_MODE", "docker-postgres"),
+        "provider": getattr(settings, "NETRA_DATABASE_PROVIDER", "postgres"),
         "host": settings.DATABASES["default"]["HOST"],
         "port": settings.DATABASES["default"]["PORT"],
         "name": settings.DATABASES["default"]["NAME"],
@@ -1090,13 +1651,38 @@ def system_health_deep(_request):
     }
     access = {
         "mode": getattr(settings, "NETRA_ACCESS_MODE", "role-headers"),
-        "label": "Trusted LAN" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "Development",
-        "authentication": "disabled" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "development headers or JWT",
+        "label": "Supabase Auth" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else ("Trusted LAN" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "Development"),
+        "authentication": "supabase-auth" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else ("disabled" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "development headers or JWT"),
+        "authorization": "role-based" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else ("disabled" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "development"),
         "publicInternet": "not-supported" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "not-configured",
         "actor": getattr(settings, "NETRA_TRUSTED_LAN_ACTOR", "Local Investigator"),
         "role": getattr(settings, "NETRA_TRUSTED_LAN_ROLE", "LAN Operator"),
     }
-    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access})
+    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access, "incidentReadiness": incident_readiness_payload()})
+
+
+def system_incident_readiness(request):
+    actor = actor_from_request(request)
+    log_access(actor, "system.incident_readiness", resource_type="System", resource_id="incident-readiness")
+    return JsonResponse(incident_readiness_payload())
+
+
+def system_deployment_readiness(request):
+    actor = actor_from_request(request)
+    log_access(actor, "system.deployment_readiness", resource_type="System", resource_id="deployment-readiness")
+    return JsonResponse(deployment_readiness_payload())
+
+
+def system_status_matrix(request):
+    actor = actor_from_request(request)
+    log_access(actor, "system.status_matrix", resource_type="System", resource_id="status-matrix")
+    return JsonResponse(status_matrix_payload())
+
+
+def ml_model_status(request):
+    actor = actor_from_request(request)
+    log_access(actor, "ml.model_status", resource_type="Model", resource_id="anomaly")
+    return JsonResponse(ml_model_status_payload())
 
 
 def system_metrics(_request):
@@ -1125,6 +1711,8 @@ def system_storage(_request):
 
 
 def system_indexes(_request):
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        return JsonResponse({"status": "ok", "provider": "postgres", "results": ["forensics_processingjob.stats", "forensics_sessionsummary", "forensics_alert"], "detail": "Elasticsearch disabled in Supabase mode."})
     try:
         from common.search import get_elasticsearch_client
         rows = sorted(get_elasticsearch_client().indices.get_alias(index="netra-*").keys())
@@ -1135,7 +1723,49 @@ def system_indexes(_request):
 
 def system_kafka(_request):
     probe = _probe_kafka()
-    return JsonResponse({"bootstrap": settings.NETRA_KAFKA_BOOTSTRAP, **probe, "topics": ["netra.pcap.uploaded", "netra.capture.chunk.received", "netra.packets.normalized", "netra.operational.events", "netra.dead_letter"]}, status=200 if probe["status"] == "ok" else 503)
+    queue_topics = ["pcap-uploaded", "capture-chunk-received", "analysis-finalize", "report-export", "dead-letter"] if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq" else ["netra.pcap.uploaded", "netra.capture.chunk.received", "netra.packets.normalized", "netra.operational.events", "netra.dead_letter"]
+    return JsonResponse({"provider": getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka"), "bootstrap": "" if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq" else settings.NETRA_KAFKA_BOOTSTRAP, **probe, "topics": queue_topics}, status=200 if probe["status"] in {"ok", "configured"} else 503)
+
+
+def system_realtime(_request):
+    expected = [
+        "forensics_operationalevent",
+        "forensics_processingjob",
+        "forensics_alert",
+        "forensics_anomalyrecord",
+        "forensics_capturejob",
+        "forensics_workerheartbeat",
+    ]
+    if getattr(settings, "NETRA_REALTIME_PROVIDER", "") != "supabase":
+        return JsonResponse({"status": "disabled", "provider": getattr(settings, "NETRA_REALTIME_PROVIDER", "none"), "tables": []})
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("select exists(select 1 from pg_publication where pubname = 'supabase_realtime')")
+            publication = bool(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                select tablename
+                from pg_publication_tables
+                where pubname = 'supabase_realtime' and schemaname = 'public'
+                order by tablename
+                """
+            )
+            tables = [row[0] for row in cursor.fetchall()]
+        missing = [table for table in expected if table not in tables]
+        return JsonResponse(
+            {
+                "status": "ok" if publication and not missing else "degraded",
+                "provider": "supabase-realtime",
+                "publication": "supabase_realtime" if publication else "",
+                "tables": tables,
+                "expectedTables": expected,
+                "missingTables": missing,
+                "detail": "Browser subscriptions use these low-volume operational tables only.",
+            },
+            status=200 if publication else 503,
+        )
+    except Exception as exc:
+        return JsonResponse({"status": "failed", "provider": "supabase-realtime", "detail": str(exc)}, status=503)
 
 
 def system_capacity(_request):
@@ -1170,6 +1800,8 @@ def _probe_postgres() -> dict:
 
 
 def _probe_elasticsearch() -> dict:
+    if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
+        return {"status": "ok", "provider": "postgres", "detail": "Elasticsearch disabled in Supabase mode."}
     started = time.perf_counter()
     try:
         from common.search import get_elasticsearch_client
@@ -1180,6 +1812,8 @@ def _probe_elasticsearch() -> dict:
 
 
 def _probe_kafka() -> dict:
+    if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq":
+        return probe_supabase_queue()
     started = time.perf_counter()
     try:
         from kafka.admin import KafkaAdminClient
@@ -1191,7 +1825,27 @@ def _probe_kafka() -> dict:
         return {"status": "failed", "detail": str(exc)}
 
 
+def _probe_realtime() -> dict:
+    if getattr(settings, "NETRA_REALTIME_PROVIDER", "") != "supabase":
+        return {"status": "configured", "provider": getattr(settings, "NETRA_REALTIME_PROVIDER", "none"), "detail": "Supabase Realtime is not selected."}
+    expected = {"forensics_operationalevent", "forensics_processingjob", "forensics_alert", "forensics_anomalyrecord", "forensics_capturejob", "forensics_workerheartbeat"}
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("select tablename from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public'")
+            tables = {row[0] for row in cursor.fetchall()}
+        missing = sorted(expected - tables)
+        return {"status": "ok" if not missing else "degraded", "provider": "supabase-realtime", "missingTables": missing}
+    except Exception as exc:
+        return {"status": "failed", "provider": "supabase-realtime", "detail": str(exc)}
+
+
 def _probe_storage() -> dict:
+    if getattr(settings, "NETRA_STORAGE_PROVIDER", "local") == "supabase":
+        try:
+            result = storage_provider.health_check()
+            return {**result, "bucket": settings.SUPABASE_STORAGE_BUCKET_EVIDENCE}
+        except Exception as exc:
+            return {"status": "failed", "provider": "supabase-storage", "detail": str(exc)}
     try:
         settings.NETRA_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
         probe = settings.NETRA_STORAGE_ROOT / ".netra-health-probe"
@@ -1211,30 +1865,80 @@ def _probe_encryption() -> dict:
         return {"status": "failed", "detail": str(exc)}
 
 
+def _probe_security() -> dict:
+    details = []
+    status = "ok"
+    if getattr(settings, "NETRA_AUTH_PROVIDER", "") != "supabase":
+        details.append("Supabase Auth is not the active auth provider.")
+        status = "degraded"
+    if getattr(settings, "NETRA_DEV_ROLE_HEADERS", False):
+        details.append("Development role headers are enabled.")
+        status = "degraded"
+    if not getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
+        details.append("Backend Supabase service-role key is missing.")
+        status = "failed"
+    if getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and not getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
+        details.append("Supabase Storage cannot use private buckets without backend service-role key.")
+        status = "failed"
+    if getattr(settings, "NETRA_EVIDENCE_KEY", "") == "netra-phase3-development-evidence-key":
+        details.append("Evidence encryption key is still the development default.")
+        if status == "ok":
+            status = "degraded"
+    admin_count = _admin_count()
+    if admin_count < 1:
+        details.append("No Netra Admin profile exists yet; the next authenticated Supabase user will bootstrap Admin.")
+        if status == "ok":
+            status = "degraded"
+    return {
+        "status": status,
+        "authProvider": getattr(settings, "NETRA_AUTH_PROVIDER", "django"),
+        "rbac": "enabled" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else "development",
+        "devRoleHeaders": bool(getattr(settings, "NETRA_DEV_ROLE_HEADERS", False)),
+        "serviceRoleBackendOnly": True,
+        "serviceRoleConfigured": bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")),
+        "adminProfiles": admin_count,
+        "detail": "; ".join(details) if details else "Supabase Auth, RBAC, private Storage credentials, and audit logging are configured.",
+    }
+
+
+def _probe_evidence_normalization() -> dict:
+    return {
+        "status": "ok",
+        "detail": "Evidence normalization and unsupported extension blocking are enabled. PCAP is fully analyzable; firewall, DNS, TLS, and mixed evidence are validation-only until their parsers are connected.",
+        "supportedTypes": ["PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"],
+        "fullyAnalyzable": ["PCAP"],
+        "unsupportedExtensionBlocking": "enabled",
+        "logEvidence": "validation-only",
+    }
+
+
 def _probe_packet_tools() -> dict:
     tools = available_packet_tools()
     return {"status": "ok" if tools.get("tshark") and tools.get("zeek") else "degraded", **tools}
 
 
 def _probe_workers() -> dict:
+    if getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase" and not getattr(settings, "NETRA_SUPABASE_START_WORKERS", False):
+        return {"status": "ok", "mode": "disabled", "detail": "Supabase worker containers are disabled for lightweight synchronous demo mode."}
     rows = system_workers(None).content
     payload = json.loads(rows)
     offline = [row["name"] for row in payload["results"] if row["status"] == "offline"]
     stale = [row["name"] for row in payload["results"] if row["status"] == "stale"]
-    return {"status": "ok" if not offline and not stale else "degraded", "offline": offline, "stale": stale}
+    return {"status": "ok" if not offline and not stale else "degraded", "mode": payload.get("workerMode", "enabled"), "offline": offline, "stale": stale}
 
 
 def system_database(_request):
     tables = connection.introspection.table_names()
     access = {
         "mode": getattr(settings, "NETRA_ACCESS_MODE", "role-headers"),
-        "label": "Trusted LAN" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "Development",
-        "authentication": "disabled" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "development headers or JWT",
+        "label": "Supabase Auth" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else ("Trusted LAN" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "Development"),
+        "authentication": "supabase-auth" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else ("disabled" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "development headers or JWT"),
         "publicInternet": "not-supported" if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan" else "not-configured",
     }
     return JsonResponse(
         {
             "mode": getattr(settings, "NETRA_DATABASE_MODE", "docker-postgres"),
+            "provider": getattr(settings, "NETRA_DATABASE_PROVIDER", "postgres"),
             "engine": settings.DATABASES["default"]["ENGINE"],
             "host": settings.DATABASES["default"]["HOST"],
             "port": settings.DATABASES["default"]["PORT"],
@@ -1310,13 +2014,10 @@ def _dead_letter_dict(row: DeadLetterEvent) -> dict:
 def dashboard_summary(request):
     analysis = _analysis(request)
     return JsonResponse(
-        analysis["summary"]
+        dashboard_summary_payload(request.GET.get("caseId") or analysis.get("caseId", ""))
         | {
             "case": analysis.get("case"),
             "evidence": analysis.get("evidence"),
-            "topAttackClass": analysis.get("topAttackClass", analysis["summary"].get("topAttackClass", "Normal Baseline")),
-            "riskLevel": analysis.get("riskLevel", analysis["summary"].get("riskLevel", "low")),
-            "toolStatus": analysis.get("toolStatus", analysis["summary"].get("toolStatus", available_packet_tools())),
             "zeek": analysis.get("zeek", analysis["summary"].get("zeek")),
         }
     )
@@ -1456,6 +2157,45 @@ def anomalies(request):
     return JsonResponse({"results": _results("anomalies", request)})
 
 
+def case_anomaly_explanation(request, case_id: str):
+    model = ml_model_status_payload()
+    rows = _analysis(case_id=case_id).get("anomalies", [])
+    top_features: list[str] = []
+    explanations = []
+    for row in rows[:8]:
+        features = row.get("topFeatures") or []
+        top_features.extend([str(item) for item in features])
+        explanations.append(
+            {
+                "id": row.get("id"),
+                "entity": row.get("entity"),
+                "behaviour": row.get("behaviour"),
+                "confidence": row.get("confidence", 0),
+                "topFeatures": features,
+                "recommendedAction": row.get("recommendedAction") or "Review related packets, sessions, and alerts before making an investigative conclusion.",
+                "modelVersion": row.get("modelVersion") or model.get("version", "fallback-scoring"),
+                "mlAnomalyScore": row.get("mlAnomalyScore"),
+            }
+        )
+    unique_features = list(dict.fromkeys(top_features))[:10]
+    return JsonResponse(
+        {
+            "caseId": case_id,
+            "mode": "trained-model-with-explainable-fallback" if model.get("modelAvailable") else "explainable-fallback",
+            "modelVersion": model.get("version") or "fallback-scoring",
+            "modelType": model.get("modelType") or "heuristic-statistical",
+            "fallbackUsed": not bool(model.get("modelAvailable")),
+            "topFeatures": unique_features,
+            "explanations": explanations,
+            "limitations": [
+                "PCAP-only anomaly scoring indicates unusual network behavior, not proof of compromise.",
+                "Encrypted payload contents are not decrypted.",
+                "Model quality depends on the available benchmark corpus and should be reviewed before public production use.",
+            ],
+        }
+    )
+
+
 def anomaly_baseline(request):
     return JsonResponse({"results": [{"metric": row["behaviour"], "baseline": row["baseline"], "observed": row["observed"], "confidence": row["confidence"]} for row in _results("anomalies", request)]})
 
@@ -1512,39 +2252,81 @@ def report_preview(request, case_id: str):
             "toolStatus": analysis.get("toolStatus", available_packet_tools()),
             "chainOfCustody": analysis.get("chainOfCustody", []),
             "custodyLedger": custody,
+            "legalReview": legal_review_checklist(case) if case else {},
             "timeline": analysis.get("trafficTimeline", []),
             "graph": analysis.get("graph", {}),
         }
     )
 
 
+def reports(request):
+    rows = Report.objects.select_related("case").order_by("-created_at")
+    case_id = request.GET.get("caseId")
+    if case_id:
+        rows = rows.filter(case_id=case_id)
+    status = request.GET.get("status")
+    if status and status != "all":
+        rows = rows.filter(status=status)
+    language = request.GET.get("language")
+    if language and language != "all":
+        rows = rows.filter(language=language)
+    if request.GET.get("includeTest") not in {"1", "true", "yes"}:
+        test_query = Q(case__is_test=True) | Q(case__origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
+        for prefix in VALIDATOR_CASE_PREFIXES:
+            test_query |= Q(case_id__startswith=prefix)
+        rows = rows.exclude(test_query)
+    return JsonResponse(_paged([_report_dict(row) for row in rows[:250]], request))
+
+
+def case_reports(request, case_id: str):
+    request.GET._mutable = True
+    request.GET["caseId"] = case_id
+    request.GET._mutable = False
+    return reports(request)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def report_generate(request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
     denied = require_permission(request, "report", case=case, resource_type="Report", resource_id=case_id)
     if denied:
         return denied
     actor = actor_from_request(request)
     payload = _json_body(request)
     language = payload.get("language", "en")
+    report_format = (payload.get("format") or "html").lower()
     analysis = _analysis(case_id=case_id)
-    custody = verify_case_ledger(case) if case else {}
-    html = build_report_html(analysis, language).replace("</body>", f"<section><h2>Custody Ledger</h2><p>Verified: {custody.get('verified')} | Events: {custody.get('eventCount')} | Latest hash: {custody.get('latestHash','')}</p></section></body>")
-    artifact = write_text_artifact(html, "report", f"{case_id}-{language}.html")
-    record_report(case_id, artifact, language, actor)
-    publish_event("netra.export.completed", {"type": "report.generated", "caseId": case_id, **artifact})
-    return JsonResponse({"caseId": case_id, "language": language, "status": "ready", "reportId": artifact["filename"], "downloadUrl": f"/api/reports/{artifact['filename']}/download", **artifact}, status=201)
+    if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
+        extension = "pdf" if report_format == "pdf" else "html"
+        report_id = f"{case_id}-{language}-{uuid4().hex[:6]}.{extension}"
+        if case:
+            Report.objects.update_or_create(
+                id=report_id,
+                defaults={"case": case, "language": language, "generated_by": actor.user, "status": "queued", "stored_path": "", "sha256": ""},
+            )
+        publish_event("netra.export.requests", {"type": "report.generate", "caseId": case_id, "language": language, "reportId": report_id, "actor": actor.user})
+        return JsonResponse({"caseId": case_id, "language": language, "status": "queued", "reportId": report_id}, status=202)
+    artifact = generate_pdf_report_artifact(case_id, language, analysis, actor) if report_format == "pdf" else generate_report_artifact(case_id, language, analysis, actor)
+    publish_event("netra.export.completed", {"type": "report.generated", "format": report_format, "caseId": case_id, **artifact})
+    return JsonResponse({"caseId": case_id, "language": language, "status": "ready", "reportId": artifact["id"], "downloadUrl": f"/api/reports/{artifact['id']}/download", **artifact}, status=201)
 
 
-def report_download(_request, report_id: str):
-    path = settings.NETRA_STORAGE_ROOT / "reports" / report_id
-    if not path.exists():
-        path = settings.NETRA_STORAGE_ROOT / "reports" / f"{report_id}.enc"
-    if not path.exists():
+def report_download(request, report_id: str):
+    report = Report.objects.filter(id=report_id).first()
+    if not report:
         raise Http404("Report not found")
-    filename = path.name.removesuffix(".enc")
-    return HttpResponse(read_encrypted_or_plain(path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type="text/html")
+    denied = require_permission(request, "report", case=report.case, resource_type="Report", resource_id=report.id)
+    if denied:
+        return denied
+    actor = actor_from_request(request)
+    record_custody_event(report.case, actor, "Report downloaded", {"reportId": report.id, "sha256": report.sha256}, resource_type="Report", resource_id=report.id)
+    log_access(actor, "report.download", case=report.case, resource_type="Report", resource_id=report.id)
+    filename = report.id.removesuffix(".enc")
+    content_type = "application/pdf" if filename.lower().endswith(".pdf") else "text/html"
+    return HttpResponse(read_encrypted_or_plain(report.stored_path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type=content_type)
 
 
 @csrf_exempt
@@ -1556,45 +2338,65 @@ def exports(request):
             return denied
         actor = actor_from_request(request)
         payload = _json_body(request)
-        export_id = f"exp-{uuid4().hex[:8]}"
         case_id = payload.get("caseId") or request.GET.get("caseId") or _analysis().get("caseId", "")
+        case = Case.objects.filter(id=case_id).first()
+        if not case:
+            raise Http404("Case not found")
         analysis = _analysis(case_id=case_id)
         export_type = (payload.get("type") or "json").lower()
-        if "csv" in export_type or "alert" in export_type:
-            filename = f"{export_id}-alerts.csv"
-            content = build_alert_csv(analysis)
-        else:
-            filename = f"{export_id}-evidence.json"
-            bundle = json.loads(build_evidence_bundle(analysis))
-            case = Case.objects.filter(id=case_id).first()
-            if case:
-                bundle["custodyLedger"] = {"verification": verify_case_ledger(case), "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("created_at", "id")]}
-            content = json.dumps(bundle, indent=2)
-        artifact = write_text_artifact(content, "export", filename)
-        record_export(case_id, export_id, export_type, artifact, actor)
-        publish_event("netra.export.requests", {"type": "export.created", "exportId": export_id, **payload})
-        return JsonResponse({"id": export_id, "status": "ready", "type": export_type, "downloadUrl": f"/api/exports/{export_id}/download", **artifact}, status=201)
+        if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
+            export_id = f"exp-{uuid4().hex[:8]}"
+            Export.objects.update_or_create(
+                id=export_id,
+                defaults={"case": case, "export_type": export_type, "requested_by": actor.user, "status": "queued", "stored_path": "", "sha256": ""},
+            )
+            publish_event("netra.export.requests", {"type": "export.generate", "caseId": case_id, "exportType": export_type, "exportId": export_id, "actor": actor.user})
+            return JsonResponse({"id": export_id, "status": "queued", "type": export_type}, status=202)
+        artifact = generate_export_artifact(case_id, export_type, analysis, actor)
+        publish_event("netra.export.requests", {"type": "export.created", "exportId": artifact["id"], **payload})
+        return JsonResponse({"id": artifact["id"], "status": "ready", "type": export_type, "downloadUrl": f"/api/exports/{artifact['id']}/download", **artifact}, status=201)
+    denied = require_permission(request, "view", resource_type="Export")
+    if denied:
+        return denied
+    case_id = request.GET.get("caseId")
+    queryset = Export.objects.select_related("case").order_by("-created_at")
+    if case_id:
+        queryset = queryset.filter(case_id=case_id)
+    if request.GET.get("includeTest") not in {"1", "true", "yes"}:
+        test_query = Q(case__is_test=True) | Q(case__origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
+        for prefix in VALIDATOR_CASE_PREFIXES:
+            test_query |= Q(case_id__startswith=prefix)
+        queryset = queryset.exclude(test_query)
     generated = [
-        {"id": row.id, "type": row.export_type, "caseId": row.case_id, "requestedBy": row.requested_by, "timestamp": row.created_at.isoformat(), "hash": row.sha256 or row.stored_path, "status": row.status}
-        for row in Export.objects.order_by("-created_at")[:50]
+        {"id": row.id, "type": row.export_type, "caseId": row.case_id, "requestedBy": row.requested_by, "timestamp": row.created_at.isoformat(), "hash": row.sha256 or row.stored_path, "status": row.status, "downloadUrl": f"/api/exports/{row.id}/download"}
+        for row in queryset[:50]
     ]
     return JsonResponse({"results": generated})
 
 
-def export_detail(_request, export_id: str):
+def export_detail(request, export_id: str):
     export = Export.objects.filter(id=export_id).first()
     if not export:
         raise Http404("Export not found")
-    return JsonResponse({"id": export.id, "type": export.export_type, "caseId": export.case_id, "requestedBy": export.requested_by, "timestamp": export.created_at.isoformat(), "hash": export.sha256 or export.stored_path, "status": export.status})
+    denied = require_permission(request, "view", case=export.case, resource_type="Export", resource_id=export.id)
+    if denied:
+        return denied
+    return JsonResponse({"id": export.id, "type": export.export_type, "caseId": export.case_id, "requestedBy": export.requested_by, "timestamp": export.created_at.isoformat(), "hash": export.sha256 or export.stored_path, "status": export.status, "downloadUrl": f"/api/exports/{export.id}/download"})
 
 
-def export_download(_request, export_id: str):
-    export_dir = settings.NETRA_STORAGE_ROOT / "exports"
-    path = next(iter(export_dir.glob(f"{export_id}*")), export_dir / f"{export_id}.json")
-    if not path.exists():
+def export_download(request, export_id: str):
+    export = Export.objects.filter(id=export_id).first()
+    if not export:
         raise Http404("Export not found")
-    filename = path.name.removesuffix(".enc")
-    return HttpResponse(read_encrypted_or_plain(path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type="application/octet-stream")
+    denied = require_permission(request, "export", case=export.case, resource_type="Export", resource_id=export.id)
+    if denied:
+        return denied
+    actor = actor_from_request(request)
+    record_custody_event(export.case, actor, "Evidence export downloaded", {"exportId": export.id, "type": export.export_type, "sha256": export.sha256}, resource_type="Export", resource_id=export.id)
+    log_access(actor, "export.download", case=export.case, resource_type="Export", resource_id=export.id)
+    extension = "cef" if "cef" in export.export_type else ("csv" if "csv" in export.export_type or "alert" in export.export_type else "json")
+    filename = f"{export.id}.{extension}"
+    return HttpResponse(read_encrypted_or_plain(export.stored_path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type="application/octet-stream")
 
 
 @csrf_exempt
@@ -1696,6 +2498,10 @@ def integration_send_alerts(request, integration_id: str):
             record_custody_event(case, actor_from_request(request), "Integration delivery sent", event, resource_type="IntegrationConnection", resource_id=str(connection.id))
     succeeded = [delivery for delivery in deliveries if delivery.result == "success"]
     failed = [delivery for delivery in deliveries if delivery.result != "success"]
+    if deliveries:
+        connection.status = "connected" if succeeded and not failed else ("degraded" if succeeded else "failed")
+        connection.last_sync_at = datetime.now(timezone.utc)
+        connection.save(update_fields=["status", "last_sync_at", "updated_at"])
     return JsonResponse({"integrationId": integration_id, "caseId": case_id, "attempted": len(deliveries), "delivered": len(succeeded), "failed": len(failed), "deliveryIds": [delivery.id for delivery in deliveries]})
 
 
@@ -1733,9 +2539,10 @@ def _deliver_webhook(connection: IntegrationConnection, payload: dict, delivery_
     result = "failed"
     for attempt in range(1, 4):
         try:
-            response = urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="POST"), timeout=5)
-            summary = f"HTTP {response.status}"
-            result = "success" if 200 <= response.status < 300 else "failed"
+            with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="POST"), timeout=5) as response:
+                preview = response.read(200).decode("utf-8", errors="replace").strip()
+                summary = f"HTTP {response.status}" + (f" {preview}" if preview else "")
+                result = "success" if 200 <= response.status < 300 else "failed"
             if result == "success":
                 break
         except urllib.error.HTTPError as exc:
@@ -1753,15 +2560,22 @@ def siem_export(request):
     denied = require_permission(request, "export", resource_type="SIEMExport")
     if denied:
         return denied
+    actor = actor_from_request(request)
     payload = _json_body(request)
     case_id = payload.get("caseId") or _analysis().get("caseId", "")
+    case = Case.objects.filter(id=case_id).first()
+    if not case:
+        raise Http404("Case not found")
     analysis = _analysis(case_id=case_id)
     lines = [
         f"CEF:0|Netra|Network Forensics|3|{alert.get('ruleId','netra-alert')}|{alert.get('attackClass')}|{alert.get('confidence')}|src={alert.get('sourceIp')} dst={alert.get('destination')} cs1={case_id} cs1Label=caseId"
         for alert in analysis.get("alerts", [])
     ]
-    artifact = write_text_artifact("\n".join(lines) or "CEF:0|Netra|Network Forensics|3|baseline|No critical alerts|0|", "export", f"siem-{case_id or 'latest'}-{uuid4().hex[:6]}.cef")
-    return JsonResponse({"caseId": case_id, "status": "ready", "downloadUrl": f"/api/exports/{Path(artifact['filename']).stem}/download", **artifact}, status=201)
+    export_id = f"siem-{uuid4().hex[:8]}"
+    artifact = write_text_artifact("\n".join(lines) or "CEF:0|Netra|Network Forensics|3|baseline|No critical alerts|0|", "export", f"{export_id}.cef")
+    record_export(case_id, export_id, "cef", artifact, actor)
+    record_custody_event(case, actor, "SIEM CEF export generated", {"exportId": export_id, "filename": artifact["filename"], "sha256": artifact["sha256"]}, resource_type="Export", resource_id=export_id)
+    return JsonResponse({"id": export_id, "caseId": case_id, "status": "ready", "downloadUrl": f"/api/exports/{export_id}/download", **artifact}, status=201)
 
 
 @csrf_exempt
@@ -1786,11 +2600,40 @@ def compliance_checklist(_request):
 
 
 def compliance_roles(_request):
-    return JsonResponse({"results": [], "status": "disabled", "detail": "Trusted-LAN mode does not expose roles."})
+    return JsonResponse(
+        {
+            "status": "enabled" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else "development",
+            "detail": "Supabase Auth identities are mapped to Netra server-side roles. Roles are enforced on protected backend actions.",
+            "results": [
+                {"role": "Admin", "permissions": ["upload", "review", "confirm", "report", "export", "view", "compliance", "manage_users", "integrations", "operations"]},
+                {"role": "Investigator", "permissions": ["upload", "review", "confirm", "report", "export", "view", "compliance"]},
+                {"role": "Analyst", "permissions": ["upload", "review", "view"]},
+                {"role": "Viewer", "permissions": ["view"]},
+            ],
+        }
+    )
 
 
 def security_posture(_request):
-    return JsonResponse({"encryptionAtRest": "ready", "rbac": "disabled", "authentication": "disabled", "accessMode": "trusted-lan", "publicInternet": "not-supported", "sensorSecurity": "installation-shared-key", "auditLogs": "enabled", "standardsAlignment": "digital evidence workflow"})
+    security = _probe_security()
+    return JsonResponse(
+        {
+            "encryptionAtRest": "ready" if security["status"] in {"ok", "degraded"} else "blocked",
+            "rbac": security["rbac"],
+            "authentication": "supabase-auth" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else "development",
+            "accessMode": getattr(settings, "NETRA_ACCESS_MODE", "role-headers"),
+            "publicInternet": "not-configured",
+            "sensorSecurity": "installation-shared-key",
+            "auditLogs": "enabled",
+            "serviceRoleBackendOnly": True,
+            "serviceRoleConfigured": security["serviceRoleConfigured"],
+            "devRoleHeaders": security["devRoleHeaders"],
+            "adminProfiles": security["adminProfiles"],
+            "status": security["status"],
+            "detail": security["detail"],
+            "standardsAlignment": "digital evidence workflow",
+        }
+    )
 
 
 def access_logs(_request):
@@ -1798,3 +2641,16 @@ def access_logs(_request):
     if rows:
         return JsonResponse({"results": [access_log_dict(row) for row in rows]})
     return JsonResponse({"results": []})
+
+
+def audit_export(request):
+    case_id = request.GET.get("caseId", "")
+    case = Case.objects.filter(id=case_id).first() if case_id else None
+    denied = require_permission(request, "compliance", case=case, resource_type="AuditExport", resource_id=case_id or "system")
+    if denied:
+        return denied
+    actor = actor_from_request(request)
+    if case:
+        record_custody_event(case, actor, "Audit export generated", {"scope": "case", "caseId": case.id}, resource_type="AuditExport", resource_id=case.id)
+    log_access(actor, "audit.export", case=case, resource_type="AuditExport", resource_id=case_id or "system")
+    return JsonResponse(audit_export_payload(case))

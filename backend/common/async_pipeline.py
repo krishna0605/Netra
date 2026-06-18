@@ -15,7 +15,7 @@ from common.audit import Actor, add_history, log_access
 from common.custody import record_custody_event
 from common.jobs import append_job_event, initial_steps
 from common.kafka import publish_event
-from common.persistence import persist_analysis
+from common.persistence import case_origin, is_validator_case, persist_analysis
 from common.storage import save_uploaded_file
 from common.vault import build_manifest_payload, temporary_decrypted_copy
 
@@ -29,8 +29,12 @@ def queue_uploaded_evidence(saved: dict, case_id: str, evidence_id: str, job_id:
             "investigator": intake.get("investigator") or actor.user,
             "department": intake.get("department") or "Gujarat Cyber Crime Cell",
             "priority": intake.get("priority") or "Standard",
+            "origin": case_origin(case_id, intake),
+            "is_test": is_validator_case(case_id, intake),
+            "opened_at": datetime.now(timezone.utc),
             "source_location": intake.get("sourceLocation", ""),
             "remarks": intake.get("remarks", ""),
+            "flags_json": intake.get("flags", []),
         },
     )
     evidence, _ = EvidenceFile.objects.update_or_create(

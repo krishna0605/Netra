@@ -1,0 +1,209 @@
+{
+  "version": "phase6-v1",
+  "startedAt": "2026-06-16T15:12:50.927926+00:00",
+  "completedAt": "2026-06-16T15:12:56.553850+00:00",
+  "caseCount": 6,
+  "metrics": {
+    "truePositives": 5,
+    "falsePositives": 3,
+    "falseNegatives": 0,
+    "precision": 0.625,
+    "recall": 1.0,
+    "f1": 0.7692,
+    "benignAccuracy": 1.0
+  },
+  "perClass": {
+    "Credential Brute Force": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "Malware C2 / Beaconing": {
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": 1.0
+    },
+    "Port Scan / Reconnaissance": {
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": 1.0
+    },
+    "Remote Command Execution": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "SMB / NetBIOS Lateral Movement": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "Suspicious SMTP Transfer": {
+      "tp": 1,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.5,
+      "recall": 1.0
+    }
+  },
+  "rows": [
+    {
+      "id": "bench-normal",
+      "file": "normal.pcap",
+      "expectedAttackClasses": [],
+      "predictedAttackClasses": [],
+      "topAttackClass": "Normal Baseline",
+      "riskLevel": "low",
+      "packets": 5000,
+      "sessions": 250,
+      "alerts": 0,
+      "anomalies": 7,
+      "maxAlertConfidence": 0,
+      "maxAnomalyConfidence": 97,
+      "truePositives": 0,
+      "falsePositives": 0,
+      "falseNegatives": 0,
+      "passed": true,
+      "error": "",
+      "notes": "Benign baseline sample should not automatically produce a named attack class."
+    },
+    {
+      "id": "bench-hydra-ssh",
+      "file": "hydra_ssh.pcap",
+      "expectedAttackClasses": [
+        "Credential Brute Force"
+      ],
+      "predictedAttackClasses": [
+        "Credential Brute Force",
+        "Malware C2 / Beaconing"
+      ],
+      "topAttackClass": "Credential Brute Force",
+      "riskLevel": "high",
+      "packets": 5000,
+      "sessions": 250,
+      "alerts": 2,
+      "anomalies": 4,
+      "maxAlertConfidence": 98,
+      "maxAnomalyConfidence": 97,
+      "truePositives": 1,
+      "falsePositives": 1,
+      "falseNegatives": 0,
+      "passed": false,
+      "error": "",
+      "notes": "Hydra SSH brute-force sample."
+    },
+    {
+      "id": "bench-hydra-ftp",
+      "file": "hydra_ftp.pcap",
+      "expectedAttackClasses": [
+        "Credential Brute Force"
+      ],
+      "predictedAttackClasses": [
+        "Credential Brute Force"
+      ],
+      "topAttackClass": "Credential Brute Force",
+      "riskLevel": "high",
+      "packets": 3904,
+      "sessions": 250,
+      "alerts": 1,
+      "anomalies": 3,
+      "maxAlertConfidence": 95,
+      "maxAnomalyConfidence": 97,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0,
+      "passed": true,
+      "error": "",
+      "notes": "Hydra FTP brute-force sample."
+    },
+    {
+      "id": "bench-distcc-rce",
+      "file": "distcc_exec_backdoor.pcap",
+      "expectedAttackClasses": [
+        "Remote Command Execution"
+      ],
+      "predictedAttackClasses": [
+        "Remote Command Execution"
+      ],
+      "topAttackClass": "Remote Command Execution",
+      "riskLevel": "critical",
+      "packets": 105,
+      "sessions": 16,
+      "alerts": 1,
+      "anomalies": 2,
+      "maxAlertConfidence": 88,
+      "maxAnomalyConfidence": 69,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0,
+      "passed": true,
+      "error": "",
+      "notes": "distcc backdoor/RCE investigation sample."
+    },
+    {
+      "id": "bench-smtp",
+      "file": "smtp.pcap",
+      "expectedAttackClasses": [
+        "Suspicious SMTP Transfer"
+      ],
+      "predictedAttackClasses": [
+        "Suspicious SMTP Transfer"
+      ],
+      "topAttackClass": "Suspicious SMTP Transfer",
+      "riskLevel": "medium",
+      "packets": 913,
+      "sessions": 20,
+      "alerts": 1,
+      "anomalies": 1,
+      "maxAlertConfidence": 80,
+      "maxAnomalyConfidence": 80,
+      "truePositives": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0,
+      "passed": true,
+      "error": "",
+      "notes": "SMTP transfer sample for suspicious mail/data movement detection."
+    },
+    {
+      "id": "bench-netbios",
+      "file": "netbios_ssn.pcap",
+      "expectedAttackClasses": [
+        "SMB / NetBIOS Lateral Movement"
+      ],
+      "predictedAttackClasses": [
+        "Port Scan / Reconnaissance",
+        "SMB / NetBIOS Lateral Movement",
+        "Suspicious SMTP Transfer"
+      ],
+      "topAttackClass": "Port Scan / Reconnaissance",
+      "riskLevel": "high",
+      "packets": 5000,
+      "sessions": 250,
+      "alerts": 3,
+      "anomalies": 8,
+      "maxAlertConfidence": 90,
+      "maxAnomalyConfidence": 97,
+      "truePositives": 1,
+      "falsePositives": 2,
+      "falseNegatives": 0,
+      "passed": false,
+      "error": "",
+      "notes": "NetBIOS/SMB lateral-movement style traffic sample."
+    }
+  ],
+  "limitations": [
+    "This benchmark uses a small labeled PCAP corpus and measures deterministic behavior rules plus explainable anomaly scoring.",
+    "Scores are engineering smoke metrics, not independent law-enforcement accuracy certification.",
+    "PCAP-only evidence cannot prove account compromise without endpoint/server log correlation."
+  ]
+}

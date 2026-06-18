@@ -1,0 +1,258 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - region "Notifications alt+T"
+    - main [ref=e4]:
+      - generic [ref=e6]:
+        - link "Netra" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img [ref=e9]
+          - text: Netra
+        - navigation [ref=e11]:
+          - link "Workflow" [ref=e12] [cursor=pointer]:
+            - /url: "#workflow"
+          - link "Capabilities" [ref=e13] [cursor=pointer]:
+            - /url: "#capabilities"
+          - link "Evidence Intake" [ref=e14] [cursor=pointer]:
+            - /url: /login
+          - link "Reports" [ref=e15] [cursor=pointer]:
+            - /url: /login
+        - generic [ref=e16]:
+          - combobox [ref=e17]:
+            - img [ref=e18]
+            - generic: English
+            - img [ref=e23]
+          - link "Open Investigation Console" [ref=e25] [cursor=pointer]:
+            - /url: /login
+      - generic [ref=e27]:
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - generic [ref=e30]:
+              - generic [ref=e31]: "01"
+              - generic [ref=e32]:
+                - heading "Evidence-first" [level=3] [ref=e33]
+                - paragraph [ref=e34]: Preserve filename, SHA-256 hash, investigator, and custody details from the first screen.
+            - generic [ref=e35]:
+              - generic [ref=e36]: "02"
+              - generic [ref=e37]:
+                - heading "Metadata-aware" [level=3] [ref=e38]
+                - paragraph [ref=e39]: Review SNI, JA3, certificates, timing patterns, and reputation without decrypting traffic.
+            - generic [ref=e40]:
+              - generic [ref=e41]: "03"
+              - generic [ref=e42]:
+                - heading "Report-ready" [level=3] [ref=e43]
+                - paragraph [ref=e44]: Move from alert to case history to police-facing report in one guided flow.
+          - generic [ref=e45]:
+            - heading "Network evidence, ready for investigation." [level=1] [ref=e46]
+            - paragraph [ref=e47]: AI-assisted network forensics for cybercrime teams.
+            - paragraph [ref=e48]: Netra turns packet captures into timelines, encrypted metadata intelligence, attack classifications, case history, and multilingual forensic reports.
+            - generic [ref=e49]:
+              - link "Open Investigation Console" [ref=e50] [cursor=pointer]:
+                - /url: /login
+                - img [ref=e51]
+                - text: Open Investigation Console
+              - link "Explore Workflow" [ref=e54] [cursor=pointer]:
+                - /url: "#workflow"
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - generic [ref=e58]:
+              - img [ref=e59]
+              - text: Netra Console
+            - generic [ref=e61]: Awaiting PCAP
+          - generic [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64]:
+                - generic [ref=e65]: Packets
+                - generic [ref=e66]: "0"
+              - generic [ref=e67]:
+                - generic [ref=e68]: Alerts
+                - generic [ref=e69]: "00"
+              - generic [ref=e70]:
+                - generic [ref=e71]: Hash
+                - generic [ref=e72]: Pending
+            - application [ref=e75]:
+              - generic [ref=e82]: Ready
+            - generic [ref=e83]:
+              - generic [ref=e84]:
+                - img [ref=e85]
+                - text: Upload a PCAP to begin
+              - paragraph [ref=e88]: Netra creates packet, protocol, alert, and anomaly rows only after real evidence is uploaded.
+      - generic [ref=e91]:
+        - generic [ref=e92]: PCAP
+        - generic [ref=e93]: DNS
+        - generic [ref=e94]: TLS Metadata
+        - generic [ref=e95]: JA3
+        - generic [ref=e96]: SNI
+        - generic [ref=e97]: Case Report
+        - generic [ref=e98]: Chain of Custody
+        - generic [ref=e99]: PCAP
+        - generic [ref=e100]: DNS
+        - generic [ref=e101]: TLS Metadata
+        - generic [ref=e102]: JA3
+        - generic [ref=e103]: SNI
+        - generic [ref=e104]: Case Report
+        - generic [ref=e105]: Chain of Custody
+      - generic [ref=e106]:
+        - generic [ref=e108]:
+          - img [ref=e109]
+          - heading "Evidence integrity" [level=3] [ref=e118]
+          - paragraph [ref=e119]: Every analysis view keeps evidence hash, timestamp, and case context close to the investigator.
+        - generic [ref=e121]:
+          - img [ref=e122]
+          - heading "Encrypted metadata" [level=3] [ref=e124]
+          - paragraph [ref=e125]: Netra does not break encryption; it studies traffic behavior and metadata patterns.
+        - generic [ref=e127]:
+          - img [ref=e128]
+          - heading "Multilingual reporting" [level=3] [ref=e132]
+          - paragraph [ref=e133]: English, Hindi, and Gujarati reporting modes support regional police workflows.
+      - generic [ref=e134]:
+        - generic [ref=e135]:
+          - heading "Requirement Coverage" [level=2] [ref=e136]
+          - paragraph [ref=e137]: Frontend surfaces now cover capture, DPI, threat detection, AI anomaly analysis, forensics, integration, and compliance workflows.
+        - generic [ref=e138]:
+          - generic [ref=e139]:
+            - generic [ref=e140]: Capture
+            - paragraph [ref=e141]: PCAP upload, real tshark parsing, filtering
+          - generic [ref=e142]:
+            - generic [ref=e143]: DPI
+            - paragraph [ref=e144]: Protocol decoder and payload inspection
+          - generic [ref=e145]:
+            - generic [ref=e146]: Detection
+            - paragraph [ref=e147]: Signatures, tunnels, malware C2, exfiltration
+          - generic [ref=e148]:
+            - generic [ref=e149]: AI
+            - paragraph [ref=e150]: Baseline deviation and unknown attack indicators
+          - generic [ref=e151]:
+            - generic [ref=e152]: Forensics
+            - paragraph [ref=e153]: Sessions, case evidence, exports, reports
+          - generic [ref=e154]:
+            - generic [ref=e155]: Compliance
+            - paragraph [ref=e156]: Evidence integrity, access logs, custody controls
+      - generic [ref=e157]:
+        - generic [ref=e158]:
+          - heading "Investigation Workflow" [level=2] [ref=e159]
+          - paragraph [ref=e160]: Six operational steps, designed like a case desk rather than a generic dashboard.
+        - generic [ref=e161]:
+          - generic [ref=e162]:
+            - generic [ref=e163]: "01"
+            - generic [ref=e164]:
+              - generic [ref=e165]:
+                - img [ref=e166]
+                - heading "Register evidence" [level=3] [ref=e169]
+              - paragraph [ref=e170]: Capture case details, investigator, source, priority, and evidence type.
+          - generic [ref=e172]:
+            - generic [ref=e173]: "02"
+            - generic [ref=e174]:
+              - generic [ref=e175]:
+                - img [ref=e176]
+                - heading "Analyze traffic" [level=3] [ref=e180]
+              - paragraph [ref=e181]: Simulate hash verification, flow extraction, and TLS metadata review.
+          - generic [ref=e183]:
+            - generic [ref=e184]: "03"
+            - generic [ref=e185]:
+              - generic [ref=e186]:
+                - img [ref=e187]
+                - heading "Classify threats" [level=3] [ref=e189]
+              - paragraph [ref=e190]: Label DNS Tunnel, Exfiltration, Beaconing, Malware C2, and Port Scan behavior.
+          - generic [ref=e192]:
+            - generic [ref=e193]: "04"
+            - generic [ref=e194]:
+              - generic [ref=e195]:
+                - img [ref=e196]
+                - heading "Map attack path" [level=3] [ref=e201]
+              - paragraph [ref=e202]: Connect suspicious workstation, DNS tunnel, encrypted session, and destination.
+          - generic [ref=e204]:
+            - generic [ref=e205]: "05"
+            - generic [ref=e206]:
+              - generic [ref=e207]:
+                - img [ref=e208]
+                - heading "Build case history" [level=3] [ref=e213]
+              - paragraph [ref=e214]: Track notes, review activity, linked alerts, and custody timeline.
+          - generic [ref=e216]:
+            - generic [ref=e217]: "06"
+            - generic [ref=e218]:
+              - generic [ref=e219]:
+                - img [ref=e220]
+                - heading "Generate report" [level=3] [ref=e223]
+              - paragraph [ref=e224]: Preview a police-ready multilingual forensic report.
+      - generic [ref=e226]:
+        - generic [ref=e227]:
+          - heading "Investigation Story" [level=2] [ref=e228]
+          - paragraph [ref=e229]: A single cybercrime scenario shown through the artifacts investigators actually use.
+        - generic [ref=e231]:
+          - article [ref=e232]:
+            - generic [ref=e233]: "01"
+            - heading "Workstation flagged" [level=3] [ref=e234]
+            - paragraph [ref=e235]: An internal machine begins sending unusual DNS queries and periodic encrypted traffic.
+          - article [ref=e236]:
+            - generic [ref=e237]: "02"
+            - heading "DNS tunnel identified" [level=3] [ref=e238]
+            - paragraph [ref=e239]: Long query bursts, repeated timing, and suspicious destinations trigger classification.
+          - article [ref=e240]:
+            - generic [ref=e241]: "03"
+            - heading "TLS metadata reviewed" [level=3] [ref=e242]
+            - paragraph [ref=e243]: SNI, JA3, certificate issuer, timing, and reputation are reviewed without decryption.
+          - article [ref=e244]:
+            - generic [ref=e245]: "04"
+            - heading "Case history built" [level=3] [ref=e246]
+            - paragraph [ref=e247]: Notes, custody actions, linked alerts, and timeline entries become part of the case.
+          - article [ref=e248]:
+            - generic [ref=e249]: "05"
+            - heading "Report generated" [level=3] [ref=e250]
+            - paragraph [ref=e251]: A structured report summarizes evidence, classification, metadata, and next steps.
+      - generic [ref=e252]:
+        - generic [ref=e253]:
+          - heading "Capabilities" [level=2] [ref=e254]
+          - paragraph [ref=e255]: Real-PCAP investigation capabilities for repeatable local forensic analysis.
+        - generic [ref=e256]:
+          - generic [ref=e257]:
+            - generic [ref=e258]: "01"
+            - generic [ref=e259]:
+              - heading "PCAP-driven alerting" [level=3] [ref=e260]
+              - paragraph [ref=e261]: Uploaded packet captures feed parsing, protocol evidence, detections, anomalies, and investigation views.
+          - generic [ref=e263]:
+            - generic [ref=e264]: "02"
+            - generic [ref=e265]:
+              - heading "Encrypted metadata without decryption" [level=3] [ref=e266]
+              - paragraph [ref=e267]: Metadata patterns provide useful evidence while respecting encrypted content.
+          - generic [ref=e269]:
+            - generic [ref=e270]: "03"
+            - generic [ref=e271]:
+              - heading "Attack classification" [level=3] [ref=e272]
+              - paragraph [ref=e273]: Alerts are grouped into practical investigation classes.
+          - generic [ref=e275]:
+            - generic [ref=e276]: "04"
+            - generic [ref=e277]:
+              - heading "Case history" [level=3] [ref=e278]
+              - paragraph [ref=e279]: Every action can be presented as part of the investigation record.
+          - generic [ref=e281]:
+            - generic [ref=e282]: "05"
+            - generic [ref=e283]:
+              - heading "Multilingual forensic reports" [level=3] [ref=e284]
+              - paragraph [ref=e285]: Report sections adapt to English, Hindi, and Gujarati.
+      - generic [ref=e288]:
+        - generic [ref=e289]:
+          - generic [ref=e290]:
+            - img [ref=e291]
+            - text: Netra
+          - paragraph [ref=e293]: Netra converts packet evidence into cybercrime investigation workflows.
+          - paragraph [ref=e294]: Netra ©2026
+        - generic [ref=e295]:
+          - heading "Navigation" [level=4] [ref=e296]
+          - generic [ref=e297]:
+            - link "Workflow" [ref=e298] [cursor=pointer]:
+              - /url: "#workflow"
+            - link "Capabilities" [ref=e299] [cursor=pointer]:
+              - /url: "#capabilities"
+            - link "Cases" [ref=e300] [cursor=pointer]:
+              - /url: /app/cases
+        - generic [ref=e301]:
+          - heading "Operational flow" [level=4] [ref=e302]
+          - generic [ref=e303]:
+            - link "Open Evidence Intake" [ref=e304] [cursor=pointer]:
+              - /url: /app/upload
+            - link "Dashboard" [ref=e305] [cursor=pointer]:
+              - /url: /app/dashboard
+            - link "Reports" [ref=e306] [cursor=pointer]:
+              - /url: /app/cases
+          - paragraph [ref=e307]: Built for a cybersecurity public-safety hackathon.
+  - generic [ref=e308]: Ready

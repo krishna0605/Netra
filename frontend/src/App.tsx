@@ -4,8 +4,6 @@ import {
   Activity,
   AlertTriangle,
   Bell,
-  CheckCircle2,
-  ClipboardCheck,
   Database,
   Download,
   Eye,
@@ -18,25 +16,18 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
-  Printer,
-  Radio,
   Search,
   Shield,
   Upload,
   UploadCloud,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { BrowserRouter as Router, Link, Navigate, NavLink, Route, Routes, useParams } from "react-router-dom";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { BrowserRouter as Router, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip as ChartTooltip,
   XAxis,
@@ -58,7 +49,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
   Sheet,
   SheetContent,
   SheetTitle,
@@ -75,7 +65,9 @@ import type {
   AccessLogRecord,
   AnomalyRecord,
   AttackClass,
+  CaseChartsRecord,
   CaseRecord,
+  CaseWorkspaceRecord,
   DashboardSummary,
   DecodedProtocolRecord,
   DetectionRuleMatch,
@@ -94,10 +86,12 @@ import type {
   CaptureScheduleRecord,
   CapacityRecord,
   OperationalEventRecord,
+  ReportRecord,
   SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
-import { cn, formatNumber } from "./lib/utils";
+import { refreshStoredSupabaseSession, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { cn, formatBytes, formatNumber } from "./lib/utils";
 
 type Dict = Record<string, string>;
 type ComplianceRecord = { item: string; status: string; detail: string };
@@ -114,6 +108,17 @@ const en: Dict = {
   analysis: "Analysis",
   investigation: "Investigation",
   governance: "Governance",
+  mainWorkflow: "Workflow",
+  advancedTools: "Advanced",
+  caseOverview: "Case Overview",
+  suspiciousActivity: "Suspicious Activity",
+  trafficEvidence: "Traffic Evidence",
+  evidenceReport: "Evidence Report",
+  systemTools: "Technical Status",
+  caseOverviewDesc: "A plain-language summary of the active investigation, risk, alerts, traffic volume, and next steps.",
+  suspiciousActivityDesc: "All confirmed and AI-assisted suspicious findings in one investigator-friendly review queue.",
+  trafficEvidenceDesc: "Packets, sessions, decoded protocols, and payload clues grouped as evidence tabs.",
+  evidenceReportDesc: "Generate legal-ready reports, exports, custody records, and evidence integrity summaries.",
   packetExplorer: "Packet Explorer",
   sessions: "Sessions",
   protocolDecoder: "Protocol Decoder",
@@ -259,8 +264,8 @@ const en: Dict = {
   dockerReady: "Docker ready",
   dockerBody: "Full stack is reading real PCAP analysis from the Django API.",
   searchPlaceholder: "Search alerts, IPs, hashes",
-  uploadTitle: "Evidence Intake",
-  uploadDesc: "Register case details, upload a PCAP or PCAPNG, and run real packet analysis.",
+  uploadTitle: "Start Investigation",
+  uploadDesc: "Upload network evidence and Netra will analyze packets, sessions, protocols, suspicious activity, and report-ready findings automatically.",
   caseNumber: "Case number",
   investigator: "Investigator",
   department: "Department",
@@ -480,8 +485,8 @@ const hi: Dict = {
   dockerReady: "Docker ready",
   dockerBody: "Full stack Django API से real PCAP analysis पढ़ रहा है।",
   searchPlaceholder: "Alerts, IPs, hashes खोजें",
-  uploadTitle: "साक्ष्य इनटेक",
-  uploadDesc: "Case details दर्ज करें, PCAP या PCAPNG upload करें, और real packet analysis चलाएं।",
+  uploadTitle: "जांच शुरू करें",
+  uploadDesc: "Network evidence upload करें और Netra packets, sessions, protocols, suspicious activity और report-ready findings automatically analyze करेगा।",
   caseNumber: "केस नंबर",
   investigator: "जांच अधिकारी",
   department: "विभाग",
@@ -701,8 +706,8 @@ const gu: Dict = {
   dockerReady: "Docker ready",
   dockerBody: "Full stack Django API માંથી real PCAP analysis વાંચે છે.",
   searchPlaceholder: "Alerts, IPs, hashes શોધો",
-  uploadTitle: "પુરાવા ઇનટેક",
-  uploadDesc: "Case details દાખલ કરો, PCAP અથવા PCAPNG upload કરો, અને real packet analysis ચલાવો.",
+  uploadTitle: "તપાસ શરૂ કરો",
+  uploadDesc: "Network evidence upload કરો અને Netra packets, sessions, protocols, suspicious activity અને report-ready findings automatically analyze કરશે.",
   caseNumber: "કેસ નંબર",
   investigator: "તપાસ અધિકારી",
   department: "વિભાગ",
@@ -845,18 +850,47 @@ type AppState = {
 const NetraContext = createContext<AppState | null>(null);
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
+const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
+  "Auto-detect": [".pcap", ".pcapng", ".log", ".txt", ".csv", ".json", ".ndjson", ".zip"],
+  PCAP: [".pcap", ".pcapng"],
+  "Firewall Logs": [".log", ".txt", ".csv", ".json", ".ndjson"],
+  "DNS Logs": [".log", ".txt", ".csv", ".json", ".ndjson"],
+  "TLS Metadata": [".log", ".txt", ".csv", ".json", ".ndjson"],
+  "Mixed Evidence": [".zip", ".json", ".csv"],
+};
+
+type EvidenceNormalizationPreview = {
+  code?: string;
+  selectedType: string;
+  detectedType: string;
+  normalizedType: string;
+  recommendedType: string;
+  validForSelectedType: boolean;
+  valid: boolean;
+  extensionAllowed?: boolean;
+  allowedExtensions?: string[];
+  confidence: number;
+  parser: string;
+  reason: string;
+  message: string;
+  signals: string[];
+  features?: { extension?: string; magicType?: string; lineFormat?: string | null; sampleSignals?: string[] };
+};
 
 function createDefaultIntakeForm(): EvidenceIntakeForm {
   const now = new Date();
   const suffix = now.toISOString().replace(/\D/g, "").slice(2, 12);
   return {
     caseNumber: `CYB-GJ-${suffix}`,
-    investigator: "Local Investigator",
-    department: "Gujarat Cyber Crime Cell",
-    evidenceType: "PCAP",
+    investigator: "",
+    department: "",
+    evidenceType: "Auto-detect",
     sourceLocation: "",
-    priority: "Standard",
+    priority: "",
     remarks: "",
+    flags: [],
+    linkedCaseIds: [],
     sourceIp: "",
     destinationIp: "",
     protocol: "",
@@ -867,6 +901,70 @@ function createDefaultIntakeForm(): EvidenceIntakeForm {
   };
 }
 
+function allowedExtensionsForType(type: EvidenceIntakeForm["evidenceType"]) {
+  return EVIDENCE_EXTENSIONS[type] ?? EVIDENCE_EXTENSIONS["Auto-detect"];
+}
+
+function acceptForEvidenceType(type: EvidenceIntakeForm["evidenceType"]) {
+  return allowedExtensionsForType(type).join(",");
+}
+
+function evidenceTypeHelper(type: EvidenceIntakeForm["evidenceType"]) {
+  return `Allowed for ${type}: ${allowedExtensionsForType(type).join(", ")}`;
+}
+
+function fileExtension(file: File) {
+  return file.name.includes(".") ? `.${file.name.split(".").pop()?.toLowerCase()}` : "";
+}
+
+function fileExtensionAllowed(file: File, type: EvidenceIntakeForm["evidenceType"]) {
+  return allowedExtensionsForType(type).includes(fileExtension(file));
+}
+
+function localNormalizationPreview(file: File, selectedType: EvidenceIntakeForm["evidenceType"]): EvidenceNormalizationPreview {
+  const extension = fileExtension(file);
+  const allowedExtensions = allowedExtensionsForType(selectedType);
+  const extensionAllowed = allowedExtensions.includes(extension);
+  if (!extensionAllowed) {
+    return {
+      code: "unsupported_evidence_extension",
+      selectedType,
+      detectedType: "Unknown",
+      normalizedType: "Unknown",
+      recommendedType: selectedType,
+      validForSelectedType: false,
+      valid: false,
+      extensionAllowed: false,
+      allowedExtensions,
+      confidence: 0,
+      parser: "none",
+      reason: `Unsupported file type ${extension || "(none)"}. ${evidenceTypeHelper(selectedType)}.`,
+      message: "Choose another file or change the evidence type.",
+      signals: extension ? [`unsupported-extension:${extension}`] : ["unsupported-extension:(none)"],
+      features: { extension, sampleSignals: extension ? [`unsupported-extension:${extension}`] : ["unsupported-extension:(none)"] },
+    };
+  }
+  const detectedType = extension === ".pcap" || extension === ".pcapng" ? "PCAP" : extension === ".zip" ? "Mixed Evidence" : extension === ".json" || extension === ".csv" || extension === ".log" || extension === ".txt" || extension === ".ndjson" ? "Unknown" : "Unknown";
+  const normalizedType = detectedType === "Unknown" && selectedType !== "Auto-detect" ? selectedType : detectedType;
+  const valid = selectedType === "Auto-detect" ? detectedType !== "Unknown" : detectedType !== "Unknown" && selectedType === detectedType;
+  return {
+    selectedType,
+    detectedType,
+    normalizedType,
+    recommendedType: normalizedType,
+    validForSelectedType: valid,
+    valid,
+    extensionAllowed: true,
+    allowedExtensions,
+    confidence: detectedType === "PCAP" ? 70 : 20,
+    parser: detectedType === "PCAP" ? "pcap" : "unknown",
+    reason: detectedType === "PCAP" ? "Local extension preview suggests PCAP. Backend will verify magic bytes before analysis." : "Backend normalization will inspect this file before analysis.",
+    message: detectedType === "PCAP" ? "Local extension preview suggests PCAP. Backend will verify magic bytes before analysis." : "Backend normalization will inspect this file before analysis.",
+    signals: extension ? [`extension:${extension}`] : [],
+    features: { extension, sampleSignals: extension ? [`extension:${extension}`] : [] },
+  };
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, { headers: netraHeaders() });
   if (!response.ok) throw new Error(`API ${path} failed with ${response.status}`);
@@ -874,62 +972,88 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 function netraHeaders(extra?: HeadersInit): HeadersInit {
-  return extra ?? {};
+  const token = window.localStorage.getItem("netra-supabase-access-token");
+  return {
+    ...(extra ?? {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
-function scoped(path: string, caseId: string | null) {
-  if (!caseId) return path;
-  const joiner = path.includes("?") ? "&" : "?";
-  return `${path}${joiner}caseId=${encodeURIComponent(caseId)}`;
+async function downloadApiFile(path: string, fallbackFilename: string) {
+  const normalizedPath = path.startsWith(`${API_BASE}/`)
+    ? path.slice(API_BASE.length)
+    : path.startsWith("/api/")
+      ? path.slice(4)
+      : path;
+  const response = await fetch(`${API_BASE}${normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`}`, { headers: netraHeaders() });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error ?? `Download failed with ${response.status}`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] || fallbackFilename;
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function graphEdgesToFlows(graphResponse: { edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }): NetworkFlow[] {
+  return (graphResponse.edges ?? []).map((edge, index) => ({
+    id: `flow-${index + 1}`,
+    source: edge.source,
+    target: edge.target,
+    protocol: edge.protocol,
+    bytes: edge.bytes ?? 0,
+    packets: edge.packets,
+    suspicious: Boolean(edge.alertIds?.length),
+    attackClass: edge.attackClass ?? ("Normal Baseline" as AttackClass),
+    alertIds: edge.alertIds ?? [],
+    risk: edge.risk ?? 0,
+  }));
 }
 
 async function loadAnalysisData(activeCaseId: string | null) {
-  const [summaryResponse, casesResponse, packetsResponse, sessionsResponse, alertsResponse, decoderResponse, payloadResponse, detectionResponse, anomaliesResponse, timelineResponse, protocolResponse, graphResponse, exportsResponse, accessResponse, complianceResponse] = await Promise.all([
-    apiGet<DashboardSummary & { evidence: EvidenceFile | null }>(scoped("/dashboard/summary", activeCaseId)),
-    apiGet<{ results: CaseRecord[] }>("/cases"),
-    apiGet<{ results: PacketRecord[] }>(scoped("/packets", activeCaseId)),
-    apiGet<{ results: SessionRecord[] }>(scoped("/sessions", activeCaseId)),
-    apiGet<{ results: AlertRecord[] }>(scoped("/alerts", activeCaseId)),
-    apiGet<{ results: DecodedProtocolRecord[]; zeek?: ZeekEvidence }>(scoped("/decoder/summary", activeCaseId)),
-    apiGet<{ results: PayloadFinding[] }>(scoped("/payloads", activeCaseId)),
-    apiGet<{ results: DetectionRuleMatch[] }>(scoped("/detection/matches", activeCaseId)),
-    apiGet<{ results: AnomalyRecord[] }>(scoped("/anomalies", activeCaseId)),
-    apiGet<{ results: { time: string; mb: number; alerts: number }[] }>(scoped("/dashboard/traffic-timeline", activeCaseId)),
-    apiGet<{ results: { name: string; value: number }[] }>(scoped("/dashboard/protocol-distribution", activeCaseId)),
-    apiGet<{ nodes: { id: string; label: string; risk: number }[]; edges: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; sessionId: string; alertIds?: string[] }[] }>(scoped("/graph", activeCaseId)),
-    apiGet<{ results: ExportRecord[] }>("/exports"),
-    apiGet<{ results: AccessLogRecord[] }>("/audit/access-logs"),
-    apiGet<{ results: ComplianceRecord[] }>("/compliance/checklist"),
-  ]);
+  const casesResponse = await apiGet<{ results: CaseRecord[] }>("/cases?limit=100");
+  const selectedCaseId = (activeCaseId && casesResponse.results.some((record) => record.id === activeCaseId) ? activeCaseId : casesResponse.results[0]?.id) ?? null;
+  const workspaceResponse = selectedCaseId ? await apiGet<CaseWorkspaceRecord>(`/cases/${selectedCaseId}/workspace`) : null;
+  const workspace = workspaceResponse?.workspace;
+  const summaryResponse = workspace?.summary ?? {
+    packets: 0,
+    sessions: 0,
+    protocolsDecoded: 0,
+    payloadFindings: 0,
+    alerts: 0,
+    anomalies: 0,
+    topAttackClass: "Normal Baseline" as AttackClass,
+    riskLevel: "low" as const,
+    toolStatus: {},
+  };
   return {
     cases: casesResponse.results,
-    evidence: summaryResponse.evidence,
+    selectedCaseId,
+    evidence: workspace?.evidence ?? null,
     summary: summaryResponse,
-    zeek: decoderResponse.zeek ?? summaryResponse.zeek ?? null,
-    packets: packetsResponse.results,
-    sessions: sessionsResponse.results,
-    alerts: alertsResponse.results,
-    decodedProtocols: decoderResponse.results,
-    payloadFindings: payloadResponse.results,
-    detectionMatches: detectionResponse.results,
-    anomalies: anomaliesResponse.results,
-    trafficTimelineData: timelineResponse.results,
-    protocolChartData: protocolResponse.results,
-    exports: exportsResponse.results,
-    accessLogs: accessResponse.results,
-    complianceRecords: complianceResponse.results,
-    networkFlows: graphResponse.edges.map((edge, index) => ({
-      id: `flow-${index + 1}`,
-      source: edge.source,
-      target: edge.target,
-      protocol: edge.protocol,
-      bytes: edge.bytes ?? 0,
-      packets: edge.packets,
-      suspicious: Boolean(edge.alertIds?.length),
-      attackClass: edge.attackClass ?? ("Normal Baseline" as AttackClass),
-      alertIds: edge.alertIds ?? [],
-      risk: edge.risk ?? 0,
-    })),
+    zeek: summaryResponse.zeek ?? null,
+    packets: workspace?.trafficEvidence.packetsPreview ?? [] as PacketRecord[],
+    sessions: workspace?.trafficEvidence.sessionsPreview ?? [] as SessionRecord[],
+    alerts: workspace?.suspiciousActivity.alerts ?? [] as AlertRecord[],
+    decodedProtocols: workspace?.trafficEvidence.protocols ?? [] as DecodedProtocolRecord[],
+    payloadFindings: workspace?.trafficEvidence.payloadClues ?? [] as PayloadFinding[],
+    detectionMatches: [] as DetectionRuleMatch[],
+    anomalies: workspace?.suspiciousActivity.anomalies ?? [] as AnomalyRecord[],
+    trafficTimelineData: (workspace?.charts.timeline ?? []).map((row) => ({ time: row.time, mb: row.mb ?? 0, alerts: row.alerts ?? 0 })),
+    protocolChartData: workspace?.charts.protocols ?? [] as { name: string; value: number }[],
+    exports: [] as ExportRecord[],
+    accessLogs: [] as AccessLogRecord[],
+    complianceRecords: [] as ComplianceRecord[],
+    networkFlows: workspace ? graphEdgesToFlows(workspace.trafficEvidence.communicationMap) : [] as NetworkFlow[],
   };
 }
 
@@ -969,6 +1093,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
   const [trafficTimelineDataState, setTrafficTimelineDataState] = useState<{ time: string; mb: number; alerts: number }[]>([]);
   const [zeekState, setZeekState] = useState<ZeekEvidence | null>(null);
   const [activeCaseId, setActiveCaseIdState] = useState<string | null>(() => window.localStorage.getItem("netra-active-case"));
+  const refreshTimerRef = useRef<number | null>(null);
   const [language, setLanguage] = useState<Language>(() => {
     const stored = window.localStorage.getItem("netra-language");
     return stored === "Hindi" || stored === "Gujarati" || stored === "English" ? stored : "English";
@@ -1003,17 +1128,55 @@ function NetraProvider({ children }: { children: ReactNode }) {
     setSummaryState(data.summary);
     setTrafficTimelineDataState(data.trafficTimelineData);
     setZeekState(data.zeek);
-    if (!activeCaseId && data.cases[0]) {
-      setActiveCaseId(data.cases[0].id);
-    }
-    if (data.cases[0]) {
-      setIntakeForm((current) => ({ ...current, caseNumber: data.cases[0].id, investigator: data.cases[0].investigator }));
+    if (data.selectedCaseId && data.selectedCaseId !== activeCaseId) {
+      setActiveCaseId(data.selectedCaseId);
     }
   }, [activeCaseId, setActiveCaseId]);
 
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = window.setTimeout(() => {
+      reloadAnalysis().catch(() => undefined);
+    }, 1500);
+  }, [reloadAnalysis]);
+
   useEffect(() => {
+    const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
+    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !window.localStorage.getItem("netra-supabase-access-token"))) return;
     reloadAnalysis().catch(() => undefined);
   }, [reloadAnalysis]);
+
+  useEffect(() => {
+    if (!SUPABASE_AUTH_ENABLED || !supabase) return undefined;
+    const client = supabase;
+    refreshStoredSupabaseSession().catch(() => undefined);
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        reloadAnalysis().catch(() => undefined);
+      } else {
+        window.localStorage.removeItem("netra-supabase-access-token");
+      }
+    });
+    if (!SUPABASE_REALTIME_ENABLED) {
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+    const channel = client
+      .channel("netra-operational-refresh")
+      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_operationalevent" }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_processingjob" }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_alert" }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_capturejob" }, scheduleRefresh)
+      .subscribe();
+    return () => {
+      subscription.unsubscribe();
+      client.removeChannel(channel);
+    };
+  }, [reloadAnalysis, scheduleRefresh]);
 
   const addCaseNote = useCallback(
     (caseId: string, note: string) => {
@@ -1094,13 +1257,159 @@ function App() {
             <Toaster position="top-right" />
             <Routes>
               <Route path="/" element={<LandingPage />} />
-              <Route path="/demo" element={<Navigate to="/app/upload" replace />} />
-              <Route path="/app/*" element={<AppShell />} />
+              <Route path="/demo" element={<Navigate to="/login" replace state={{ from: "/app/upload" }} />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/app/login" element={<Navigate to="/login" replace />} />
+              <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
             </Routes>
           </Router>
         </div>
       </NetraProvider>
     </TooltipProvider>
+  );
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const [status, setStatus] = useState<"checking" | "signed-in" | "signed-out">("checking");
+
+  useEffect(() => {
+    if (!SUPABASE_AUTH_ENABLED || !supabase) {
+      setStatus("signed-out");
+      return undefined;
+    }
+    let mounted = true;
+    refreshStoredSupabaseSession()
+      .then((session) => {
+        if (!mounted) return;
+        setStatus(session?.access_token ? "signed-in" : "signed-out");
+      })
+      .catch(() => {
+        if (mounted) setStatus("signed-out");
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        setStatus("signed-in");
+      } else {
+        window.localStorage.removeItem("netra-supabase-access-token");
+        setStatus("signed-out");
+      }
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  if (status === "checking") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4">
+        <section className="w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+          <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
+          <h1 className="mt-2 text-2xl font-bold text-strong">Checking session</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">Verifying your Supabase sign-in before opening the investigation console.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (status === "signed-out") {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return <>{children}</>;
+}
+
+function LoginPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [hasSession, setHasSession] = useState(false);
+  const from = typeof location.state === "object" && location.state && "from" in location.state ? String(location.state.from) : "/app/upload";
+
+  useEffect(() => {
+    if (!SUPABASE_AUTH_ENABLED || !supabase) {
+      setCheckingSession(false);
+      return undefined;
+    }
+    let mounted = true;
+    refreshStoredSupabaseSession().then((session) => {
+      if (!mounted) return;
+      setHasSession(Boolean(session?.access_token));
+      setCheckingSession(false);
+    }).catch(() => {
+      if (!mounted) return;
+      setHasSession(false);
+      setCheckingSession(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function signIn(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (!supabase) {
+      toast.error("Supabase Auth is not configured for this build.");
+      return;
+    }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    if (data.session?.access_token) window.localStorage.setItem("netra-supabase-access-token", data.session.access_token);
+    toast.success("Signed in to Supabase");
+    navigate(from, { replace: true });
+  }
+
+  async function signOut() {
+    if (supabase) await supabase.auth.signOut();
+    window.localStorage.removeItem("netra-supabase-access-token");
+    setHasSession(false);
+    toast.success("Signed out");
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4">
+      <section className="w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+        <div className="mb-6">
+          <p className="text-sm font-semibold text-accent">Netra Supabase</p>
+          <h1 className="mt-2 text-2xl font-bold text-strong">Sign in</h1>
+          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts are created in the Supabase project by an administrator.</p>
+        </div>
+        {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.</Alert>}
+        {checkingSession && <Alert>Checking whether this browser already has an active Netra session.</Alert>}
+        {hasSession && (
+          <div className="mt-4 grid gap-3">
+            <Alert>You are already signed in on this browser. Continue to the investigation console or sign out to use another officer account.</Alert>
+            <Button type="button" onClick={() => navigate(from, { replace: true })}>Continue to investigation console</Button>
+            <Button type="button" variant="secondary" onClick={signOut}>Sign out</Button>
+          </div>
+        )}
+        {!hasSession && <form className="mt-4 grid gap-3" onSubmit={signIn}>
+          <label className="grid gap-1 text-sm font-semibold text-strong">
+            Email
+            <Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="officer@example.com" type="email" autoComplete="email" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-strong">
+            Password
+            <Input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" autoComplete="current-password" />
+          </label>
+          <Button type="submit" disabled={loading || !email || !password}>
+            {loading ? "Signing in..." : "Sign in"}
+          </Button>
+        </form>}
+      </section>
+    </main>
   );
 }
 
@@ -1141,7 +1450,7 @@ function LandingPage() {
               <p className="max-w-2xl text-base leading-7 text-muted">{t("landingBody")}</p>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Button asChild size="lg">
-                  <Link to="/app/upload">
+                  <Link to="/login" state={{ from: "/app/upload" }}>
                     <Eye data-icon="inline-start" />
                     {t("viewDemo")}
                   </Link>
@@ -1207,13 +1516,13 @@ function LandingHeader() {
         <nav className="hidden items-center gap-7 text-sm font-semibold text-muted md:flex">
           <a href="#workflow">{t("workflow")}</a>
           <a href="#capabilities">{t("capabilities")}</a>
-          <Link to="/app/upload">{t("evidenceIntake")}</Link>
-          <Link to="/app/cases">{t("reports")}</Link>
+          <Link to="/login" state={{ from: "/app/upload" }}>{t("evidenceIntake")}</Link>
+          <Link to="/login" state={{ from: "/app/reports" }}>{t("reports")}</Link>
         </nav>
         <div className="flex items-center gap-2">
           <LanguageControl />
           <Button asChild>
-            <Link to="/app/upload">{t("viewDemo")}</Link>
+            <Link to="/login" state={{ from: "/app/upload" }}>{t("viewDemo")}</Link>
           </Button>
         </div>
       </div>
@@ -1462,7 +1771,12 @@ function AppShell() {
           <TopBar />
           <div className="p-4 sm:p-6">
             <Routes>
+              <Route index element={<Navigate to="upload" replace />} />
               <Route path="upload" element={<UploadPage />} />
+              <Route path="overview" element={<DashboardPage />} />
+              <Route path="activity" element={<SuspiciousActivityPage />} />
+              <Route path="evidence" element={<TrafficEvidencePage />} />
+              <Route path="report" element={<Navigate to="/app/reports" replace />} />
               <Route path="packets" element={<PacketExplorerPage />} />
               <Route path="sessions" element={<SessionsPage />} />
               <Route path="dashboard" element={<DashboardPage />} />
@@ -1473,6 +1787,7 @@ function AppShell() {
               <Route path="graph" element={<GraphPage />} />
               <Route path="cases" element={<CasesPage />} />
               <Route path="cases/:caseId" element={<CaseDetailPage />} />
+              <Route path="reports" element={<EvidenceReportPage />} />
               <Route path="reports/:caseId" element={<ReportPage />} />
               <Route path="exports" element={<ExportCenterPage />} />
               <Route path="integrations" element={<IntegrationsPage />} />
@@ -1490,12 +1805,24 @@ function AppShell() {
 }
 
 function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
-  const { activeCaseId, t } = useNetra();
+  const { t } = useNetra();
   const navGroups = [
-    { label: t("capture"), items: [[Upload, t("evidenceIntake"), "/app/upload"], [Database, t("packetExplorer"), "/app/packets"], [History, t("sessions"), "/app/sessions"]] },
-    { label: t("analysis"), items: [[Activity, t("dashboard"), "/app/dashboard"], [Fingerprint, t("protocolDecoder"), "/app/decoder"], [Eye, t("payloadInspection"), "/app/payloads"], [AlertTriangle, t("threatDetection"), "/app/detection"], [Radio, t("aiAnomaly"), "/app/ai-anomaly"], [Network, t("networkGraph"), "/app/graph"]] },
-    { label: t("investigation"), items: [[FileSearch, t("cases"), "/app/cases"], [FileText, t("reports"), `/app/reports/${activeCaseId ?? "new"}`], [Download, t("exportCenter"), "/app/exports"]] },
-    { label: t("governance"), items: [[Radio, "Sensor Fleet", "/app/sensors"], [History, "Schedules", "/app/schedules"], [Database, "Retention", "/app/retention"], [Database, t("integrations"), "/app/integrations"], [ClipboardCheck, t("compliance"), "/app/compliance"], [Activity, "System", "/app/system"]] },
+    {
+      label: t("mainWorkflow"),
+      items: [
+        [Upload, "Start Investigation", "/app/upload"],
+        [FileSearch, t("cases"), "/app/cases"],
+        [FileText, t("evidenceReport"), "/app/reports"],
+        [AlertTriangle, t("suspiciousActivity"), "/app/activity"],
+        [Database, t("trafficEvidence"), "/app/evidence"],
+      ],
+    },
+    {
+      label: t("advancedTools"),
+      items: [
+        [Activity, t("systemTools"), "/app/system"],
+      ],
+    },
   ] as const;
   return (
     <>
@@ -1545,21 +1872,12 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
           </div>
         ))}
       </nav>
-      {!collapsed && (
-        <div className="mt-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-strong">
-            <Database className="size-4 text-accent" />
-            {t("dockerReady")}
-          </div>
-          <p className="text-xs leading-5 text-muted">{t("dockerBody")}</p>
-        </div>
-      )}
     </>
   );
 }
 
 function TopBar() {
-  const { t, activeCaseId } = useNetra();
+  const { t } = useNetra();
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
     <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[rgba(13,13,13,0.82)] px-4 py-3 backdrop-blur-xl sm:px-6">
@@ -1581,7 +1899,7 @@ function TopBar() {
       <div className="flex items-center gap-3">
         <LanguageControl />
         <Button asChild>
-          <Link to={`/app/reports/${activeCaseId ?? "new"}`}>{t("generateReport")}</Link>
+          <Link to="/app/reports">{t("generateReport")}</Link>
         </Button>
       </div>
     </header>
@@ -1590,17 +1908,40 @@ function TopBar() {
 
 function UploadPage() {
   const { t, alertRecords, decodedProtocols, evidence, intakeForm, packets, payloadFindings, reloadAnalysis, sessions, setActiveCaseId, setIntakeForm, summary } = useNetra();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<EvidenceIntakeForm>(intakeForm);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [replayFile, setReplayFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
   const [sensorId, setSensorId] = useState("");
   const [interfaceName, setInterfaceName] = useState("");
   const [captureJob, setCaptureJob] = useState<CaptureJobRecord | null>(null);
   const [events, setEvents] = useState<OperationalEventRecord[]>([]);
   const [uploadResult, setUploadResult] = useState<{ topClass?: string; risk?: string; hash?: string; encryptedHash?: string; keyId?: string; jobId?: string; steps?: { name: string; status: string }[] } | null>(null);
+  const [normalization, setNormalization] = useState<EvidenceNormalizationPreview | null>(null);
   const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
+  const selectedFileExtensionAllowed = selectedFile ? fileExtensionAllowed(selectedFile, draft.evidenceType) : true;
+  const effectiveExtensionAllowed = normalization ? normalization.extensionAllowed !== false : selectedFileExtensionAllowed;
+  const normalizationCode = normalization?.code ?? "";
+  const normalizationBlocked = Boolean(
+    selectedFile && (
+      !effectiveExtensionAllowed ||
+      normalization?.extensionAllowed === false ||
+      normalization?.validForSelectedType === false ||
+      (normalization?.validForSelectedType === true && normalization.normalizedType !== "PCAP") ||
+      normalizationCode === "evidence_type_not_analyzable"
+    )
+  );
+  const normalizationTone: "normal" | "danger" | "success" = selectedFile && normalizationBlocked ? "danger" : selectedFile && normalization?.validForSelectedType ? "success" : "normal";
+  const normalizationLabel =
+    !selectedFile ? "" :
+    !normalization ? "Checking" :
+    normalizationCode === "unsupported_evidence_extension" || normalization.extensionAllowed === false ? "Unsupported file type" :
+    normalizationCode === "evidence_type_not_analyzable" || (normalization.validForSelectedType && normalization.normalizedType !== "PCAP") ? "Parser not enabled" :
+    normalization.validForSelectedType ? "Verified" :
+    "Mismatch";
 
   useEffect(() => {
     apiGet<{ results: SensorRecord[] }>("/sensors")
@@ -1668,9 +2009,37 @@ function UploadPage() {
   function update<K extends keyof EvidenceIntakeForm>(key: K, value: EvidenceIntakeForm[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setNormalization(null);
+      return;
+    }
+    let cancelled = false;
+    const form = new FormData();
+    form.append("file", selectedFile);
+    form.append("evidenceType", draft.evidenceType);
+    fetch(`${API_BASE}/evidence/normalize-preview`, { method: "POST", headers: netraHeaders(), body: form })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Evidence normalization preview failed");
+        if (!cancelled) setNormalization(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setNormalization(localNormalizationPreview(selectedFile, draft.evidenceType));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFile, draft.evidenceType]);
+
   async function startProcessing() {
     if (!selectedFile) {
-      toast.error("Choose a PCAP file first.");
+      toast.error("Choose an evidence file first.");
+      return;
+    }
+    if (normalizationBlocked) {
+      toast.error(normalization?.reason ?? "Fix the evidence type or choose a supported file before analysis.");
       return;
     }
     setIntakeForm(draft);
@@ -1678,6 +2047,7 @@ function UploadPage() {
     const form = new FormData();
     form.append("caseId", draft.caseNumber);
     form.append("file", selectedFile);
+    form.append("evidenceType", draft.evidenceType);
     form.append("investigator", draft.investigator);
     form.append("department", draft.department);
     form.append("sourceLocation", draft.sourceLocation);
@@ -1690,20 +2060,28 @@ function UploadPage() {
     form.append("durationSeconds", draft.durationSeconds);
     form.append("packetLimit", draft.packetLimit);
     form.append("bpfFilter", draft.bpfFilter);
+    form.append("flags", JSON.stringify(draft.flags ?? []));
     try {
       const response = await fetch(`${API_BASE}/evidence/upload`, { method: "POST", headers: netraHeaders(), body: form });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Upload failed");
+      if (!response.ok) {
+        if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap" || payload.code === "evidence_type_not_analyzable") {
+          setNormalization(payload);
+        }
+        throw new Error(payload.reason ?? payload.error ?? "Upload failed");
+      }
       setActiveCaseId(payload.caseId);
       if (payload.status === "queued") {
         setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
         toast.success("Evidence encrypted and queued for async worker analysis.");
+        navigate("/app/overview");
         void followUploadJob(payload.jobId);
         return;
       }
       await reloadAnalysis();
       setUploadResult({ topClass: payload.detectedAttackClasses?.[0], risk: payload.riskLevel, hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
       toast.success(t("evidenceToast"));
+      navigate("/app/overview");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "PCAP analysis failed");
     } finally {
@@ -1795,19 +2173,123 @@ function UploadPage() {
 
   return (
     <PageFrame title={t("uploadTitle")} description={t("uploadDesc")}>
-      <div className="surface rounded-[1.5rem] p-5">
-        <Alert>Choose a concrete evidence action. Netra creates investigation rows only from an uploaded file, a replayed feed, or bounded traffic captured by a connected sensor.</Alert>
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          <div>
-            <h3 className="font-bold text-strong">Capture bounds</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <Field label="Duration limit (seconds)" value={draft.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
-              <Field label="Packet limit" value={draft.packetLimit} onChange={(value) => update("packetLimit", value)} />
-              <Field label="BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} />
+      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="surface rounded-[1.5rem] p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <Badge>Primary action</Badge>
+              <h2 className="mt-3 text-2xl font-black text-strong">Upload PCAP Evidence</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Choose a real PCAP or PCAPNG file. Netra will validate, hash, encrypt, analyze, and prepare the investigation automatically.</p>
+            </div>
+            <UploadCloud className="size-9 text-accent" aria-hidden="true" />
+          </div>
+          <input ref={fileInputRef} className="hidden" type="file" accept={acceptForEvidenceType(draft.evidenceType)} onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+          <div className="mt-6 rounded-[1.25rem] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-5">
+            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
+              <div>
+                <div className="text-sm font-bold text-strong">{selectedFile?.name ?? "No file selected"}</div>
+                <div className="mt-1 text-xs text-muted">{selectedFile ? `${formatBytes(selectedFile.size)} | ${fileExtension(selectedFile) || "no extension"}` : evidenceTypeHelper(draft.evidenceType)}</div>
+              </div>
+              <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="size-4" />
+                Choose file
+              </Button>
+            </div>
+            {selectedFile && !effectiveExtensionAllowed && (
+              <div className="mt-4 rounded-xl border border-[#7f2f23] bg-[#2b1410] px-4 py-3 text-sm text-[#ffd0c4]">
+                Unsupported file type {fileExtension(selectedFile) || "(none)"}. {evidenceTypeHelper(draft.evidenceType)}.
+              </div>
+            )}
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <Button onClick={startProcessing} disabled={processing || !selectedFile || normalizationBlocked}>
+                {processing ? "Analyzing evidence..." : "Analyze Evidence"}
+              </Button>
+              {selectedFile && <Badge variant={normalizationBlocked ? "destructive" : "secondary"}>{normalizationBlocked ? normalizationLabel : "Ready to analyze"}</Badge>}
             </div>
           </div>
+          {selectedFile && (
+            <div
+              className={cn(
+                "mt-5 rounded-[1.25rem] border p-4 transition-colors",
+                normalizationTone === "danger" && "border-[#7f2f23] bg-[#2b1410]",
+                normalizationTone === "success" && "border-[#2f6b4f] bg-[#102017]",
+                normalizationTone === "normal" && "border-[var(--border)] bg-[var(--surface-muted)]",
+              )}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-strong">Evidence Normalization</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted">Netra checks whether the selected evidence type matches the file before storage and ML analysis.</p>
+                </div>
+                <Badge variant={normalizationTone === "danger" ? "destructive" : "secondary"}>{normalizationLabel}</Badge>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <NormalizationMetric label="Selected type" value={normalization?.selectedType ?? draft.evidenceType} />
+                <NormalizationMetric label="Detected type" value={normalization?.detectedType ?? "Checking"} />
+                <NormalizationMetric label="Allowed extensions" value={(normalization?.allowedExtensions?.length ? normalization.allowedExtensions : allowedExtensionsForType(draft.evidenceType)).join(", ")} compact />
+                <NormalizationMetric label="Parser / confidence" value={normalization ? `${normalization.parser} | ${normalization.confidence}%` : "-"} />
+              </div>
+              <p className="mt-3 text-sm leading-6 text-muted">{normalization?.reason ?? "Reading file signature and sample metadata..."}</p>
+              {normalization && !normalization.validForSelectedType && normalization.detectedType !== "Unknown" && (
+                <Button className="mt-3" type="button" variant="secondary" onClick={() => update("evidenceType", normalization.recommendedType as EvidenceIntakeForm["evidenceType"])}>
+                  Use detected type: {normalization.recommendedType}
+                </Button>
+              )}
+            </div>
+          )}
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {[[t("packetsParsed"), formatNumber(packets.length)], [t("sessionsReconstructed"), sessions.length], [t("protocolsDecoded"), decodedProtocols.length], [t("payloadFindings"), payloadFindings.length], [t("alertsGenerated"), alertRecords.length]].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+                <div className="text-xs uppercase text-muted">{label}</div>
+                <div className="mt-1 text-xl font-black text-strong">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="surface rounded-[1.5rem] p-5">
+          <h2 className="text-xl font-black text-strong">Case Details</h2>
+          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are already prepared for local investigation.</p>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <Field label={t("caseNumber")} value={draft.caseNumber} onChange={(value) => update("caseNumber", value)} disabled />
+            <Field label={t("investigator")} value={draft.investigator} onChange={(value) => update("investigator", value)} />
+            <Field label={t("department")} value={draft.department} onChange={(value) => update("department", value)} />
+            <Field label={t("sourceLocation")} value={draft.sourceLocation} onChange={(value) => update("sourceLocation", value)} />
+            <SelectField label={t("priority")} value={draft.priority || "Select priority"} values={["Select priority", "Standard", "Urgent", "Critical"]} onChange={(value) => update("priority", value === "Select priority" ? "" : value as EvidenceIntakeForm["priority"])} />
+            <SelectField label={t("evidenceType")} value={draft.evidenceType} values={EVIDENCE_TYPE_OPTIONS} onChange={(value) => update("evidenceType", value as EvidenceIntakeForm["evidenceType"])} helper={evidenceTypeHelper(draft.evidenceType)} tone={normalizationTone} />
+            <label className="flex flex-col gap-2 md:col-span-2">
+              <span className="text-sm font-semibold text-strong">{t("remarks")}</span>
+              <Textarea value={draft.remarks} onChange={(event) => update("remarks", event.target.value)} placeholder="Optional notes for the report" />
+            </label>
+            <div className="md:col-span-2">
+              <div className="text-sm font-semibold text-strong">Case flags</div>
+              <p className="mt-1 text-xs leading-5 text-muted">Optional tags to help connect related investigations later.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {["urgent", "ransomware", "insider-threat", "exfiltration", "related-case", "needs-review"].map((flag) => {
+                  const active = (draft.flags ?? []).includes(flag);
+                  return (
+                    <Button
+                      key={flag}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "secondary"}
+                      onClick={() => update("flags", active ? (draft.flags ?? []).filter((item) => item !== flag) : [...(draft.flags ?? []), flag])}
+                    >
+                      {flag}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <details className="surface rounded-[1.5rem] p-5">
+        <summary className="cursor-pointer text-lg font-black text-strong">Advanced Options</summary>
+        <p className="mt-2 text-sm leading-6 text-muted">Optional filters for investigators who already know which source, destination, protocol, or port matters. Leave these blank for normal analysis.</p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <div>
-            <h3 className="font-bold text-strong">{t("preAnalysisFilters")}</h3>
+            <h3 className="font-bold text-strong">Analysis filters</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <Field label={t("sourceIp")} value={draft.sourceIp} onChange={(value) => update("sourceIp", value)} />
               <Field label={t("destinationIp")} value={draft.destinationIp} onChange={(value) => update("destinationIp", value)} />
@@ -1815,68 +2297,53 @@ function UploadPage() {
               <Field label={t("port")} value={draft.port} onChange={(value) => update("port", value)} />
             </div>
           </div>
-        </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {[[t("packetsParsed"), formatNumber(packets.length)], [t("sessionsReconstructed"), sessions.length], [t("protocolsDecoded"), decodedProtocols.length], [t("payloadFindings"), payloadFindings.length], [t("alertsGenerated"), alertRecords.length]].map(([label, value]) => (
-            <div key={label} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3">
-              <div className="text-xs uppercase text-muted">{label}</div>
-              <div className="mt-1 text-xl font-black text-strong">{value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-        <div className="surface rounded-[1.5rem] p-5">
-          <h2 className="text-xl font-black text-strong">{t("stepRegister")}</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <Field label={t("caseNumber")} value={draft.caseNumber} onChange={(value) => update("caseNumber", value)} disabled />
-            <Field label={t("investigator")} value={draft.investigator} onChange={(value) => update("investigator", value)} />
-            <Field label={t("department")} value={draft.department} onChange={(value) => update("department", value)} />
-            <Field label={t("sourceLocation")} value={draft.sourceLocation} onChange={(value) => update("sourceLocation", value)} />
-            <SelectField label={t("evidenceType")} value={draft.evidenceType} values={["PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"]} onChange={(value) => update("evidenceType", value as EvidenceIntakeForm["evidenceType"])} />
-            <SelectField label={t("priority")} value={draft.priority} values={["Standard", "Urgent", "Critical"]} onChange={(value) => update("priority", value as EvidenceIntakeForm["priority"])} />
-            <label className="flex flex-col gap-2 md:col-span-2">
-              <span className="text-sm font-semibold text-strong">{t("remarks")}</span>
-              <Textarea value={draft.remarks} onChange={(event) => update("remarks", event.target.value)} />
-            </label>
-          </div>
-        </div>
-        <div className="grid gap-5">
-          <div className="surface-solid rounded-[1.5rem] p-5">
-            <h2 className="text-xl font-black text-strong">Import existing PCAP</h2>
-            <p className="mt-1 text-sm text-muted">Validate, hash, encrypt, parse, classify, and index one historical evidence file.</p>
-            <div className="mt-5 flex flex-col gap-3 rounded-[1.25rem] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-5">
-              <Input type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
-              <div className="font-bold text-strong">{selectedFile?.name ?? "Choose a real PCAP or PCAPNG file"}</div>
-              <Button className="w-fit" onClick={startProcessing} disabled={processing || !selectedFile}>{processing ? "Analyzing..." : "Upload and analyze"}</Button>
+          <div>
+            <h3 className="font-bold text-strong">Capture bounds</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <Field label="Duration limit (seconds)" value={draft.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
+              <Field label="Packet limit" value={draft.packetLimit} onChange={(value) => update("packetLimit", value)} />
+              <div className="md:col-span-2">
+                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} />
+                <p className="mt-2 text-xs text-muted">Use only if you know packet filter syntax. Most investigations should leave this blank.</p>
+              </div>
             </div>
           </div>
-          <div className="surface-solid rounded-[1.5rem] p-5">
-            <h2 className="text-xl font-black text-strong">Capture from sensor</h2>
-            <p className="mt-1 text-sm text-muted">Run a bounded native `dumpcap` capture from a sensor interface. Start the local sensor agent first.</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <SelectField label="Sensor" value={sensorId || "none"} values={sensors.length ? sensors.map((sensor) => sensor.id) : ["none"]} onChange={(value) => {
-                setSensorId(value === "none" ? "" : value);
-                const sensor = sensors.find((item) => item.id === value);
-                setInterfaceName(sensor?.interfaces[0]?.name ?? "");
-              }} />
-              <SelectField label="Interface" value={interfaceName || "none"} values={selectedSensor?.interfaces.length ? selectedSensor.interfaces.map((item) => item.name) : ["none"]} onChange={(value) => setInterfaceName(value === "none" ? "" : value)} />
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button onClick={startCapture} disabled={!sensorId || !interfaceName}>Start bounded capture</Button>
-              <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{selectedSensor ? `${selectedSensor.name}: ${selectedSensor.status}` : "No sensor connected"}</Badge>
-            </div>
+        </div>
+      </details>
+
+      <details className="surface rounded-[1.5rem] p-5">
+        <summary className="cursor-pointer text-lg font-black text-strong">Advanced Capture And Demo Tools</summary>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+            <h2 className="text-lg font-black text-strong">Capture from sensor</h2>
+            <p className="mt-1 text-sm text-muted">{sensors.length ? "Run a bounded native capture from a connected sensor interface." : "No capture sensor connected. Start the native sensor agent to enable live capture."}</p>
+            {sensors.length > 0 && (
+              <>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <SelectField label="Sensor" value={sensorId || "none"} values={sensors.map((sensor) => sensor.id)} onChange={(value) => {
+                    setSensorId(value);
+                    const sensor = sensors.find((item) => item.id === value);
+                    setInterfaceName(sensor?.interfaces[0]?.name ?? "");
+                  }} />
+                  <SelectField label="Interface" value={interfaceName || "none"} values={selectedSensor?.interfaces.length ? selectedSensor.interfaces.map((item) => item.name) : ["none"]} onChange={(value) => setInterfaceName(value === "none" ? "" : value)} />
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <Button onClick={startCapture} disabled={!sensorId || !interfaceName}>Start bounded capture</Button>
+                  <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{selectedSensor ? `${selectedSensor.name}: ${selectedSensor.status}` : "No sensor selected"}</Badge>
+                </div>
+              </>
+            )}
           </div>
-          <div className="surface-solid rounded-[1.5rem] p-5">
-            <h2 className="text-xl font-black text-strong">Replay PCAP feed</h2>
-            <p className="mt-1 text-sm text-muted">Stream an explicitly selected PCAP through the same chunk ingestion and finalization path used by native sensors.</p>
+          <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+            <h2 className="text-lg font-black text-strong">Replay PCAP for demo/testing</h2>
+            <p className="mt-1 text-sm text-muted">Replay is not live capture. It streams a selected PCAP through the demo ingestion path for validation.</p>
             <div className="mt-4 flex flex-col gap-3">
               <Input type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" onChange={(event) => setReplayFile(event.target.files?.[0] ?? null)} />
               <Button className="w-fit" onClick={startReplay} disabled={!replayFile}>Start replay feed</Button>
             </div>
           </div>
         </div>
-      </div>
+      </details>
       {captureJob && (
         <div className="surface rounded-[1.5rem] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1931,15 +2398,19 @@ function UploadPage() {
 }
 
 function DashboardPage() {
-  const { t, alertRecords, caseRecords, decodedProtocols, packets, protocolChartData, sessions, trafficTimelineData, intakeForm, summary, zeek, activeCaseId, setActiveCaseId } = useNetra();
-  const [severity, setSeverity] = useState("all");
-  const [attackClass, setAttackClass] = useState("all");
-  const filteredAlerts = alertRecords.filter((alert) => (severity === "all" || alert.severity === severity) && (attackClass === "all" || alert.attackClass === attackClass));
-  const timeline = trafficTimelineData;
-  const classificationData = Object.entries(alertRecords.reduce<Record<string, number>>((acc, alert) => {
-    acc[alert.attackClass] = (acc[alert.attackClass] ?? 0) + 1;
-    return acc;
-  }, {})).map(([name, value]) => ({ name, value }));
+  const { t, alertRecords, anomalies, caseRecords, decodedProtocols, evidence, networkFlows, packets, sessions, summary, zeek, activeCaseId, setActiveCaseId } = useNetra();
+  const currentCase = caseRecords.find((record) => record.id === activeCaseId) ?? caseRecords[0];
+  const highRiskAlerts = alertRecords.filter((alert) => ["critical", "high"].includes(alert.severity));
+  const topAlert = highRiskAlerts[0] ?? alertRecords[0] ?? null;
+  const suspiciousFlows = networkFlows.filter((flow) => flow.suspicious || (flow.risk ?? 0) >= 60);
+  const evidenceVerified = evidence?.status === "verified" || Boolean(evidence?.manifestHash);
+  const findingText = topAlert?.explanation
+    ?? (alertRecords.length
+      ? "Netra found suspicious network behavior and linked it to packet, session, and protocol evidence."
+      : "No high-risk behavior has been found in the selected evidence so far.");
+  const nextStep = topAlert
+    ? "Review the suspicious activity details, then generate the evidence report when the finding is ready for case review."
+    : "Open the traffic evidence tabs to inspect the capture, or generate a baseline report if this is a normal sample.";
   if (caseRecords.length === 0) {
     return (
       <PageFrame title={t("dashboardTitle")} description={t("dashboardDesc")}>
@@ -1956,98 +2427,74 @@ function DashboardPage() {
   }
   return (
     <PageFrame title={t("dashboardTitle")} description={t("dashboardDesc")}>
-      <div className="surface rounded-[1.5rem] p-4">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Selected case</div>
+            <h2 className="mt-2 text-2xl font-black text-strong">{currentCase?.id ?? "No case selected"}</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">{currentCase?.title ?? "Choose a case to see investigation results."}</p>
+          </div>
           <Select value={activeCaseId ?? caseRecords[0]?.id ?? ""} onValueChange={(value) => setActiveCaseId(value)}>
             <SelectTrigger className="max-w-xs"><SelectValue placeholder="Select case" /></SelectTrigger>
             <SelectContent>{caseRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.id}</SelectItem>)}</SelectContent>
           </Select>
-          <Input className="max-w-xs" placeholder={t("searchPlaceholder")} />
-          <Select value={severity} onValueChange={setSeverity}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{["all", "critical", "high", "medium", "low"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={attackClass} onValueChange={setAttackClass}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{["all", "Credential Brute Force", "IoT Botnet / Scanning", "Malware C2 / Beaconing", "DNS Tunnel", "Data Exfiltration", "Service Exploitation", "Remote Command Execution", "SMB / NetBIOS Lateral Movement"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
-          </Select>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-5">
-          {[[t("packets"), formatNumber(packets.length)], [t("sessions"), sessions.length], [t("protocolsDecoded"), decodedProtocols.length], [t("alerts"), alertRecords.length], ["Top class", summary.topAttackClass], ["Risk", summary.riskLevel.toUpperCase()], [t("case"), intakeForm.caseNumber]].map(([label, value]) => (
-            <div key={label} className="border-l border-[var(--border)] pl-4 first:border-l-0">
-              <div className="text-xs font-semibold uppercase text-muted">{label}</div>
-              <div className="mt-1 text-2xl font-black text-strong">{value}</div>
-            </div>
-          ))}
+          <MetricTile label="Risk" value={summary.riskLevel.toUpperCase()} detail={summary.topAttackClass} />
+          <MetricTile label="Packets" value={formatNumber(summary.indexedPackets ?? packets.length)} detail={(summary.searchCompleteness === "truncated-search-index" && summary.observedPackets) ? `${formatNumber(summary.observedPackets)} observed; metadata capped` : "Packet metadata indexed"} />
+          <MetricTile label="Sessions" value={sessions.length} detail="Reconstructed conversations" />
+          <MetricTile label="Alerts" value={alertRecords.length} detail={`${highRiskAlerts.length} high risk`} />
+          <MetricTile label="Evidence hash" value={evidenceVerified ? "Verified" : "Pending"} detail={evidence?.sha256 ? `${evidence.sha256.slice(0, 16)}...` : "No hash available"} />
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_0.8fr]">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <div className="text-xs font-bold uppercase text-muted">Top alert</div>
-            <div className="mt-2 text-lg font-black text-strong">{alertRecords[0]?.attackClass ?? "No high-risk alert"}</div>
-            <p className="mt-1 text-sm leading-6 text-muted">{alertRecords[0]?.explanation ?? "Current capture is behaving like a low-risk baseline."}</p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+          <div className="surface-solid rounded-[1.5rem] p-5">
+            <div className="flex flex-wrap gap-2">
+              <SeverityBadge severity={topAlert?.severity ?? summary.riskLevel} />
+              <AttackBadge attackClass={(topAlert?.attackClass ?? summary.topAttackClass) as AttackClass} />
+            </div>
+            <h2 className="mt-4 text-xl font-black text-strong">What Netra found</h2>
+            <p className="mt-2 text-sm leading-7 text-muted">{findingText}</p>
+            {topAlert?.observedSignals?.length ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {topAlert.observedSignals.slice(0, 3).map((signal) => <Badge key={signal} variant="secondary">{signal}</Badge>)}
+              </div>
+            ) : null}
           </div>
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <div className="text-xs font-bold uppercase text-muted">Tool status</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {Object.entries(summary.toolStatus ?? {}).map(([name, ok]) => <Badge key={name} variant={ok ? "secondary" : "destructive"}>{name}: {ok ? "ready" : "missing"}</Badge>)}
-              <Badge>Zeek {zeek?.status ?? "not-run"}</Badge>
+          <div className="surface-solid rounded-[1.5rem] p-5">
+            <h2 className="text-xl font-black text-strong">Recommended next step</h2>
+            <p className="mt-2 text-sm leading-7 text-muted">{topAlert?.recommendedAction ?? nextStep}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button asChild><Link to="/app/activity"><AlertTriangle className="size-4" />Review activity</Link></Button>
+              <Button asChild variant="secondary"><Link to="/app/evidence"><Database className="size-4" />Inspect evidence</Link></Button>
+              <Button asChild variant="secondary"><Link to="/app/report"><FileText className="size-4" />Prepare report</Link></Button>
             </div>
           </div>
-        </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {[[t("packetExplorer"), "/app/packets"], [t("sessions"), "/app/sessions"], [t("protocolDecoder"), "/app/decoder"], [t("aiAnomaly"), "/app/ai-anomaly"]].map(([label, href]) => (
-            <Button key={href} asChild variant="secondary" size="sm"><Link to={href}>{label}</Link></Button>
-          ))}
         </div>
       </div>
-      <div className="surface rounded-[1.5rem] p-4">
-        <Tabs defaultValue="overview" className="flex flex-col gap-4">
-          <TabsList className="w-fit flex-wrap">
-            <TabsTrigger value="overview">{t("overview")}</TabsTrigger>
-            <TabsTrigger value="alerts">{t("alerts")}</TabsTrigger>
-            <TabsTrigger value="encrypted">{t("encryptedTraffic")}</TabsTrigger>
-            <TabsTrigger value="classes">{t("classifications")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="overview">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <ChartPanel title={t("protocolDistribution")}>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie data={protocolChartData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={86}>
-                      {["var(--accent)", "var(--text-strong)", "var(--muted)", "var(--border-strong)"].map((color) => <Cell key={color} fill={color} />)}
-                    </Pie>
-                    <ChartTooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </ChartPanel>
-              <ChartPanel title={t("trafficTimeline")}>
-                <ResponsiveContainer width="100%" height={250}>
-                  <AreaChart data={timeline}>
-                    <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="time" fontSize={11} stroke="var(--muted)" />
-                    <YAxis fontSize={11} stroke="var(--muted)" />
-                    <ChartTooltip />
-                    <Area dataKey="mb" type="monotone" stroke="var(--accent)" fill="var(--accent-soft)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </ChartPanel>
-              <ChartPanel title={t("alertVolume")}>
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={classificationData}>
-                    <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" fontSize={11} stroke="var(--muted)" />
-                    <YAxis allowDecimals={false} fontSize={11} stroke="var(--muted)" />
-                    <ChartTooltip />
-                    <Bar dataKey="value" fill="var(--accent)" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartPanel>
-            </div>
-          </TabsContent>
-          <TabsContent value="alerts"><AlertTable alerts={filteredAlerts} /></TabsContent>
-          <TabsContent value="encrypted"><EncryptedTrafficTable /></TabsContent>
-          <TabsContent value="classes"><ClassificationPanel data={classificationData} /></TabsContent>
-        </Tabs>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="surface rounded-[1.5rem] p-5">
+          <h2 className="text-lg font-black text-strong">Investigation counts</h2>
+          <div className="mt-4 grid gap-3 text-sm">
+            <MetadataRow label="Protocols decoded" value={`${decodedProtocols.length}`} />
+            <MetadataRow label="Anomaly explanations" value={`${anomalies.length}`} />
+            <MetadataRow label="Suspicious flows" value={`${suspiciousFlows.length}`} />
+          </div>
+        </div>
+        <div className="surface rounded-[1.5rem] p-5">
+          <h2 className="text-lg font-black text-strong">Evidence integrity</h2>
+          <div className="mt-4 grid gap-3 text-sm">
+            <MetadataRow label="File" value={evidence?.filename ?? "No file"} />
+            <MetadataRow label="Manifest" value={evidence?.manifestHash ? "Available" : "Pending"} />
+            <MetadataRow label="Encryption key" value={evidence?.keyId ?? "Pending"} />
+          </div>
+        </div>
+        <div className="surface rounded-[1.5rem] p-5">
+          <h2 className="text-lg font-black text-strong">Analysis tools</h2>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {Object.entries(summary.toolStatus ?? {}).map(([name, ok]) => <Badge key={name} variant={ok ? "secondary" : "destructive"}>{name}: {ok ? "ready" : "missing"}</Badge>)}
+            <Badge>Zeek {zeek?.status ?? "not-run"}</Badge>
+          </div>
+        </div>
       </div>
     </PageFrame>
   );
@@ -2186,6 +2633,8 @@ function PayloadInspectionPage() {
             <>
               <h2 className="text-xl font-black text-strong">{activeFinding.id}</h2>
               <p className="mt-1 text-sm text-muted">{activeFinding.matchedPattern}</p>
+              {activeFinding.description && <p className="mt-3 text-sm leading-6 text-strong">{activeFinding.description}</p>}
+              {activeFinding.limitations && <p className="mt-2 text-xs leading-5 text-muted">{activeFinding.limitations}</p>}
               <CodeBlock title={t("textPreview")} value={activeFinding.textPreview} />
               <CodeBlock title={t("hexPreview")} value={activeFinding.hexPreview} />
               <div className="mt-4 flex flex-wrap gap-2">{activeFinding.extractedStrings.map((item) => <Badge key={item}>{item}</Badge>)}</div>
@@ -2261,6 +2710,616 @@ function AiAnomalyPage() {
         </ChartPanel>
       </div>
     </PageFrame>
+  );
+}
+
+function SuspiciousActivityPage() {
+  const { t, activeCaseId, alertRecords: contextAlerts, anomalies: contextAnomalies, detectionMatches: contextDetectionMatches, networkFlows: contextFlows } = useNetra();
+  const [alertRecords, setAlertRecords] = useState<AlertRecord[]>(contextAlerts);
+  const [anomalies, setAnomalies] = useState<AnomalyRecord[]>(contextAnomalies);
+  const [detectionMatches, setDetectionMatches] = useState<DetectionRuleMatch[]>(contextDetectionMatches);
+  const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>(contextFlows);
+  const [aiExplanation, setAiExplanation] = useState<{ mode: string; modelVersion: string; fallbackUsed: boolean; limitations: string[] } | null>(null);
+  useEffect(() => {
+    if (!activeCaseId) return;
+    let cancelled = false;
+    Promise.all([
+      apiGet<{ results: AlertRecord[] }>(`/alerts?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
+      apiGet<{ results: AnomalyRecord[] }>(`/anomalies?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
+      apiGet<{ results: DetectionRuleMatch[] }>(`/detection/matches?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
+      apiGet<{ edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }>(`/graph?caseId=${encodeURIComponent(activeCaseId)}`),
+      apiGet<{ mode: string; modelVersion: string; fallbackUsed: boolean; limitations: string[] }>(`/cases/${activeCaseId}/anomaly-explanation`),
+    ]).then(([alertsPayload, anomalyPayload, detectionPayload, graphPayload, explanationPayload]) => {
+      if (cancelled) return;
+      setAlertRecords(alertsPayload.results);
+      setAnomalies(anomalyPayload.results);
+      setDetectionMatches(detectionPayload.results);
+      setNetworkFlows(graphEdgesToFlows(graphPayload));
+      setAiExplanation(explanationPayload);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCaseId]);
+  const highRiskAlerts = alertRecords.filter((alert) => ["critical", "high"].includes(alert.severity));
+  const suspiciousFlows = networkFlows.filter((flow) => flow.suspicious || (flow.risk ?? 0) >= 60).slice(0, 8);
+  const reviewItems = [
+    ...(highRiskAlerts.length ? highRiskAlerts : alertRecords).slice(0, 6).map((alert) => ({
+      id: `alert-${alert.id}`,
+      kind: "Alert",
+      title: alert.type || alert.attackClass,
+      severity: alert.severity,
+      badge: alert.attackClass,
+      confidence: alert.confidence,
+      explanation: alert.explanation || "Netra found suspicious traffic behavior linked to packet or session evidence.",
+      evidence: [...(alert.evidencePacketIds ?? []), ...(alert.evidenceSessionIds ?? [])].slice(0, 6),
+      recommendation: alert.recommendedAction || "Review linked packets and sessions before adding this finding to the report.",
+      meta: [
+        ["Source", alert.sourceIp || "-"],
+        ["Destination", alert.destination || "-"],
+        ["Protocol", alert.protocol || "-"],
+      ],
+    })),
+    ...anomalies.slice(0, 4).map((item) => ({
+      id: `anomaly-${item.id}`,
+      kind: "Anomaly",
+      title: item.behaviour,
+      severity: item.confidence >= 85 ? "high" as Severity : item.confidence >= 65 ? "medium" as Severity : "low" as Severity,
+      badge: "AI-assisted anomaly",
+      confidence: item.confidence,
+      explanation: `${item.observed} compared with ${item.baseline}. ${item.hypothesis}`,
+      evidence: item.topFeatures ?? [],
+      recommendation: item.recommendedAction || "Compare this pattern with case context and related packet evidence.",
+      meta: [
+        ["Entity", item.entity],
+        ["Deviation", item.deviation],
+        ["Observed", item.observed],
+      ],
+    })),
+    ...suspiciousFlows.slice(0, 4).map((flow) => ({
+      id: `flow-${flow.id}`,
+      kind: "Flow",
+      title: `${flow.source} to ${flow.target}`,
+      severity: (flow.risk ?? 0) >= 80 ? "high" as Severity : (flow.risk ?? 0) >= 60 ? "medium" as Severity : "low" as Severity,
+      badge: flow.attackClass,
+      confidence: flow.risk ?? 0,
+      explanation: `Suspicious communication path over ${flow.protocol} with ${formatNumber(flow.packets)} packets and ${formatBytes(flow.bytes)} transferred.`,
+      evidence: flow.alertIds,
+      recommendation: "Open Traffic Evidence to inspect the linked packets, sessions, and communication path.",
+      meta: [
+        ["Source", flow.source],
+        ["Destination", flow.target],
+        ["Protocol", flow.protocol],
+      ],
+    })),
+  ];
+  if (!alertRecords.length && !anomalies.length && !detectionMatches.length) {
+    return (
+      <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}>
+        <div className="surface mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-[1.5rem] p-8 text-center">
+          <AlertTriangle size={34} aria-hidden="true" />
+          <div>
+            <h2 className="text-xl font-black text-strong">No suspicious activity yet</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">Upload a PCAP, replay evidence, or start a bounded sensor capture. Netra will automatically explain suspicious traffic here.</p>
+          </div>
+          <Button asChild><Link to="/app/upload"><Upload size={16} />Start investigation</Link></Button>
+        </div>
+      </PageFrame>
+    );
+  }
+  return (
+    <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}>
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricTile label="Review queue" value={reviewItems.length} detail="Alerts, anomalies, and risky flows" />
+        <MetricTile label="High risk" value={highRiskAlerts.length} detail="Critical or high severity findings" />
+        <MetricTile label="Rule matches" value={detectionMatches.length} detail="Signature and behavior detections" />
+        <MetricTile label="Case" value={activeCaseId ?? "none"} detail="Current investigation" />
+      </div>
+      {aiExplanation && (
+        <div className="surface rounded-[1.5rem] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-strong">AI anomaly explanation</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">Netra uses ML-assisted scoring with explainable fallback. It highlights unusual network behavior; it does not prove compromise by itself.</p>
+            </div>
+            <Badge>{aiExplanation.fallbackUsed ? "Fallback scoring" : aiExplanation.modelVersion}</Badge>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge variant="secondary">{aiExplanation.mode}</Badge>
+            {aiExplanation.limitations.slice(0, 2).map((item) => <Badge key={item} variant="warning">{item}</Badge>)}
+          </div>
+        </div>
+      )}
+      <Tabs defaultValue="summary" className="flex flex-col gap-4">
+        <TabsList className="w-fit flex-wrap">
+          <TabsTrigger value="summary">Simple review</TabsTrigger>
+          <TabsTrigger value="rules">Detection details</TabsTrigger>
+          <TabsTrigger value="patterns">Suspicious patterns</TabsTrigger>
+          <TabsTrigger value="flows">Communication map</TabsTrigger>
+        </TabsList>
+        <TabsContent value="summary">
+          <div className="grid gap-4">
+            {reviewItems.map((item) => (
+              <div key={item.id} className="surface rounded-[1.5rem] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap gap-2"><Badge variant="secondary">{item.kind}</Badge><SeverityBadge severity={item.severity} /><Badge>{item.badge}</Badge></div>
+                    <h2 className="mt-3 text-xl font-black text-strong">{item.title}</h2>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{item.explanation}</p>
+                  </div>
+                  <Badge>{item.confidence}% confidence</Badge>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  {item.meta.map(([label, value]) => <MetadataRow key={`${item.id}-${label}`} label={label} value={value} />)}
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+                    <div className="text-sm font-bold text-strong">Evidence</div>
+                    <p className="mt-2 text-sm leading-6 text-muted">{item.evidence.join(", ") || "Packet and session evidence will appear after analysis finalizes."}</p>
+                  </div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+                    <div className="text-sm font-bold text-strong">Recommended action</div>
+                    <p className="mt-2 text-sm leading-6 text-muted">{item.recommendation}</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button asChild size="sm" variant="secondary"><Link to="/app/evidence"><Database className="size-4" />Open evidence</Link></Button>
+                  <Button asChild size="sm" variant="secondary"><Link to="/app/report"><FileText className="size-4" />Prepare report</Link></Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+        <TabsContent value="rules"><DetectionTable /></TabsContent>
+        <TabsContent value="patterns"><AnomalyReviewPanel /></TabsContent>
+        <TabsContent value="flows">
+          <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+            <div className="overflow-x-auto p-4">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Source</th><th>Destination</th><th>Protocol</th><th>Packets</th><th>Risk</th><th>Finding</th></tr></thead>
+                <tbody>{suspiciousFlows.map((flow) => <tr key={flow.id} className="border-b border-[var(--border)]"><td className="py-3 font-mono text-xs">{flow.source}</td><td className="font-mono text-xs">{flow.target}</td><td><Badge>{flow.protocol}</Badge></td><td>{formatNumber(flow.packets)}</td><td>{flow.risk ?? 0}</td><td>{flow.attackClass}</td></tr>)}</tbody>
+              </table>
+              {!suspiciousFlows.length && <div className="py-8 text-center text-sm text-muted">No suspicious communication paths found yet.</div>}
+            </div>
+          </div>
+          <div className="mt-4"><Button asChild variant="secondary"><Link to="/app/graph">Open full communication map</Link></Button></div>
+        </TabsContent>
+      </Tabs>
+    </PageFrame>
+  );
+}
+
+function TrafficEvidencePage() {
+  const { t, activeCaseId } = useNetra();
+  const [packets, setPackets] = useState<PacketRecord[]>([]);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [decodedProtocols, setDecodedProtocols] = useState<DecodedProtocolRecord[]>([]);
+  const [payloadFindings, setPayloadFindings] = useState<PayloadFinding[]>([]);
+  const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>([]);
+  const [zeek, setZeek] = useState<ZeekEvidence | null>(null);
+  const [query, setQuery] = useState("");
+  const [protocol, setProtocol] = useState("all");
+  const [port, setPort] = useState("");
+  const [severity, setSeverity] = useState("all");
+  useEffect(() => {
+    if (!activeCaseId) return;
+    let cancelled = false;
+    Promise.all([
+      apiGet<{ results: PacketRecord[] }>(`/packets?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
+      apiGet<{ results: SessionRecord[] }>(`/sessions?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
+      apiGet<{ results: DecodedProtocolRecord[]; zeek?: ZeekEvidence }>(`/decoder/summary?caseId=${encodeURIComponent(activeCaseId)}`),
+      apiGet<{ results: PayloadFinding[] }>(`/payloads?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
+      apiGet<{ edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }>(`/graph?caseId=${encodeURIComponent(activeCaseId)}`),
+    ]).then(([packetPayload, sessionPayload, protocolPayload, payloadPayload, graphPayload]) => {
+      if (cancelled) return;
+      setPackets(packetPayload.results);
+      setSessions(sessionPayload.results);
+      setDecodedProtocols(protocolPayload.results);
+      setZeek(protocolPayload.zeek ?? null);
+      setPayloadFindings(payloadPayload.results);
+      setNetworkFlows(graphEdgesToFlows(graphPayload));
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCaseId]);
+  const filteredPackets = useMemo(() => {
+    const text = query.trim().toLowerCase();
+    const portText = port.trim();
+    return packets.filter((packet) => {
+      const haystack = [packet.sourceIp, packet.destinationIp, packet.protocol, packet.sessionId, packet.decodedSummary, packet.relatedAlertId ?? ""].join(" ").toLowerCase();
+      return (
+        (!text || haystack.includes(text)) &&
+        (protocol === "all" || packet.protocol.toLowerCase() === protocol.toLowerCase()) &&
+        (!portText || String(packet.sourcePort).includes(portText) || String(packet.destinationPort).includes(portText)) &&
+        (severity === "all" || packet.severity === severity)
+      );
+    });
+  }, [packets, port, protocol, query, severity]);
+  const filteredSessions = useMemo(() => {
+    const text = query.trim().toLowerCase();
+    const portText = port.trim();
+    return sessions.filter((session) => {
+      const haystack = [session.id, session.source, session.destination, session.protocol, ...(session.relatedAlertIds ?? [])].join(" ").toLowerCase();
+      return (
+        (!text || haystack.includes(text)) &&
+        (protocol === "all" || session.protocol.toLowerCase() === protocol.toLowerCase()) &&
+        (!portText || session.source.includes(portText) || session.destination.includes(portText)) &&
+        (severity === "all" || session.riskScore >= (severity === "critical" ? 90 : severity === "high" ? 70 : severity === "medium" ? 40 : 0))
+      );
+    });
+  }, [port, protocol, query, sessions, severity]);
+  const filteredProtocols = decodedProtocols.filter((record) => protocol === "all" || record.protocol.toLowerCase().includes(protocol.toLowerCase()));
+  const filteredPayloads = payloadFindings.filter((finding) => {
+    const text = query.trim().toLowerCase();
+    return (!text || [finding.id, finding.packetId, finding.sessionId, finding.protocol, finding.payloadType, finding.matchedPattern].join(" ").toLowerCase().includes(text)) && (protocol === "all" || finding.protocol.toLowerCase() === protocol.toLowerCase()) && (severity === "all" || finding.risk === severity);
+  });
+  const filteredFlows = networkFlows.filter((flow) => {
+    const text = query.trim().toLowerCase();
+    const portText = port.trim();
+    return (
+      (!text || [flow.source, flow.target, flow.protocol, flow.attackClass, ...flow.alertIds].join(" ").toLowerCase().includes(text)) &&
+      (protocol === "all" || flow.protocol.toLowerCase() === protocol.toLowerCase()) &&
+      (!portText || flow.source.includes(portText) || flow.target.includes(portText)) &&
+      (severity === "all" || (flow.risk ?? 0) >= (severity === "critical" ? 90 : severity === "high" ? 70 : severity === "medium" ? 40 : 0))
+    );
+  });
+  if (!packets.length && !sessions.length && !decodedProtocols.length && !payloadFindings.length) {
+    return (
+      <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}>
+        <div className="surface mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-[1.5rem] p-8 text-center">
+          <Database size={34} aria-hidden="true" />
+          <div>
+            <h2 className="text-xl font-black text-strong">No traffic evidence yet</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">Upload or capture network traffic first. Packets, sessions, protocols, and payload clues will be grouped here automatically.</p>
+          </div>
+          <Button asChild><Link to="/app/upload"><Upload size={16} />Add network evidence</Link></Button>
+        </div>
+      </PageFrame>
+    );
+  }
+  return (
+    <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}>
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricTile label="Packets" value={formatNumber(packets.length)} detail="Representative packet metadata" />
+        <MetricTile label="Sessions" value={sessions.length} detail="Reconstructed conversations" />
+        <MetricTile label="Protocols" value={decodedProtocols.length} detail={`Zeek ${zeek?.status ?? "not-run"}`} />
+        <MetricTile label="Payload clues" value={payloadFindings.length} detail="Hidden-data and obfuscation indicators" />
+      </div>
+      <div className="surface rounded-[1.5rem] p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search IP, session, alert, protocol" />
+          <Select value={protocol} onValueChange={setProtocol}>
+            <SelectTrigger><SelectValue placeholder="Protocol" /></SelectTrigger>
+            <SelectContent>{["all", "TCP", "UDP", "DNS", "HTTP", "TLS", "SSH", "FTP", "SMTP", "ICMP"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input value={port} onChange={(event) => setPort(event.target.value)} placeholder="Port" />
+          <Select value={severity} onValueChange={setSeverity}>
+            <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
+            <SelectContent>{["all", "critical", "high", "medium", "low"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-muted">These filters narrow the officer evidence view only. Use advanced drilldowns for raw packet inspection.</p>
+      </div>
+      <Tabs defaultValue="packets" className="flex flex-col gap-4">
+        <TabsList className="w-fit flex-wrap">
+          <TabsTrigger value="packets">Packets</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="protocols">Protocols</TabsTrigger>
+          <TabsTrigger value="payloads">Payload clues</TabsTrigger>
+          <TabsTrigger value="map">Communication map</TabsTrigger>
+        </TabsList>
+        <TabsContent value="packets"><PacketEvidenceTable packets={filteredPackets.slice(0, 120)} /></TabsContent>
+        <TabsContent value="sessions"><SessionEvidenceTable sessions={filteredSessions.slice(0, 120)} /></TabsContent>
+        <TabsContent value="protocols"><ProtocolEvidenceTable protocols={filteredProtocols} zeek={zeek} /></TabsContent>
+        <TabsContent value="payloads"><PayloadEvidenceTable findings={filteredPayloads} /></TabsContent>
+        <TabsContent value="map"><FlowEvidenceTable flows={filteredFlows.slice(0, 120)} /></TabsContent>
+      </Tabs>
+    </PageFrame>
+  );
+}
+
+function EvidenceReportPage() {
+  const { t, activeCaseId, caseRecords, language, reloadAnalysis, summary, setActiveCaseId } = useNetra();
+  const [selectedCaseId, setSelectedCaseId] = useState(activeCaseId ?? caseRecords[0]?.id ?? "");
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [exports, setExports] = useState<ExportRecord[]>([]);
+  const [legalReview, setLegalReview] = useState<{ status: string; items: { name: string; status: string; detail: string }[] } | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const currentCase = caseRecords.find((record) => record.id === selectedCaseId) ?? caseRecords[0];
+
+  const refreshArtifacts = useCallback(() => {
+    apiGet<{ results: ReportRecord[] }>(selectedCaseId ? `/reports?caseId=${encodeURIComponent(selectedCaseId)}&limit=50` : "/reports?limit=50").then((payload) => setReports(payload.results)).catch(() => setReports([]));
+    apiGet<{ results: ExportRecord[] }>(selectedCaseId ? `/exports?caseId=${encodeURIComponent(selectedCaseId)}&limit=50` : "/exports?limit=50").then((payload) => setExports(payload.results)).catch(() => setExports([]));
+    if (selectedCaseId) {
+      apiGet<{ status: string; items: { name: string; status: string; detail: string }[] }>(`/cases/${selectedCaseId}/legal-review/checklist`).then(setLegalReview).catch(() => setLegalReview(null));
+    } else {
+      setLegalReview(null);
+    }
+  }, [selectedCaseId]);
+
+  useEffect(() => {
+    refreshArtifacts();
+  }, [refreshArtifacts]);
+
+  function selectCase(caseId: string) {
+    setSelectedCaseId(caseId);
+    setActiveCaseId(caseId);
+  }
+
+  async function exportPdfReport() {
+    if (!currentCase) return;
+    setBusyAction("report");
+    try {
+      const response = await fetch(`${API_BASE}/reports/${currentCase.id}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language, format: "pdf" }) });
+      const payload = await response.json();
+      if (!response.ok) {
+        toast.error(payload.error ?? "PDF report generation failed");
+        return;
+      }
+      await downloadApiFile(payload.downloadUrl, payload.filename ?? `${currentCase.id}-report.pdf`);
+      toast.success(`PDF report downloaded: ${payload.filename}`);
+      refreshArtifacts();
+      await reloadAnalysis().catch(() => undefined);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "PDF report download failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function createExport(type: string) {
+    if (!currentCase) return;
+    setBusyAction(type);
+    try {
+      const response = await fetch(`${API_BASE}/exports`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ type, caseId: currentCase.id }) });
+      const payload = await response.json();
+      if (!response.ok) {
+        toast.error(payload.error ?? "Export failed");
+        return;
+      }
+      toast.success(`${type} export ready: ${payload.filename ?? payload.id}`);
+      refreshArtifacts();
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function verifyEvidence() {
+    if (!currentCase?.evidenceFileId) {
+      toast.error("No evidence file is available for the selected case.");
+      return;
+    }
+    setBusyAction("verify");
+    try {
+      const response = await fetch(`${API_BASE}/evidence/${currentCase.evidenceFileId}/verify-integrity`, { method: "POST", headers: netraHeaders() });
+      const payload = await response.json();
+      if (!response.ok || !payload.verified) {
+        toast.error(payload.error ?? "Evidence integrity could not be verified.");
+        return;
+      }
+      toast.success("Evidence integrity verified.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  if (!currentCase) {
+    return (
+      <PageFrame title={t("evidenceReport")} description={t("evidenceReportDesc")}>
+        <div className="surface mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-[1.5rem] p-8 text-center">
+          <FileText size={34} aria-hidden="true" />
+          <div>
+            <h2 className="text-xl font-black text-strong">No reports yet</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">Upload and analyze evidence first. Netra will create case-specific report artifacts here.</p>
+          </div>
+          <Button asChild><Link to="/app/upload"><Upload size={16} />Start investigation</Link></Button>
+        </div>
+      </PageFrame>
+    );
+  }
+
+  return (
+    <PageFrame title={t("evidenceReport")} description="Generated report artifacts, downloads, exports, and legal readiness for officer cases.">
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-black text-strong">Report center</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Choose a case, generate a structured PDF, and download previous report/export artifacts without leaving the officer workflow.</p>
+          </div>
+          <label className="min-w-[18rem] max-w-xl flex-1">
+            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-muted">Selected case</span>
+            <Select value={currentCase.id} onValueChange={selectCase}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{caseRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.id}</SelectItem>)}</SelectContent>
+            </Select>
+          </label>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-4">
+          <MetricTile label="Case" value={currentCase.id} detail={currentCase.status} />
+          <MetricTile label="Risk" value={(currentCase.riskLevel ?? summary.riskLevel).toUpperCase()} detail={currentCase.topAttackClass ?? summary.topAttackClass} />
+          <MetricTile label="Reports" value={reports.length} detail="Generated PDF/HTML artifacts" />
+          <MetricTile label="Exports" value={exports.length} detail="JSON, CSV, and CEF bundles" />
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Button onClick={exportPdfReport} disabled={busyAction !== null}><FileText className="size-4" />{busyAction === "report" ? "Generating..." : "Generate and download PDF"}</Button>
+          <Button variant="secondary" onClick={() => createExport("Evidence JSON")} disabled={busyAction !== null}><Download className="size-4" />Export JSON bundle</Button>
+          <Button variant="secondary" onClick={() => createExport("Alert CSV")} disabled={busyAction !== null}><Download className="size-4" />Export alert CSV</Button>
+          <Button variant="secondary" onClick={verifyEvidence} disabled={busyAction !== null || !currentCase.evidenceFileId}><Fingerprint className="size-4" />Verify evidence hash</Button>
+        </div>
+      </div>
+
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="p-5 pb-0">
+          <h2 className="text-xl font-black text-strong">Generated reports</h2>
+          <p className="mt-1 text-sm text-muted">Reports are backend-generated files stored as encrypted artifacts and downloaded through authenticated routes.</p>
+        </div>
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Report</th><th>Case</th><th>Opened</th><th>Closed</th><th>Generated</th><th>Language</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>{reports.map((report) => (
+              <tr key={report.id} className="border-b border-[var(--border)]">
+                <td className="py-3"><div className="font-bold text-strong">{report.title}</div><div className="text-xs text-muted">{report.filename}</div></td>
+                <td>{report.caseId}</td>
+                <td>{report.openedAt ? new Date(report.openedAt).toLocaleString() : "-"}</td>
+                <td>{report.closedAt ? new Date(report.closedAt).toLocaleString() : "Open"}</td>
+                <td>{new Date(report.generatedAt).toLocaleString()}</td>
+                <td>{report.language}</td>
+                <td><Badge>{report.status}</Badge></td>
+                <td><Button size="sm" variant="secondary" onClick={() => downloadApiFile(report.downloadUrl, report.filename)}><Download className="size-4" />Download</Button></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {!reports.length && <div className="py-8 text-center text-sm text-muted">No generated reports for this case yet. Use Generate and download PDF to create one.</div>}
+        </div>
+      </div>
+
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="p-5 pb-0">
+          <h2 className="text-xl font-black text-strong">Generated exports</h2>
+        </div>
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Export</th><th>Type</th><th>Case</th><th>Created</th><th>Status</th><th>Hash</th></tr></thead>
+            <tbody>{exports.map((item) => <tr key={item.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.id}</td><td>{item.type}</td><td>{item.caseId}</td><td>{item.timestamp}</td><td><Badge>{item.status}</Badge></td><td className="font-mono text-xs">{item.hash}</td></tr>)}</tbody>
+          </table>
+          {!exports.length && <div className="py-8 text-center text-sm text-muted">No exports for this case yet.</div>}
+        </div>
+      </div>
+
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="p-5 pb-0">
+          <h2 className="text-xl font-black text-strong">Legal review checklist</h2>
+          <p className="mt-1 text-sm text-muted">Status: {legalReview?.status ?? "loading"}</p>
+        </div>
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Control</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody>{(legalReview?.items ?? []).map((item) => <tr key={item.name} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.name}</td><td><Badge>{item.status}</Badge></td><td>{item.detail}</td></tr>)}</tbody>
+          </table>
+          {!legalReview?.items?.length && <div className="py-6 text-center text-sm text-muted">Legal checklist will appear after case evidence is available.</div>}
+        </div>
+      </div>
+    </PageFrame>
+  );
+}
+
+function AnomalyReviewPanel({ anomalies: scopedAnomalies, timeline }: { anomalies?: AnomalyRecord[]; timeline?: { time: string; mb?: number; alerts?: number; packets?: number; anomalies?: number; value?: number }[] }) {
+  const { anomalies, trafficTimelineData } = useNetra();
+  const rows = scopedAnomalies ?? anomalies;
+  const chartRows = (timeline?.length ? timeline : trafficTimelineData).map((row) => ({ ...row, mb: row.mb ?? 0, alerts: row.alerts ?? 0 }));
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+      <div className="surface-solid rounded-[1.5rem] p-5">
+        <h3 className="text-lg font-black text-strong">AI-assisted anomaly review</h3>
+        <p className="mt-1 text-sm text-muted">Netra explains unusual behavior using case features, baseline comparison, and model/fallback confidence.</p>
+        <div className="mt-4 grid gap-3">
+          {rows.map((item) => (
+            <div key={item.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-bold text-strong">{item.entity}</div>
+                  <div className="mt-1 text-sm text-muted">{item.behaviour}</div>
+                </div>
+                <Badge>{item.confidence}% confidence</Badge>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <MetadataRow label="Observed" value={item.observed || "-"} />
+                <MetadataRow label="Baseline" value={item.baseline || "-"} />
+                <MetadataRow label="Deviation" value={item.deviation || "-"} />
+                <MetadataRow label="Model" value={item.modelVersion || "fallback-scoring"} />
+              </div>
+              {item.topFeatures?.length ? <p className="mt-3 text-xs leading-5 text-muted">Evidence features: {item.topFeatures.join(", ")}</p> : null}
+              {item.recommendedAction ? <p className="mt-2 text-xs leading-5 text-muted">Recommended action: {item.recommendedAction}</p> : null}
+            </div>
+          ))}
+          {!rows.length && <div className="rounded-xl border border-dashed border-[var(--border)] p-8 text-center text-sm text-muted">No unusual behavioral patterns were detected in this evidence file.</div>}
+        </div>
+      </div>
+      <ChartPanel title="Traffic pattern over time">
+        {chartRows.length ? <ResponsiveContainer width="100%" height={280}><AreaChart data={chartRows}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" fontSize={11} stroke="var(--muted)" /><YAxis fontSize={11} stroke="var(--muted)" /><ChartTooltip /><Area dataKey={timeline?.length ? "alerts" : "mb"} type="monotone" stroke="var(--accent)" fill="var(--accent-soft)" /></AreaChart></ResponsiveContainer> : <div className="flex min-h-[280px] items-center justify-center text-sm text-muted">No traffic pattern data found in this evidence file.</div>}
+      </ChartPanel>
+    </div>
+  );
+}
+
+function PacketEvidenceTable({ packets }: { packets: PacketRecord[] }) {
+  return (
+    <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+      <div className="overflow-x-auto p-4">
+        <table className="w-full min-w-[920px] text-left text-sm">
+          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Packet</th><th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Session</th><th>Risk</th></tr></thead>
+          <tbody>{packets.map((packet) => <tr key={packet.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{packet.id}</td><td className="font-mono text-xs">{packet.timestamp}</td><td className="font-mono text-xs">{packet.sourceIp}:{packet.sourcePort}</td><td className="font-mono text-xs">{packet.destinationIp}:{packet.destinationPort}</td><td><Badge>{packet.protocol}</Badge></td><td>{packet.sessionId}</td><td>{packet.riskScore}</td></tr>)}</tbody>
+        </table>
+        {!packets.length && <div className="py-8 text-center text-sm text-muted">No packet rows found in this evidence file.</div>}
+      </div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/packets">Open advanced packet explorer</Link></Button></div>
+    </div>
+  );
+}
+
+function SessionEvidenceTable({ sessions }: { sessions: SessionRecord[] }) {
+  return (
+    <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+      <div className="overflow-x-auto p-4">
+        <table className="w-full min-w-[880px] text-left text-sm">
+          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Session</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Duration</th><th>Packets</th><th>Risk</th></tr></thead>
+          <tbody>{sessions.map((session) => <tr key={session.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{session.id}</td><td>{session.source}</td><td>{session.destination}</td><td><Badge>{session.protocol}</Badge></td><td>{session.duration}</td><td>{session.packetCount}</td><td>{session.riskScore}</td></tr>)}</tbody>
+        </table>
+        {!sessions.length && <div className="py-8 text-center text-sm text-muted">No sessions were reconstructed from this evidence file.</div>}
+      </div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/sessions">Open session drilldown</Link></Button></div>
+    </div>
+  );
+}
+
+function ProtocolEvidenceTable({ protocols, zeek }: { protocols: DecodedProtocolRecord[]; zeek?: ZeekEvidence | null }) {
+  return (
+    <div className="grid gap-4">
+      <div className="surface rounded-[1.5rem] p-4">
+        <div className="flex flex-wrap items-center gap-2"><Badge>Zeek: {zeek?.status ?? "not-run"}</Badge>{(zeek?.logs ?? []).map((log) => <Badge key={log} variant="secondary">{log}</Badge>)}</div>
+      </div>
+      <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+        <div className="overflow-x-auto p-4">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Protocol</th><th>Packets</th><th>Sessions</th><th>Suspicious</th><th>Status</th><th>Evidence note</th></tr></thead>
+            <tbody>{protocols.map((record) => <tr key={record.protocol} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{record.protocol}</td><td>{formatNumber(record.packetCount)}</td><td>{record.sessionCount}</td><td>{record.suspiciousCount}</td><td><Badge>{record.status}</Badge></td><td>{record.detail}</td></tr>)}</tbody>
+          </table>
+          {!protocols.length && <div className="py-8 text-center text-sm text-muted">No decoded protocol evidence found in this evidence file.</div>}
+        </div>
+        <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/decoder">Open protocol decoder</Link></Button></div>
+      </div>
+    </div>
+  );
+}
+
+function PayloadEvidenceTable({ findings }: { findings: PayloadFinding[] }) {
+  return (
+    <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+      <div className="overflow-x-auto p-4">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Finding</th><th>Packet</th><th>Session</th><th>Protocol</th><th>Type</th><th>Hidden</th><th>Risk</th><th>Pattern</th></tr></thead>
+          <tbody>{findings.map((finding) => <tr key={finding.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{finding.id}</td><td>{finding.packetId}</td><td>{finding.sessionId}</td><td><Badge>{finding.protocol}</Badge></td><td>{finding.payloadType}</td><td>{finding.hiddenData ? "yes" : "no"}</td><td><SeverityBadge severity={finding.risk} /></td><td>{finding.description ?? finding.matchedPattern}</td></tr>)}</tbody>
+        </table>
+        {!findings.length && <div className="py-8 text-center text-sm text-muted">No payload clues found in this evidence file.</div>}
+      </div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/payloads">Open payload drilldown</Link></Button></div>
+    </div>
+  );
+}
+
+function FlowEvidenceTable({ flows }: { flows: NetworkFlow[] }) {
+  return (
+    <div className="surface-solid overflow-hidden rounded-[1.5rem]">
+      <div className="overflow-x-auto p-4">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Source</th><th>Destination</th><th>Protocol</th><th>Packets</th><th>Bytes</th><th>Risk</th><th>Finding</th></tr></thead>
+          <tbody>{flows.map((flow) => <tr key={flow.id} className="border-b border-[var(--border)]"><td className="py-3 font-mono text-xs">{flow.source}</td><td className="font-mono text-xs">{flow.target}</td><td><Badge>{flow.protocol}</Badge></td><td>{formatNumber(flow.packets)}</td><td>{formatBytes(flow.bytes)}</td><td>{flow.risk ?? 0}</td><td>{flow.attackClass}</td></tr>)}</tbody>
+        </table>
+        {!flows.length && <div className="py-8 text-center text-sm text-muted">No communication paths found in this evidence file.</div>}
+      </div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/graph">Open full communication map</Link></Button></div>
+    </div>
   );
 }
 
@@ -2390,20 +3449,24 @@ function RetentionPage() {
 }
 
 function SystemPage() {
-  const [health, setHealth] = useState<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; publicInternet: string; actor?: string; role?: string } } | null>(null);
+  const [health, setHealth] = useState<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string; rbac?: string; devRoleHeaders?: boolean; serviceRoleBackendOnly?: boolean; serviceRoleConfigured?: boolean; adminProfiles?: number }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; authorization?: string; publicInternet: string; actor?: string; role?: string }; incidentReadiness?: { status: string; summary: Record<string, number>; checks: { name: string; status: string; detail: string }[]; recommendedActions: string[] } } | null>(null);
+  const [statusMatrix, setStatusMatrix] = useState<{ results: { area: string; targetStatus: string; detail: string; validation: string[] }[]; summary: { total: number; validated: number; gated: number } } | null>(null);
+  const [mlStatus, setMlStatus] = useState<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string } | null>(null);
   const [database, setDatabase] = useState<{ mode: string; host: string; port: string; name: string; user: string; tables: number; forensicsTables: string[]; access?: { mode: string; label: string; authentication: string; publicInternet: string } } | null>(null);
   const [metrics, setMetrics] = useState<Record<string, number>>({});
   const [deadLetters, setDeadLetters] = useState<{ id: string; workerName: string; caseId: string; error: string; status: string }[]>([]);
-  const [workers, setWorkers] = useState<{ name: string; status: string; lastSeen?: string; currentJobId?: string; replicaCount?: number }[]>([]);
+  const [workerStatus, setWorkerStatus] = useState<{ processingMode?: string; queueProvider?: string; workerMode?: string; results: { name: string; status: string; lastSeen?: string; currentJobId?: string; replicaCount?: number }[] }>({ results: [] });
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
   const [capacity, setCapacity] = useState<CapacityRecord | null>(null);
   useEffect(() => {
     function refresh() {
-      apiGet<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; publicInternet: string; actor?: string; role?: string } }>("/system/health/deep").then(setHealth).catch(() => undefined);
+      apiGet<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string; rbac?: string; devRoleHeaders?: boolean; serviceRoleBackendOnly?: boolean; serviceRoleConfigured?: boolean; adminProfiles?: number }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; authorization?: string; publicInternet: string; actor?: string; role?: string } }>("/system/health/deep").then(setHealth).catch(() => undefined);
       apiGet<{ mode: string; host: string; port: string; name: string; user: string; tables: number; forensicsTables: string[]; access?: { mode: string; label: string; authentication: string; publicInternet: string } }>("/system/database").then(setDatabase).catch(() => undefined);
+      apiGet<{ results: { area: string; targetStatus: string; detail: string; validation: string[] }[]; summary: { total: number; validated: number; gated: number } }>("/system/status-matrix").then(setStatusMatrix).catch(() => undefined);
+      apiGet<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string }>("/ml/model-status").then(setMlStatus).catch(() => undefined);
       apiGet<Record<string, number>>("/system/metrics").then(setMetrics).catch(() => undefined);
       apiGet<{ results: typeof deadLetters }>("/system/dead-letter").then((payload) => setDeadLetters(payload.results)).catch(() => undefined);
-      apiGet<{ results: typeof workers }>("/system/workers").then((payload) => setWorkers(payload.results)).catch(() => undefined);
+      apiGet<{ processingMode?: string; queueProvider?: string; workerMode?: string; results: typeof workerStatus.results }>("/system/workers").then(setWorkerStatus).catch(() => undefined);
       apiGet<{ results: SensorRecord[] }>("/system/sensors").then((payload) => setSensors(payload.results)).catch(() => undefined);
       apiGet<CapacityRecord>("/system/capacity").then(setCapacity).catch(() => undefined);
     }
@@ -2412,9 +3475,53 @@ function SystemPage() {
     return () => window.clearInterval(interval);
   }, []);
   return (
-    <PageFrame title="System Monitor" description="Verified service probes, native sensors, worker heartbeats, storage, and dead-letter visibility.">
+    <PageFrame title="Technical Status" description="Operator diagnostics for Supabase, packet-analysis tools, workers, storage, and sensors. Officers do not need this page for normal investigations.">
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         {Object.entries(health?.checks ?? {}).map(([key, value]) => <MetricTile key={key} label={key} value={value.status} detail={value.detail ?? (value.latencyMs !== undefined ? `${value.latencyMs} ms` : "Live deep-health probe")} />)}
+      </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <h2 className="text-xl font-black text-strong">Incident readiness</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-5">
+          <MetadataRow label="Status" value={health?.incidentReadiness?.status ?? "-"} />
+          <MetadataRow label="Failed jobs" value={`${health?.incidentReadiness?.summary?.failedJobs ?? 0}`} />
+          <MetadataRow label="Dead letters" value={`${health?.incidentReadiness?.summary?.unresolvedDeadLetters ?? 0}`} />
+          <MetadataRow label="Denied access" value={`${health?.incidentReadiness?.summary?.deniedAccessLast24h ?? 0}`} />
+          <MetadataRow label="Ops events" value={`${health?.incidentReadiness?.summary?.operationalEventsLast24h ?? 0}`} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(health?.incidentReadiness?.checks ?? []).slice(0, 8).map((item) => <Badge key={item.name} variant={item.status === "attention" ? "destructive" : "secondary"}>{item.name}: {item.status}</Badge>)}
+        </div>
+        <p className="mt-3 text-sm text-muted">{health?.incidentReadiness?.recommendedActions?.[0] ?? "Operational readiness will appear after health checks load."}</p>
+      </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black text-strong">Feature status matrix</h2>
+            <p className="mt-1 text-sm text-muted">Generated from validation-backed status rules, not manual labels.</p>
+          </div>
+          <Badge variant={statusMatrix?.summary?.gated ? "destructive" : "secondary"}>{statusMatrix?.summary?.validated ?? 0}/{statusMatrix?.summary?.total ?? 0} validated</Badge>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {(statusMatrix?.results ?? []).map((row) => (
+            <div key={row.area} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-black text-strong">{row.area}</h3>
+                <Badge variant={row.targetStatus.includes("Gated") || row.targetStatus.includes("fallback") ? "destructive" : "secondary"}>{row.targetStatus}</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted">{row.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="surface rounded-[1.5rem] p-5">
+        <h2 className="text-xl font-black text-strong">ML anomaly model</h2>
+        <div className="mt-4 grid gap-2 md:grid-cols-4">
+          <MetadataRow label="Mode" value={mlStatus?.status ?? "-"} />
+          <MetadataRow label="Model" value={mlStatus?.modelAvailable ? "available" : "fallback scoring"} />
+          <MetadataRow label="Version" value={mlStatus?.version ?? "-"} />
+          <MetadataRow label="Training rows" value={`${mlStatus?.trainingRows ?? 0}`} />
+        </div>
+        <p className="mt-3 text-sm text-muted">{mlStatus?.detail ?? (mlStatus?.modelAvailable ? "Trained model metadata is available. Reports still include explainable feature context." : "Run npm run netra:benchmark:ml to train the optional anomaly model.")}</p>
       </div>
       <div className="surface rounded-[1.5rem] p-5">
         <h2 className="text-xl font-black text-strong">Database</h2>
@@ -2427,14 +3534,18 @@ function SystemPage() {
         <p className="mt-3 text-sm text-muted">Use pgAdmin or psql against native Windows PostgreSQL when running `npm run netra:start:local-db`.</p>
       </div>
       <div className="surface rounded-[1.5rem] p-5">
-        <h2 className="text-xl font-black text-strong">LAN Access</h2>
+        <h2 className="text-xl font-black text-strong">Application Access</h2>
         <div className="mt-4 grid gap-2 md:grid-cols-4">
-          <MetadataRow label="Access mode" value={health?.access?.label ?? database?.access?.label ?? "Trusted LAN"} />
-          <MetadataRow label="Authentication" value={health?.access?.authentication ?? database?.access?.authentication ?? "Disabled"} />
-          <MetadataRow label="Public internet" value={health?.access?.publicInternet ?? database?.access?.publicInternet ?? "Not supported"} />
-          <MetadataRow label="Audit actor" value={health?.access?.actor ?? "Local Investigator"} />
+          <MetadataRow label="Access mode" value={health?.access?.label ?? database?.access?.label ?? "Supabase Auth"} />
+          <MetadataRow label="Authentication" value={health?.access?.authentication ?? database?.access?.authentication ?? "Enabled"} />
+          <MetadataRow label="Authorization" value={health?.access?.authorization ?? health?.checks?.security?.rbac ?? "role-based"} />
+          <MetadataRow label="Public internet" value={health?.access?.publicInternet ?? database?.access?.publicInternet ?? "Not configured"} />
+          <MetadataRow label="Dev role headers" value={health?.checks?.security?.devRoleHeaders ? "enabled" : "disabled"} />
+          <MetadataRow label="Service key" value={health?.checks?.security?.serviceRoleBackendOnly ? "backend-only" : "check config"} />
+          <MetadataRow label="Admin profiles" value={`${health?.checks?.security?.adminProfiles ?? 0}`} />
+          <MetadataRow label="Audit actor" value={health?.access?.actor ?? "Signed-in officer"} />
         </div>
-        <p className="mt-3 text-sm text-muted">Anyone who can reach the private LAN URL can operate Netra. Keep port 8080 limited to trusted private networks.</p>
+        <p className="mt-3 text-sm text-muted">Netra requires a Supabase session before investigation actions can run. Keep service-role keys on the backend only.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         {Object.entries(metrics).map(([key, value]) => <MetricTile key={key} label={key} value={formatNumber(value)} detail="Current platform metric" />)}
@@ -2458,11 +3569,14 @@ function SystemPage() {
         </div>
       </div>
       <div className="surface-solid overflow-hidden rounded-[1.5rem]">
-        <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">Worker heartbeats</h3></div>
+        <div className="p-5 pb-0">
+          <h3 className="text-lg font-black text-strong">Worker heartbeats</h3>
+          <p className="mt-1 text-sm text-muted">Mode: {workerStatus.workerMode ?? "disabled"} | Queue: {workerStatus.queueProvider ?? "supabase-pgmq"} | Processing: {workerStatus.processingMode ?? "hybrid"}</p>
+        </div>
         <div className="overflow-x-auto p-4">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Worker</th><th>Status</th><th>Replicas</th><th>Current job</th><th>Last heartbeat</th></tr></thead>
-            <tbody>{workers.map((item) => <tr key={item.name} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.name}</td><td><Badge>{item.status}</Badge></td><td>{item.replicaCount ?? 0}</td><td>{item.currentJobId || "-"}</td><td>{item.lastSeen ?? "-"}</td></tr>)}</tbody>
+            <tbody>{workerStatus.results.map((item) => <tr key={item.name} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{item.name}</td><td><Badge>{item.status}</Badge></td><td>{item.replicaCount ?? 0}</td><td>{item.currentJobId || "-"}</td><td>{item.lastSeen ?? "-"}</td></tr>)}</tbody>
           </table>
         </div>
       </div>
@@ -2654,70 +3768,328 @@ function GraphPage() {
 }
 
 function CasesPage() {
-  const { t, caseRecords, activeCaseId, setActiveCaseId } = useNetra();
-  const [selectedCaseId, setSelectedCaseId] = useState(activeCaseId ?? caseRecords[0]?.id ?? "");
-  const selectedCase = caseRecords.find((record) => record.id === selectedCaseId) ?? caseRecords[0];
-  if (!selectedCase) {
-    return <PageFrame title={t("cases")} description={t("caseQueueDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Upload a PCAP to create a real case record.</div></PageFrame>;
+  const { t, caseRecords, reloadAnalysis, setActiveCaseId } = useNetra();
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const navigate = useNavigate();
+  const filteredCases = caseRecords.filter((record) => {
+    const text = query.trim().toLowerCase();
+    return (!text || [record.id, record.title, record.investigator, record.sourceLocation ?? "", record.topAttackClass ?? ""].join(" ").toLowerCase().includes(text)) && (status === "all" || record.status === status);
+  });
+  async function generateCaseReport(caseId: string) {
+    const response = await fetch(`${API_BASE}/reports/${caseId}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language: "English", format: "pdf" }) });
+    const payload = await response.json();
+    if (!response.ok) {
+      toast.error(payload.error ?? "PDF report generation failed");
+      return;
+    }
+    await downloadApiFile(payload.downloadUrl, payload.filename ?? `${caseId}-report.pdf`);
+    toast.success(`PDF report downloaded: ${payload.filename}`);
+    await reloadAnalysis().catch(() => undefined);
+  }
+  function openCase(caseId: string) {
+    setActiveCaseId(caseId);
+    navigate(`/app/cases/${caseId}`);
   }
   return (
     <PageFrame title={t("cases")} description={t("caseQueueDesc")}>
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <div className="surface min-w-0 rounded-[1.5rem] p-5">
-          <h2 className="text-xl font-black text-strong">{t("caseQueue")}</h2>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-[var(--border)] text-xs uppercase text-muted">
-                <tr><th className="py-3">{t("case")}</th><th>{t("status")}</th><th>{t("investigator")}</th><th>{t("report")}</th></tr>
-              </thead>
-              <tbody>
-                {caseRecords.map((record) => (
-                  <tr key={record.id} onClick={() => { setSelectedCaseId(record.id); setActiveCaseId(record.id); }} className={cn("cursor-pointer border-b border-[var(--border)] hover:bg-[var(--surface-muted)]", record.id === selectedCaseId && "bg-[var(--accent-soft)]")}>
-                    <td className="py-3"><div className="font-semibold text-strong">{record.id}</div><div className="text-xs text-muted">{record.title}</div></td>
-                    <td><Badge>{record.status}</Badge></td>
-                    <td>{record.investigator}</td>
-                    <td>{record.reportStatus}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-black text-strong">Case registry</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Only real officer-facing investigations are shown here. Validator and system-test cases are hidden from this list.</p>
           </div>
+          <Button asChild><Link to="/app/upload"><Upload className="size-4" />New investigation</Link></Button>
         </div>
-        <CaseHistoryPanel record={selectedCase} />
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search case, investigator, IP, finding" />
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{["all", "open", "reviewing", "report-ready"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button variant="secondary" onClick={() => reloadAnalysis()}><Search className="size-4" />Refresh cases</Button>
+        </div>
+      </div>
+      <div className="grid gap-3">
+        {filteredCases.map((record) => (
+          <CaseRegistryCard
+            key={record.id}
+            record={record}
+            onOpen={() => openCase(record.id)}
+            onGenerate={() => generateCaseReport(record.id)}
+            onDownloadLatest={() => record.latestReportDownloadUrl && downloadApiFile(record.latestReportDownloadUrl, `${record.id}-report.pdf`)}
+          />
+        ))}
+        {!filteredCases.length && <div className="surface-solid rounded-[1.5rem] p-8 text-center text-sm text-muted">No officer-facing cases found. Upload evidence to create the first real investigation.</div>}
       </div>
     </PageFrame>
   );
 }
 
+function CaseRegistryCard({ record, onOpen, onGenerate, onDownloadLatest }: { record: CaseRecord; onOpen: () => void; onGenerate: () => void; onDownloadLatest: () => void }) {
+  return (
+    <article className="surface-solid rounded-[1.5rem] p-5">
+      <div className="grid gap-5 xl:grid-cols-[minmax(16rem,1.25fr)_minmax(0,2fr)_auto]">
+        <div className="min-w-0">
+          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted">Case number</div>
+          <h3 className="mt-2 break-words text-xl font-black text-strong">{record.id}</h3>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted">{record.title}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge>{record.status}</Badge>
+            <SeverityBadge severity={(record.riskLevel ?? "low") as Severity} />
+            <Badge variant="secondary">{record.reportStatus}</Badge>
+          </div>
+        </div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <CaseStat label="Priority" value={record.priority || "-"} />
+          <CaseStat label="Top finding" value={record.topAttackClass ?? "Normal Baseline"} />
+          <CaseStat label="Packets" value={formatNumber(record.packetCount ?? 0)} />
+          <CaseStat label="Sessions" value={formatNumber(record.sessionCount ?? 0)} />
+          <CaseStat label="Alerts" value={formatNumber(record.alertCount ?? 0)} />
+          <CaseStat label="Opened" value={record.openedAt ? new Date(record.openedAt).toLocaleDateString() : "-"} />
+          <CaseStat label="Updated" value={record.updatedAt ? new Date(record.updatedAt).toLocaleDateString() : "-"} />
+          <CaseStat label="Investigator" value={record.investigator || "-"} />
+        </div>
+        <div className="flex min-w-[12rem] flex-col gap-2 xl:items-stretch">
+          <Button size="sm" onClick={onOpen}>View full case</Button>
+          <Button size="sm" variant="secondary" onClick={onGenerate}>Generate report</Button>
+          {record.latestReportDownloadUrl && <Button size="sm" variant="secondary" onClick={onDownloadLatest}>Latest PDF</Button>}
+        </div>
+      </div>
+      {record.flags?.length ? <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">{record.flags.slice(0, 6).map((flag) => <Badge key={flag} variant="secondary">{flag}</Badge>)}</div> : null}
+    </article>
+  );
+}
+
+function CaseStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+      <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted">{label}</div>
+      <div className="mt-1 truncate text-sm font-bold text-strong" title={String(value)}>{value}</div>
+    </div>
+  );
+}
+
 function CaseDetailPage() {
-  const { t, caseRecords, alertRecords, addCaseNote, decodedProtocols, exportRecords, packets, payloadFindings, sessions } = useNetra();
+  const { t, caseRecords, addCaseNote, setActiveCaseId } = useNetra();
   const { caseId = caseRecords[0]?.id ?? "" } = useParams();
-  const record = caseRecords.find((caseRecord) => caseRecord.id === caseId) ?? caseRecords[0];
+  const [workspace, setWorkspace] = useState<CaseWorkspaceRecord | null>(null);
+  const [record, setRecord] = useState<CaseRecord | null>(caseRecords.find((caseRecord) => caseRecord.id === caseId) ?? null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [charts, setCharts] = useState<CaseChartsRecord | null>(null);
+  const [alerts, setAlerts] = useState<AlertRecord[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyRecord[]>([]);
+  const [packets, setPackets] = useState<PacketRecord[]>([]);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [decodedProtocols, setDecodedProtocols] = useState<DecodedProtocolRecord[]>([]);
+  const [payloadFindings, setPayloadFindings] = useState<PayloadFinding[]>([]);
+  const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>([]);
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [ledger, setLedger] = useState<{ verification?: { verified: boolean; eventCount: number; latestHash: string }; results?: { id: string; timestamp: string; actor: string; action: string; eventHash: string; previousHash: string }[] }>({});
+  const [activeTab, setActiveTab] = useState("overview");
   const [note, setNote] = useState("");
+  const [flagInput, setFlagInput] = useState("");
+  const [linkTarget, setLinkTarget] = useState("");
+  const [linkRelation, setLinkRelation] = useState("manual_link");
+
+  const applyWorkspace = useCallback((payload: CaseWorkspaceRecord) => {
+    const data = payload.workspace;
+    setWorkspace(payload);
+    setRecord(data.case);
+    setSummary(data.summary);
+    setCharts(data.charts);
+    setAlerts(data.suspiciousActivity.alerts ?? []);
+    setAnomalies(data.suspiciousActivity.anomalies ?? []);
+    setPackets(data.trafficEvidence.packetsPreview ?? []);
+    setSessions(data.trafficEvidence.sessionsPreview ?? []);
+    setDecodedProtocols(data.trafficEvidence.protocols ?? []);
+    setPayloadFindings(data.trafficEvidence.payloadClues ?? []);
+    setNetworkFlows(graphEdgesToFlows(data.trafficEvidence.communicationMap ?? {}));
+    setReports(data.reports.items ?? []);
+    setLedger({ verification: data.custody.verification, results: data.custody.eventsPreview ?? [] });
+  }, []);
+
+  const refreshWorkspace = useCallback(async () => {
+    if (!caseId) return;
+    const payload = await apiGet<CaseWorkspaceRecord>(`/cases/${caseId}/workspace`);
+    applyWorkspace(payload);
+  }, [applyWorkspace, caseId]);
+
+  useEffect(() => {
+    if (!caseId) return;
+    setActiveCaseId(caseId);
+    let cancelled = false;
+    apiGet<CaseWorkspaceRecord>(`/cases/${caseId}/workspace`)
+      .then((payload) => {
+        if (!cancelled) applyWorkspace(payload);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWorkspace, caseId, setActiveCaseId]);
+
+  const availableTabs = workspace?.workspace.availableTabs ?? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true };
+  const dataMessages = workspace?.workspace.dataMessages ?? {};
+  const tabVisible = useCallback((value: string) => {
+    if (value === "activity") return availableTabs.suspiciousActivity;
+    if (value === "evidence") return availableTabs.trafficEvidence;
+    if (value === "timeline") return availableTabs.timeline;
+    if (value === "reports") return availableTabs.reports;
+    if (value === "custody") return availableTabs.custody;
+    return true;
+  }, [availableTabs]);
+
+  useEffect(() => {
+    if (!tabVisible(activeTab)) setActiveTab("overview");
+  }, [activeTab, tabVisible]);
+
+  async function generateCaseReport() {
+    if (!record) return;
+    const response = await fetch(`${API_BASE}/reports/${record.id}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language: "English", format: "pdf" }) });
+    const payload = await response.json();
+    if (!response.ok) {
+      toast.error(payload.error ?? "PDF report generation failed");
+      return;
+    }
+    await downloadApiFile(payload.downloadUrl, payload.filename ?? `${record.id}-report.pdf`);
+    await refreshWorkspace().catch(() => undefined);
+    toast.success(`PDF report downloaded: ${payload.filename}`);
+  }
+
+  async function addFlag() {
+    if (!record || !flagInput.trim()) return;
+    const response = await fetch(`${API_BASE}/cases/${record.id}/flags`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ flags: [flagInput.trim()] }) });
+    const payload = await response.json();
+    if (!response.ok) {
+      toast.error(payload.error ?? "Flag could not be added");
+      return;
+    }
+    setRecord({ ...record, flags: payload.flags });
+    setWorkspace((current) => current ? { ...current, workspace: { ...current.workspace, case: { ...current.workspace.case, flags: payload.flags } } } : current);
+    setFlagInput("");
+  }
+
+  async function linkCase() {
+    if (!record || !linkTarget.trim()) return;
+    const response = await fetch(`${API_BASE}/cases/${record.id}/links`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ targetCaseId: linkTarget.trim(), relationType: linkRelation }) });
+    const payload = await response.json();
+    if (!response.ok) {
+      toast.error(payload.error ?? "Related case could not be linked");
+      return;
+    }
+    setRecord({ ...record, linkedCases: [...(record.linkedCases ?? []), payload] });
+    setWorkspace((current) => current ? { ...current, workspace: { ...current.workspace, case: { ...current.workspace.case, linkedCases: [...(current.workspace.case.linkedCases ?? []), payload] } } } : current);
+    setLinkTarget("");
+    toast.success("Related case linked.");
+  }
+
   if (!record) {
     return <PageFrame title={t("caseDetail")} description={t("caseQueueDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Upload a PCAP to create a real case record.</div></PageFrame>;
   }
-  const linkedAlerts = alertRecords.filter((alert) => record.alertIds.includes(alert.id));
+  const highRiskAlerts = alerts.filter((alert) => ["critical", "high"].includes(alert.severity));
+  const chartEmptyText = dataMessages.chart || "No data found in this evidence file.";
   return (
     <PageFrame title={`${t("caseDetail")} - ${record.id}`} description={record.title}>
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-        <div className="min-w-0 flex flex-col gap-5">
-          <div className="surface min-w-0 rounded-[1.5rem] p-5">
-            <h2 className="text-xl font-black text-strong">{t("caseSummary")}</h2>
-            <div className="mt-4 flex flex-col gap-1">
-              <MetadataRow label={t("caseNumber")} value={record.id} />
-              <MetadataRow label={t("investigator")} value={record.investigator} />
-              <MetadataRow label={t("created")} value={record.createdAt} />
-              <MetadataRow label={t("report")} value={record.reportStatus} />
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap gap-2">
+              <Badge>{record.status}</Badge>
+              <SeverityBadge severity={(summary?.riskLevel ?? record.riskLevel ?? "low") as Severity} />
+              {(record.flags ?? []).map((flag) => <Badge key={flag} variant="secondary">{flag}</Badge>)}
+            </div>
+            <h2 className="mt-3 text-2xl font-black text-strong">{record.id}</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{record.title}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={generateCaseReport}><FileText className="size-4" />Generate report</Button>
+            <Button asChild variant="secondary"><Link to="/app/cases">Back to cases</Link></Button>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <MetricTile label="Risk" value={(summary?.riskLevel ?? record.riskLevel ?? "low").toUpperCase()} detail={summary?.topAttackClass ?? record.topAttackClass ?? "Normal Baseline"} />
+          <MetricTile label="Packets" value={formatNumber(summary?.packets ?? record.packetCount ?? 0)} />
+          <MetricTile label="Sessions" value={formatNumber(summary?.sessions ?? record.sessionCount ?? 0)} />
+          <MetricTile label="Alerts" value={formatNumber(alerts.length || record.alertCount || 0)} detail={`${highRiskAlerts.length} high risk`} />
+          <MetricTile label="Anomalies" value={formatNumber(anomalies.length)} detail="ML-assisted findings" />
+          <MetricTile label="Reports" value={reports.length} detail={record.reportStatus} />
+        </div>
+      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
+        <TabsList className="max-w-full overflow-x-auto">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          {availableTabs.suspiciousActivity && <TabsTrigger value="activity">Suspicious activity</TabsTrigger>}
+          {availableTabs.trafficEvidence && <TabsTrigger value="evidence">Traffic evidence</TabsTrigger>}
+          {availableTabs.timeline && <TabsTrigger value="timeline">Timeline</TabsTrigger>}
+          {availableTabs.reports && <TabsTrigger value="reports">Reports</TabsTrigger>}
+          {availableTabs.custody && <TabsTrigger value="custody">Custody</TabsTrigger>}
+        </TabsList>
+        <TabsContent value="overview">
+          <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="surface rounded-[1.5rem] p-5">
+              <h2 className="text-xl font-black text-strong">{t("caseSummary")}</h2>
+              <div className="mt-4 grid gap-2">
+                <MetadataRow label={t("caseNumber")} value={record.id} />
+                <MetadataRow label={t("investigator")} value={record.investigator || "-"} />
+                <MetadataRow label={t("department")} value={record.department || "-"} />
+                <MetadataRow label={t("sourceLocation")} value={record.sourceLocation || "-"} />
+                <MetadataRow label="Opened" value={record.openedAt ? new Date(record.openedAt).toLocaleString() : record.createdAt} />
+                <MetadataRow label="Closed" value={record.closedAt ? new Date(record.closedAt).toLocaleString() : "Open"} />
+              </div>
+              <div className="mt-5 grid gap-3">
+                <div className="flex gap-2">
+                  <Input value={flagInput} onChange={(event) => setFlagInput(event.target.value)} placeholder="Add flag, e.g. exfiltration" />
+                  <Button type="button" onClick={addFlag}>Add</Button>
+                </div>
+                <div className="flex flex-wrap gap-2">{(record.flags ?? []).map((flag) => <Badge key={flag} variant="secondary">{flag}</Badge>)}</div>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <ChartPanel title="Alert severity">{charts?.severity?.length ? <MiniBarList rows={charts.severity} /> : <p className="text-sm text-muted">{chartEmptyText}</p>}</ChartPanel>
+              <ChartPanel title="Attack classes">{charts?.attackClasses?.length ? <MiniBarList rows={charts.attackClasses} /> : <p className="text-sm text-muted">{chartEmptyText}</p>}</ChartPanel>
+              <ChartPanel title="Protocols">{charts?.protocols?.length ? <MiniBarList rows={charts.protocols} /> : <p className="text-sm text-muted">{chartEmptyText}</p>}</ChartPanel>
+              <ChartPanel title="Top sources">{charts?.topSources?.length ? <MiniBarList rows={charts.topSources} /> : <p className="text-sm text-muted">{chartEmptyText}</p>}</ChartPanel>
+              <ChartPanel title="Top destinations">{charts?.topDestinations?.length ? <MiniBarList rows={charts.topDestinations} /> : <p className="text-sm text-muted">{chartEmptyText}</p>}</ChartPanel>
+              <ChartPanel title="Activity timeline">{charts?.timeline?.length ? <ResponsiveContainer width="100%" height={150}><AreaChart data={charts.timeline}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" fontSize={11} stroke="var(--muted)" /><YAxis fontSize={11} stroke="var(--muted)" /><ChartTooltip /><Area dataKey="alerts" type="monotone" stroke="var(--accent)" fill="var(--accent-soft)" /></AreaChart></ResponsiveContainer> : <p className="text-sm text-muted">{dataMessages.timeline || chartEmptyText}</p>}</ChartPanel>
             </div>
           </div>
-          <EvidenceCard />
-        </div>
-        <div className="surface min-w-0 rounded-[1.5rem] p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          {charts?.dataQuality && <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted">Data quality: {charts.dataQuality}</div>}
+          <div className="surface mt-4 rounded-[1.5rem] p-5">
+            <h2 className="text-xl font-black text-strong">Related cases</h2>
+            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]">
+              <Input value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)} placeholder="Case number to link" />
+              <Select value={linkRelation} onValueChange={setLinkRelation}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{["manual_link", "similar_traffic", "same_source_ip", "same_target", "same_suspect", "same_incident"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+              </Select>
+              <Button onClick={linkCase}>Link case</Button>
+            </div>
+            <div className="mt-4 grid gap-2">{(record.linkedCases ?? []).map((link) => <div key={link.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-sm"><b>{link.caseId}</b> · {link.relationType}<div className="text-muted">{link.caseTitle}</div></div>)}</div>
+          </div>
+        </TabsContent>
+        {availableTabs.suspiciousActivity && <TabsContent value="activity">
+          <AlertTable alerts={alerts} />
+          <div className="mt-4"><AnomalyReviewPanel anomalies={anomalies} timeline={charts?.timeline ?? []} /></div>
+        </TabsContent>}
+        {availableTabs.trafficEvidence && <TabsContent value="evidence">
+          <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-sm text-muted">
+            Showing the stored case snapshot preview. Use the advanced packet explorer only when you need deeper pagination.
+          </div>
+          <Tabs defaultValue="packets" className="flex flex-col gap-4">
+            <TabsList className="w-fit flex-wrap"><TabsTrigger value="packets">Packets</TabsTrigger><TabsTrigger value="sessions">Sessions</TabsTrigger><TabsTrigger value="protocols">Protocols</TabsTrigger><TabsTrigger value="payloads">Payloads</TabsTrigger><TabsTrigger value="map">Communication map</TabsTrigger></TabsList>
+            <TabsContent value="packets"><PacketEvidenceTable packets={packets} /></TabsContent>
+            <TabsContent value="sessions"><SessionEvidenceTable sessions={sessions} /></TabsContent>
+            <TabsContent value="protocols"><ProtocolEvidenceTable protocols={decodedProtocols} /></TabsContent>
+            <TabsContent value="payloads"><PayloadEvidenceTable findings={payloadFindings} /></TabsContent>
+            <TabsContent value="map"><FlowEvidenceTable flows={networkFlows} /></TabsContent>
+          </Tabs>
+        </TabsContent>}
+        {availableTabs.timeline && <TabsContent value="timeline">
+          <div className="surface rounded-[1.5rem] p-5">
             <h2 className="text-xl font-black text-strong">{t("caseHistory")}</h2>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="secondary"><Link to={`/app/reports/${record.id}`}>{t("generateReport")}</Link></Button>
+            <TimelineList record={record} />
+            <div className="mt-5">
               <Dialog>
                 <DialogTrigger asChild><Button>{t("addNote")}</Button></DialogTrigger>
                 <DialogContent aria-describedby={undefined}>
@@ -2730,24 +4102,30 @@ function CaseDetailPage() {
               </Dialog>
             </div>
           </div>
-          <TimelineList record={record} />
-          <Separator className="my-5" />
-          <h3 className="mb-3 font-bold text-strong">{t("alerts")}</h3>
-          <AlertTable alerts={linkedAlerts} compact />
-          <Separator className="my-5" />
-          <h3 className="mb-3 font-bold text-strong">{t("linkedEvidence")}</h3>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <LinkedEvidencePanel title={t("packetExplorer")} items={packets.slice(0, 3).map((packet) => `${packet.id} · ${packet.protocol} · ${packet.riskScore}`)} />
-            <LinkedEvidencePanel title={t("sessions")} items={sessions.slice(0, 3).map((session) => `${session.id} · ${session.protocol} · ${session.duration}`)} />
-            <LinkedEvidencePanel title={t("payloadFindings")} items={payloadFindings.map((finding) => `${finding.id} · ${finding.matchedPattern}`)} />
-            <LinkedEvidencePanel title={t("protocolDecoder")} items={decodedProtocols.slice(0, 3).map((record) => `${record.protocol} · ${record.status}`)} />
-            <LinkedEvidencePanel title={t("exportCenter")} items={exportRecords.map((item) => `${item.id} · ${item.type} · ${item.status}`)} />
+        </TabsContent>}
+        {availableTabs.reports && <TabsContent value="reports">
+          <div className="surface rounded-[1.5rem] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-black text-strong">Case reports</h2><Button onClick={generateCaseReport}>Generate PDF report</Button></div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Report</th><th>Generated</th><th>Language</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>{reports.map((report) => <tr key={report.id} className="border-b border-[var(--border)]"><td className="py-3 font-bold text-strong">{report.filename}</td><td>{new Date(report.generatedAt).toLocaleString()}</td><td>{report.language}</td><td><Badge>{report.status}</Badge></td><td><Button size="sm" variant="secondary" onClick={() => downloadApiFile(report.downloadUrl, report.filename)}>Download</Button></td></tr>)}</tbody>
+              </table>
+              {!reports.length && <div className="py-8 text-center text-sm text-muted">No reports generated for this case yet.</div>}
+            </div>
           </div>
-          <Separator className="my-5" />
-          <h3 className="mb-3 font-bold text-strong">{t("investigatorNotes")}</h3>
-          <div className="grid gap-3">{record.notes.map((caseNote) => <div key={caseNote} className="rounded-xl bg-[var(--surface-muted)] p-3 text-sm">{caseNote}</div>)}</div>
-        </div>
-      </div>
+        </TabsContent>}
+        {availableTabs.custody && <TabsContent value="custody">
+          <div className="grid gap-5 lg:grid-cols-3">
+            <CustodyMetric label="Ledger" value={ledger.verification?.verified ? "Verified" : "Pending"} />
+            <CustodyMetric label="Events" value={ledger.verification?.eventCount ?? 0} />
+            <CustodyMetric label="Latest hash" value={ledger.verification?.latestHash ?? "-"} mono compact />
+          </div>
+          <div className="mt-6">
+            <CustodyLedgerTable rows={ledger.results ?? []} />
+          </div>
+        </TabsContent>}
+      </Tabs>
     </PageFrame>
   );
 }
@@ -2760,14 +4138,15 @@ function ReportPage() {
   if (!record) {
     return <PageFrame title={t("reportTitle")} description={t("reportDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Upload a PCAP to generate a real report.</div></PageFrame>;
   }
-  async function generateHtmlReport() {
-    const response = await fetch(`${API_BASE}/reports/${record.id}/generate`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language }) });
+  async function exportPdfReport() {
+    const response = await fetch(`${API_BASE}/reports/${record.id}/generate`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language, format: "pdf" }) });
     const payload = await response.json();
     if (!response.ok) {
-      toast.error(payload.error ?? "Report generation failed");
+      toast.error(payload.error ?? "PDF report generation failed");
       return;
     }
-    toast.success(`Report generated: ${payload.filename}`);
+    await downloadApiFile(payload.downloadUrl, payload.filename ?? `${record.id}-report.pdf`);
+    toast.success(`PDF report downloaded: ${payload.filename}`);
   }
   return (
     <PageFrame title={t("reportTitle")} description={`${record.id} - ${record.createdAt}`}>
@@ -2776,8 +4155,7 @@ function ReportPage() {
           <SelectTrigger><Languages className="size-4" /><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="English">English</SelectItem><SelectItem value="Hindi">Hindi</SelectItem><SelectItem value="Gujarati">Gujarati</SelectItem></SelectContent>
         </Select>
-        <Button variant="secondary" onClick={() => window.print()}><Printer className="size-4" />{t("print")}</Button>
-        <Button variant="secondary" onClick={generateHtmlReport}><Download className="size-4" />Generate HTML Report</Button>
+        <Button variant="secondary" onClick={exportPdfReport}><Download className="size-4" />Download PDF report</Button>
         <Button asChild variant="secondary"><Link to={`/app/cases/${record.id}`}>{t("backToCase")}</Link></Button>
       </div>
       <div className="print-surface report-print surface-solid mx-auto flex max-w-5xl flex-col gap-6 rounded-[1.5rem] p-6">
@@ -2820,20 +4198,27 @@ function ReportPage() {
 
 function MetricTile({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
   return (
-    <div className="surface rounded-[1.25rem] p-4">
+    <div className="surface min-w-0 rounded-[1.25rem] p-4">
       <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted">{label}</div>
-      <div className="mt-2 text-2xl font-black text-strong">{value}</div>
+      <div className="mt-2 min-w-0 break-words text-2xl font-black leading-tight text-strong">{value}</div>
       {detail && <p className="mt-2 text-xs leading-5 text-muted">{detail}</p>}
     </div>
   );
 }
 
-function LinkedEvidencePanel({ title, items }: { title: string; items: string[] }) {
+function CustodyMetric({ label, value, mono = false, compact = false }: { label: string; value: string | number; mono?: boolean; compact?: boolean }) {
   return (
-    <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-      <h3 className="font-bold text-strong">{title}</h3>
-      <div className="mt-3 grid gap-2">
-        {items.map((item) => <div key={item} className="break-words rounded-lg bg-[var(--surface-muted)] p-2 text-xs text-muted">{item}</div>)}
+    <div className="surface min-w-0 rounded-[1.25rem] p-5">
+      <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted">{label}</div>
+      <div
+        className={cn(
+          "mt-3 min-h-[2.5rem] text-2xl font-black leading-tight text-strong",
+          mono && "font-mono",
+          compact ? "break-all text-base leading-7 md:text-lg" : "truncate",
+        )}
+        title={String(value)}
+      >
+        {value}
       </div>
     </div>
   );
@@ -2918,12 +4303,13 @@ function DeliveryTable({ rows }: { rows: { id: string; timestamp: string; caseId
 function CustodyLedgerTable({ rows }: { rows: { id: string; timestamp: string; actor: string; action: string; previousHash: string; eventHash: string }[] }) {
   return (
     <div className="surface-solid overflow-hidden rounded-[1.5rem]">
-      <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">Chain of custody</h3></div>
-      <div className="overflow-x-auto p-4">
-        <table className="w-full min-w-[900px] text-left text-sm">
+      <div className="p-6 pb-2"><h3 className="text-lg font-black text-strong">Chain of custody</h3></div>
+      <div className="overflow-x-auto px-6 pb-6">
+        <table className="w-full min-w-[860px] table-fixed text-left text-sm">
           <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Time</th><th>Actor</th><th>Action</th><th>Previous hash</th><th>Event hash</th></tr></thead>
-          <tbody>{(rows.length ? rows : []).map((item) => <tr key={item.id} className="border-b border-[var(--border)]"><td className="py-3">{item.timestamp}</td><td>{item.actor}</td><td>{item.action}</td><td className="max-w-44 truncate font-mono text-xs">{item.previousHash || "root"}</td><td className="max-w-52 truncate font-mono text-xs">{item.eventHash}</td></tr>)}</tbody>
+          <tbody>{(rows.length ? rows : []).map((item) => <tr key={item.id} className="border-b border-[var(--border)]"><td className="py-3 pr-4 text-xs text-muted">{new Date(item.timestamp).toLocaleString()}</td><td className="pr-4">{item.actor}</td><td className="pr-4">{item.action}</td><td className="truncate pr-4 font-mono text-xs" title={item.previousHash || "root"}>{item.previousHash || "root"}</td><td className="truncate font-mono text-xs" title={item.eventHash}>{item.eventHash}</td></tr>)}</tbody>
         </table>
+        {!rows.length && <div className="py-8 text-center text-sm text-muted">No custody events found for this case yet.</div>}
       </div>
     </div>
   );
@@ -2969,14 +4355,35 @@ function Field({ label, value, onChange, disabled }: { label: string; value: str
   return <label className="flex flex-col gap-2"><span className="text-sm font-semibold text-strong">{label}</span><Input value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
-function SelectField({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange: (value: string) => void }) {
+function SelectField({
+  label,
+  value,
+  values,
+  onChange,
+  helper,
+  tone = "normal",
+}: {
+  label: string;
+  value: string;
+  values: string[];
+  onChange: (value: string) => void;
+  helper?: string;
+  tone?: "normal" | "danger" | "success";
+}) {
   return (
-    <label className="flex flex-col gap-2">
+    <label
+      className={cn(
+        "flex flex-col gap-2 rounded-xl transition-colors",
+        tone === "danger" && "border border-[#7f2f23] bg-[#2b1410] p-3",
+        tone === "success" && "border border-[#2f6b4f] bg-[#102017] p-3",
+      )}
+    >
       <span className="text-sm font-semibold text-strong">{label}</span>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>{values.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
       </Select>
+      {helper && <span className={cn("text-xs leading-5", tone === "danger" ? "text-[#ffd0c4]" : "text-muted")}>{helper}</span>}
     </label>
   );
 }
@@ -2999,23 +4406,6 @@ function EvidenceCard() {
   );
 }
 
-function CaseHistoryPanel({ record }: { record: CaseRecord }) {
-  const { t } = useNetra();
-  return (
-    <div className="surface min-w-0 rounded-[1.5rem] p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div><h2 className="text-xl font-black text-strong">{record.title}</h2><p className="mt-1 text-sm text-muted">{record.id}</p></div>
-        <Button asChild><Link to={`/app/cases/${record.id}`}>{t("viewFullCase")}</Link></Button>
-      </div>
-      <h3 className="mt-6 text-sm font-bold uppercase text-muted">{t("caseHistory")}</h3>
-      <TimelineList record={record} />
-      <Separator className="my-5" />
-      <h3 className="mb-3 font-bold text-strong">{t("investigatorNotes")}</h3>
-      <div className="grid gap-3">{record.notes.slice(0, 2).map((note) => <div key={note} className="rounded-xl bg-[var(--surface-muted)] p-3 text-sm">{note}</div>)}</div>
-    </div>
-  );
-}
-
 function TimelineList({ record }: { record: CaseRecord }) {
   return (
     <div className="mt-5 flex flex-col gap-4">
@@ -3030,22 +4420,24 @@ function TimelineList({ record }: { record: CaseRecord }) {
 }
 
 function ChartPanel({ title, children }: { title: string; children: ReactNode }) {
-  return <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4"><h3 className="mb-3 text-sm font-bold text-strong">{title}</h3>{children}</div>;
+  return <div className="min-w-0 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4"><h3 className="mb-3 text-sm font-bold text-strong">{title}</h3>{children}</div>;
 }
 
-function ClassificationPanel({ data }: { data: { name: string; value: number }[] }) {
-  const { t } = useNetra();
+function MiniBarList({ rows }: { rows: { name: string; value: number }[] }) {
+  const max = Math.max(1, ...rows.map((row) => row.value));
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
-      <ChartPanel title={t("attackClassification")}>
-        <ResponsiveContainer width="100%" height={270}>
-          <BarChart data={data}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" fontSize={11} stroke="var(--muted)" /><YAxis allowDecimals={false} fontSize={11} stroke="var(--muted)" /><ChartTooltip /><Bar dataKey="value" fill="var(--accent)" radius={[6, 6, 0, 0]} /></BarChart>
-        </ResponsiveContainer>
-      </ChartPanel>
-      <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-5">
-        <h3 className="font-bold text-strong">{t("nextActions")}</h3>
-        <div className="mt-4 grid gap-3">{["actionDomain", "actionIsolate", "actionMetadata", "actionReport"].map((item) => <div key={item} className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-accent" />{t(item)}</div>)}</div>
-      </div>
+    <div className="grid gap-3">
+      {rows.slice(0, 8).map((row) => (
+        <div key={row.name}>
+          <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+            <span className="truncate text-muted">{row.name}</span>
+            <span className="font-bold text-strong">{row.value}</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[var(--surface)]">
+            <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${Math.max(8, (row.value / max) * 100)}%` }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -3066,26 +4458,7 @@ function AlertTable({ alerts: rows, liveId, compact = false }: { alerts: AlertRe
             ))}</AnimatePresence>
           </tbody>
         </table>
-      </div>
-    </div>
-  );
-}
-
-function EncryptedTrafficTable({ compact = false }: { compact?: boolean }) {
-  const { t, packets } = useNetra();
-  const tlsPackets = packets.filter((packet) => packet.protocol === "TLS");
-  const rows = compact ? tlsPackets.slice(0, 4) : tlsPackets.slice(0, 100);
-  return (
-    <div className={cn("overflow-hidden rounded-[1.25rem] border border-[var(--border)]", !compact && "surface-solid")}>
-      {!compact && <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">{t("encryptedTitle")}</h3><p className="text-sm text-muted">{t("encryptedBody")}</p></div>}
-      <div className="overflow-x-auto p-5">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">{t("source")}</th><th>{t("destination")}</th><th>Session</th><th>Metadata preview</th><th>{t("risk")}</th></tr></thead>
-          <tbody>{rows.map((packet) => (
-            <tr key={packet.id} className="border-b border-[var(--border)] hover:bg-[var(--surface-muted)]"><td className="py-3 font-mono text-xs">{packet.sourceIp}:{packet.sourcePort || "-"}</td><td className="font-mono text-xs">{packet.destinationIp}:{packet.destinationPort || "-"}</td><td className="font-mono text-xs">{packet.sessionId || "-"}</td><td className="max-w-80 truncate font-mono text-xs">{packet.asciiPreview || "TLS metadata only; encrypted payload not decrypted."}</td><td className="font-bold text-strong">{packet.riskScore}</td></tr>
-          ))}
-          {rows.length === 0 && <tr><td className="py-6 text-center text-muted" colSpan={5}>No TLS packet metadata found. Upload a PCAP containing TLS traffic to populate this view.</td></tr>}</tbody>
-        </table>
+        {!rows.length && <div className="py-8 text-center text-sm text-muted">No suspicious activity found in this evidence file.</div>}
       </div>
     </div>
   );
@@ -3101,6 +4474,15 @@ function AttackBadge({ attackClass }: { attackClass: AttackClass }) {
 
 function MetadataRow({ label, value }: { label: string; value: string }) {
   return <div className="grid grid-cols-[minmax(7rem,0.45fr)_minmax(0,1fr)] gap-4 border-b border-[var(--border)] py-2 text-sm last:border-b-0"><span className="text-muted">{label}</span><span className="min-w-0 break-all text-right font-semibold text-strong">{value}</span></div>;
+}
+
+function NormalizationMetric({ label, value, compact = false }: { label: string; value: string; compact?: boolean }) {
+  return (
+    <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{label}</div>
+      <div className={cn("mt-1 text-sm font-black leading-5 text-strong", compact ? "break-words" : "truncate")} title={value}>{value}</div>
+    </div>
+  );
 }
 
 function ReportSection({ title, children }: { title: string; children: ReactNode }) {

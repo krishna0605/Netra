@@ -1,0 +1,36 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI", "primaryColor": "#EAF1F6", "primaryTextColor": "#17202A", "primaryBorderColor": "#2D5F88", "lineColor": "#2D5F88", "clusterBkg": "#F7F9FB", "clusterBorder": "#9AA8B4"}}}%%
+flowchart LR
+  subgraph G["Observed technical gaps"]
+    G1["Fragmented evidence context"]
+    G2["Manual correlation and reporting"]
+    G3["Opaque or weakly contextualized alerts"]
+    G4["Integrity and custody handled separately"]
+    G5["Scale, policy, and legal readiness uncertain"]
+  end
+  subgraph C["NETRA capability response"]
+    C1["Case-scoped evidence model"]
+    C2["Automated packet-to-report pipeline"]
+    C3["Rules, features, confidence, and evidence links"]
+    C4["Hashes, manifests, encrypted artifacts, ledger"]
+    C5["Validation matrix and gated roadmap"]
+  end
+  subgraph O["Expected operational effect"]
+    O1["Improved traceability"]
+    O2["Reduced context switching"]
+    O3["More reviewable findings"]
+    O4["Stronger evidence-handling discipline"]
+    O5["Explicit maturity decisions"]
+  end
+  G1 --> C1 --> O1
+  G2 --> C2 --> O2
+  G3 --> C3 --> O3
+  G4 --> C4 --> O4
+  G5 --> C5 --> O5
+
+  classDef gap fill:#FDECEC,stroke:#B54747,color:#6B1F1F;
+  classDef capability fill:#EAF1F6,stroke:#2D5F88,color:#17202A;
+  classDef outcome fill:#E9F5EE,stroke:#3E7C59,color:#214A35;
+  class G1,G2,G3,G4,G5 gap;
+  class C1,C2,C3,C4,C5 capability;
+  class O1,O2,O3,O4,O5 outcome;
+

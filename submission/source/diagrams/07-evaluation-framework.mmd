@@ -1,0 +1,26 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI", "primaryColor": "#EAF1F6", "primaryTextColor": "#17202A", "primaryBorderColor": "#2D5F88", "lineColor": "#2D5F88", "clusterBkg": "#F7F9FB", "clusterBorder": "#9AA8B4"}}}%%
+flowchart LR
+  Q["Research question: is NETRA useful, accurate, secure, and operationally reliable?"]
+  Q --> A["Detection validity"]
+  Q --> B["Forensic integrity"]
+  Q --> C["Usability and workflow"]
+  Q --> D["Performance and reliability"]
+  Q --> E["Security and governance"]
+
+  A --> A1["Precision, recall, F1, per-class false positives"]
+  A --> A2["Independent train/test and external PCAP corpus"]
+  B --> B1["Hash verification and custody-chain consistency"]
+  B --> B2["Reproducibility of report and export artifacts"]
+  C --> C1["Task completion, time-on-task, error rate"]
+  C --> C2["Investigator comprehension and confidence"]
+  D --> D1["Throughput, latency, recovery, queue health"]
+  D --> D2["Large-PCAP and concurrent-case tests"]
+  E --> E1["RLS/RBAC, secret handling, access review"]
+  E --> E2["Legal-process and retention-policy review"]
+
+  classDef question fill:#18324A,stroke:#18324A,color:#FFFFFF,stroke-width:2px;
+  classDef dimension fill:#EAF1F6,stroke:#2D5F88,color:#17202A;
+  classDef measure fill:#FFFFFF,stroke:#77838F,color:#17202A;
+  class Q question;
+  class A,B,C,D,E dimension;
+  class A1,A2,B1,B2,C1,C2,D1,D2,E1,E2 measure;

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
+
 from netra_ml.explanations import recommended_action
+from netra_ml.modeling import score_with_model
 
 
 def score_anomalies(features: dict[str, Any], sessions: list[dict[str, Any]], alerts: list[dict[str, Any]], filename: str = "") -> list[dict[str, Any]]:
@@ -47,6 +50,16 @@ def score_anomalies(features: dict[str, Any], sessions: list[dict[str, Any]], al
     for index, item in enumerate(output, start=1):
         item["id"] = f"anom-{index:04d}"
         item["recommendedAction"] = recommended_action(item["behaviour"], item["hypothesis"])
+    model_score = score_with_model(features, settings.BASE_DIR.parent / "ml-services" / "anomaly-engine" / "models" / "anomaly-model.pkl")
+    if model_score:
+        for item in output:
+            item.update(model_score)
+            item["confidence"] = max(item["confidence"], model_score["mlAnomalyScore"])
+        if not output and model_score["mlPrediction"] == "anomalous":
+            output.append(_record(summary.get("topTalker", "capture"), "ML-assisted anomaly", "Trained benchmark model expected lower-risk feature mix", f"Model score {model_score['mlAnomalyScore']}%", "model-assisted", model_score["mlAnomalyScore"], "Unknown or mixed suspicious behavior", ["modelVersion", "featureSchema"]))
+            output[-1].update(model_score)
+            output[-1]["id"] = "anom-0001"
+            output[-1]["recommendedAction"] = recommended_action(output[-1]["behaviour"], output[-1]["hypothesis"])
     return [item for item in output if item["confidence"] >= 50]
 
 

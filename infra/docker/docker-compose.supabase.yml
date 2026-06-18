@@ -1,0 +1,122 @@
+name: netra-supabase
+
+x-supabase-env: &supabase-env
+  env_file:
+    - ../../.env.supabase.local
+  environment:
+    DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+    DATABASE_URL: ${DATABASE_URL}
+    DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-0}
+    SUPABASE_PROJECT_REF: ${SUPABASE_PROJECT_REF}
+    SUPABASE_URL: ${SUPABASE_URL}
+    SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+    SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    NETRA_DATABASE_PROVIDER: supabase
+    NETRA_DATABASE_MODE: supabase
+    NETRA_STORAGE_PROVIDER: supabase
+    NETRA_QUEUE_PROVIDER: supabase-pgmq
+    NETRA_REALTIME_PROVIDER: supabase
+    NETRA_AUTH_PROVIDER: supabase
+    NETRA_ACCESS_MODE: supabase-auth
+    NETRA_DEV_ROLE_HEADERS: "0"
+    NETRA_SEARCH_PROVIDER: postgres
+    NETRA_PROCESSING_MODE: ${NETRA_SUPABASE_PROCESSING_MODE:-hybrid}
+    NETRA_SUPABASE_START_WORKERS: ${NETRA_SUPABASE_START_WORKERS:-0}
+    NETRA_SYNC_FALLBACK_ENABLED: "1"
+    NETRA_STORAGE_ROOT: /app/storage
+    NETRA_EVIDENCE_ENCRYPTION: ${NETRA_EVIDENCE_ENCRYPTION:-on}
+    NETRA_EVIDENCE_KEY: ${NETRA_EVIDENCE_KEY}
+    NETRA_EVIDENCE_KEY_ID: ${NETRA_EVIDENCE_KEY_ID:-supabase-dev-key-001}
+    NETRA_SENSOR_SHARED_KEY: ${NETRA_SENSOR_SHARED_KEY}
+    NETRA_WEBHOOK_SIGNING_SECRET: ${NETRA_WEBHOOK_SIGNING_SECRET}
+    NETRA_MAX_UPLOAD_MB: ${NETRA_MAX_UPLOAD_MB:-1024}
+    NETRA_WORKER_MAX_RETRIES: ${NETRA_WORKER_MAX_RETRIES:-3}
+
+x-worker-service: &worker-service
+  build:
+    context: ../..
+    dockerfile: backend/Dockerfile
+  <<: *supabase-env
+  volumes:
+    - netra-supabase-storage:/app/storage
+  depends_on:
+    - backend
+  restart: unless-stopped
+  profiles:
+    - workers
+
+services:
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_SUPABASE_REALTIME_ENABLED: ${VITE_SUPABASE_REALTIME_ENABLED:-1}
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    <<: *supabase-env
+    command: sh -c "python manage.py migrate --run-syncdb && (python manage.py bootstrap_supabase || echo 'Supabase bootstrap failed; continuing so the API can start. Check Supabase keys/buckets.') && python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - netra-supabase-storage:/app/storage
+    restart: unless-stopped
+
+  capture-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker capture
+
+  pcap-ingestion-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker pcap-ingestion
+
+  parser-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker parser
+
+  decoder-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker decoder
+
+  session-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker session
+
+  detection-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker detection
+
+  anomaly-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker anomaly
+
+  analysis-finalizer-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker analysis-finalizer
+
+  report-export-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_worker report-export
+
+  scheduler-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_scheduler
+
+  retention-worker:
+    <<: *worker-service
+    command: python manage.py run_netra_retention
+
+volumes:
+  netra-supabase-storage:

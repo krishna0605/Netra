@@ -1,0 +1,80 @@
+{
+  "version": "netra-anomaly-20260616180900",
+  "modelType": "RandomForestClassifier",
+  "trainedAt": "2026-06-16T18:09:00.791435+00:00",
+  "featureNames": [
+    "internalHostCount",
+    "externalHostCount",
+    "uniquePorts",
+    "maxDestinationFanout",
+    "maxPortFanout",
+    "largestSessionBytes",
+    "longestDnsQuery",
+    "averageDnsQueryLength",
+    "repeatedDnsDomainCount",
+    "icmpLargePacketCount",
+    "beaconPairs",
+    "sshConnectionCount",
+    "dnsQueryCount",
+    "hostRiskHintCount",
+    "serviceRiskHintCount"
+  ],
+  "trainingRows": 6,
+  "metrics": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "confusionMatrix": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        5
+      ]
+    ]
+  },
+  "limitations": [
+    "This model is trained on the available local benchmark manifest and is not independent legal certification.",
+    "Fallback explainable scoring remains active when the model artifact is unavailable."
+  ],
+  "rows": [
+    {
+      "id": "bench-normal",
+      "label": 0,
+      "prediction": 0,
+      "score": 0.275
+    },
+    {
+      "id": "bench-hydra-ssh",
+      "label": 1,
+      "prediction": 1,
+      "score": 0.9625
+    },
+    {
+      "id": "bench-hydra-ftp",
+      "label": 1,
+      "prediction": 1,
+      "score": 1.0
+    },
+    {
+      "id": "bench-distcc-rce",
+      "label": 1,
+      "prediction": 1,
+      "score": 1.0
+    },
+    {
+      "id": "bench-smtp",
+      "label": 1,
+      "prediction": 1,
+      "score": 1.0
+    },
+    {
+      "id": "bench-netbios",
+      "label": 1,
+      "prediction": 1,
+      "score": 0.9625
+    }
+  ]
+}
