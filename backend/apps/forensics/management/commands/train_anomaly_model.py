@@ -19,7 +19,7 @@ class Command(BaseCommand):
         parser.add_argument("--manifest", required=True)
         parser.add_argument("--pcap-root", default="")
         parser.add_argument("--model-dir", default="ml-services/anomaly-engine/models")
-        parser.add_argument("--output-dir", default="docs/benchmarks")
+        parser.add_argument("--output-dir", default="Miscellaneous/docs/benchmarks")
         parser.add_argument("--fail-under-f1", type=float, default=0.0)
 
     def handle(self, *args, **options):

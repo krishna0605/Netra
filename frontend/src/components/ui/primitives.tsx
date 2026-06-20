@@ -14,12 +14,12 @@ import { forwardRef } from "react";
 import { cn } from "../../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 rounded-[2px] font-mono text-xs font-bold uppercase tracking-[0.04em] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-[var(--accent)] !text-[#0d0d0d] shadow-sm hover:-translate-y-0.5 hover:brightness-110 hover:shadow-md",
-        secondary: "border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-strong)] hover:-translate-y-0.5 hover:border-[var(--accent-line)] hover:bg-[var(--surface-solid)]",
+        default: "bg-[var(--accent)] !text-[var(--charcoal-deep)] shadow-sm [clip-path:polygon(0_0,calc(100%_-_8px)_0,100%_8px,100%_100%,8px_100%,0_calc(100%_-_8px))] hover:brightness-110 hover:shadow-md",
+        secondary: "border border-[var(--border-strong)] bg-[var(--cream-primary)] text-[var(--charcoal-deep)] hover:border-[var(--accent-line)] hover:bg-[var(--cream-bright)]",
         ghost: "text-[var(--text)] hover:bg-[var(--surface-muted)]",
         destructive: "border border-[var(--border-strong)] bg-[var(--text-strong)] text-[var(--bg)] hover:opacity-90",
         outline: "border border-[var(--border)] bg-transparent text-[var(--text)] hover:bg-[var(--surface-muted)]",
@@ -53,7 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 Button.displayName = "Button";
 
 const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.02em]",
+  "inline-flex items-center gap-1 rounded-[2px] border px-2 py-0.5 font-mono text-[0.65rem] font-semibold uppercase tracking-[0.04em]",
   {
     variants: {
       variant: {
@@ -80,7 +80,7 @@ export function Badge({
 }
 
 export function Card({ className, ...props }: ComponentPropsWithoutRef<"div">) {
-  return <div className={cn("rounded-lg surface-solid", className)} {...props} />;
+  return <div className={cn("rounded-[2px] surface-solid", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: ComponentPropsWithoutRef<"div">) {
@@ -107,7 +107,7 @@ export function Input({ className, ...props }: ComponentPropsWithoutRef<"input">
   return (
     <input
       className={cn(
-        "h-10 w-full rounded-md border border-[var(--border)] bg-[var(--surface-solid)] px-3 text-sm text-[var(--text)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]",
+        "h-10 w-full rounded-[2px] border border-[var(--border)] bg-[var(--surface-solid)] px-3 text-sm text-[var(--text)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]",
         className,
       )}
       {...props}
@@ -119,7 +119,7 @@ export function Textarea({ className, ...props }: ComponentPropsWithoutRef<"text
   return (
     <textarea
       className={cn(
-        "min-h-28 w-full rounded-md border border-[var(--border)] bg-[var(--surface-solid)] px-3 py-2 text-sm text-[var(--text)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]",
+        "min-h-28 w-full rounded-[2px] border border-[var(--border)] bg-[var(--surface-solid)] px-3 py-2 text-sm text-[var(--text)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]",
         className,
       )}
       {...props}
@@ -140,7 +140,7 @@ export function Skeleton({ className, ...props }: ComponentPropsWithoutRef<"div"
 }
 
 export function Alert({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("rounded-lg border border-[var(--accent-line)] bg-[var(--accent-soft)] p-4 text-sm text-[var(--text)]", className)}>{children}</div>;
+  return <div className={cn("rounded-[2px] border border-[var(--accent-line)] bg-[var(--accent-soft)] p-4 text-sm text-[var(--text)]", className)}>{children}</div>;
 }
 
 export const Separator = forwardRef<
@@ -156,7 +156,7 @@ export const TabsList = forwardRef<
   ElementRef<typeof TabsPrimitive.List>,
   ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, ...props }, ref) => (
-  <TabsPrimitive.List ref={ref} className={cn("inline-flex rounded-lg bg-[var(--surface-muted)] p-1", className)} {...props} />
+  <TabsPrimitive.List ref={ref} className={cn("inline-flex rounded-[2px] border border-[var(--border)] bg-[var(--surface-muted)] p-1", className)} {...props} />
 ));
 TabsList.displayName = "TabsList";
 
@@ -167,7 +167,7 @@ export const TabsTrigger = forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "rounded-md px-3 py-1.5 text-sm font-medium text-[var(--muted)] transition data-[state=active]:bg-[var(--surface-solid)] data-[state=active]:text-[var(--text)] data-[state=active]:shadow-sm",
+      "rounded-[1px] px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-[0.04em] text-[var(--muted)] transition data-[state=active]:bg-[var(--cream-primary)] data-[state=active]:text-[var(--charcoal-deep)] data-[state=active]:shadow-sm",
       className,
     )}
     {...props}
@@ -189,13 +189,13 @@ export const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[var(--border)] bg-[var(--surface-solid)] p-6 text-[var(--text)] shadow-xl",
+        "fixed left-1/2 top-1/2 z-50 w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-[var(--border)] bg-[var(--surface-solid)] p-6 text-[var(--text)] shadow-xl [clip-path:polygon(0_12px,12px_0,100%_0,100%_calc(100%_-_12px),calc(100%_-_12px)_100%,0_100%)]",
         className,
       )}
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-muted)]">
+      <DialogPrimitive.Close aria-label="Close dialog" className="absolute right-4 top-4 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-muted)]">
         <X className="size-4" />
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -221,7 +221,7 @@ export const SheetContent = forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-muted)]">
+      <DialogPrimitive.Close aria-label="Close sheet" className="absolute right-4 top-4 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--surface-muted)]">
         <X className="size-4" />
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -237,7 +237,7 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 min-w-36 items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-solid)] px-3 text-sm text-[var(--text)] outline-none focus:ring-2 focus:ring-[var(--accent-soft)]",
+      "flex h-10 min-w-36 items-center justify-between gap-2 rounded-[2px] border border-[var(--border)] bg-[var(--surface-solid)] px-3 font-mono text-xs text-[var(--text)] outline-none focus:ring-2 focus:ring-[var(--accent-soft)]",
       className,
     )}
     {...props}

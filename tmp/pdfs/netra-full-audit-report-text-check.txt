@@ -1,3 +1,0 @@
-pages=13
-contains_title=True
-contains_validation=True
