@@ -43,10 +43,10 @@ foreach ($name in $required) {
   }
 }
 
-$composeFile = Join-Path $repoRoot "infra\docker\docker-compose.supabase.production.yml"
+$composeFile = Join-Path $repoRoot "infra\docker\compose.netra-production.yml"
 $services = @("frontend", "backend")
 if ($WithWorkers -or (Get-NetraEnvValue "NETRA_SUPABASE_START_WORKERS") -eq "1") {
-  $services += @("capture-worker", "pcap-ingestion-worker", "parser-worker", "decoder-worker", "session-worker", "detection-worker", "anomaly-worker", "analysis-finalizer-worker", "report-export-worker")
+  $services += @("capture-worker", "pcap-ingestion-worker", "parser-worker", "decoder-worker", "session-worker", "detection-worker", "anomaly-worker", "analysis-finalizer-worker", "report-export-worker", "scheduler-worker", "retention-worker")
   $profileArgs = @("--profile", "workers")
 } else {
   $profileArgs = @()

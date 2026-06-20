@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.supabase.example
+!.env.supabase.production.example
 *.local
 *.pem
 *.key
@@ -13,8 +14,17 @@
 secrets/
 credentials/
 
+# Local-only project material
+/Miscellaneous/
+/database/
+
+# Keep only the current public production workflow scripts
+/infra/scripts/*.ps1
+!/infra/scripts/start-netra-production.ps1
+!/infra/scripts/stop-netra.ps1
+!/infra/scripts/validate-production-phase11.ps1
+
 # Packet captures, evidence, and generated forensic artifacts
-samples/pcaps/
 *.pcap
 *.pcapng
 *.cap
@@ -57,6 +67,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Editors and operating systems
+.agents/
+.playwright-cli/
 .vs/
 .vscode/*
 !.vscode/extensions.json

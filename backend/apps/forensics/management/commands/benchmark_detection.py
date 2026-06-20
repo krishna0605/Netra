@@ -19,7 +19,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser) -> None:
         parser.add_argument("--manifest", required=True, help="Path to labeled benchmark manifest JSON.")
         parser.add_argument("--pcap-root", default="", help="Directory containing PCAP files. Defaults to manifest directory.")
-        parser.add_argument("--output-dir", default="docs/benchmarks", help="Directory for JSON and Markdown benchmark outputs.")
+        parser.add_argument("--output-dir", default="Miscellaneous/docs/benchmarks", help="Directory for JSON and Markdown benchmark outputs.")
         parser.add_argument("--fail-under-f1", type=float, default=0.0, help="Fail if multilabel F1 is below this value.")
         parser.add_argument("--max-cases", type=int, default=0, help="Optional limit for quick smoke runs.")
 

@@ -19,4 +19,12 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/App.tsx'],
+    rules: {
+      // Legacy effects coordinate API hydration and authenticated route state.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/purity': 'off',
+    },
+  },
 ])

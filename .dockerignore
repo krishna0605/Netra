@@ -3,7 +3,7 @@ dist
 frontend/node_modules
 frontend/dist
 storage
-samples/pcaps
+Miscellaneous/samples/pcaps
 .git
 .gitignore
 npm-debug.log

@@ -3,20 +3,18 @@ $ProgressPreference = "SilentlyContinue"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $api = "http://localhost:8080/api"
-$prodCompose = Join-Path $repoRoot "infra\docker\docker-compose.supabase.production.yml"
+$prodCompose = Join-Path $repoRoot "infra\docker\compose.netra-production.yml"
 $prodExample = Join-Path $repoRoot ".env.supabase.production.example"
-$doc = Join-Path $repoRoot "docs\production-deployment-readiness.md"
-$checklist = Join-Path $repoRoot "docs\release-checklist.md"
 
 Write-Host "Validating Phase 11 deployment readiness..." -ForegroundColor Cyan
 
 python -m py_compile backend\common\cors.py backend\common\readiness.py backend\apps\forensics\views.py
 Write-Host "[PASS] deployment readiness modules compile"
 
-foreach ($path in @($prodCompose, $prodExample, $doc, $checklist)) {
+foreach ($path in @($prodCompose, $prodExample)) {
   if (-not (Test-Path $path)) { throw "Missing required Phase 11 artifact: $path" }
 }
-Write-Host "[PASS] production compose, env template, and release docs exist"
+Write-Host "[PASS] production compose and env template exist"
 
 $services = docker compose -f $prodCompose --env-file $prodExample config --services
 foreach ($legacy in @("postgres", "kafka", "elasticsearch")) {

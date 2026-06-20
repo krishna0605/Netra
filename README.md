@@ -1,146 +1,81 @@
 # Netra
 
-Netra is a network and packet forensics platform prototype for authorized cybercrime investigation workflows. It supports real PCAP upload, packet parsing with `tshark`, protocol/session analysis, alerting, anomaly views, graph visualization, and report-ready evidence metadata.
+Netra is a network and packet forensics platform for authorized cybercrime investigation workflows. It supports PCAP upload, packet parsing with `tshark` and Zeek, protocol and session analysis, alerting, anomaly views, evidence metadata, and report generation.
 
 > Use Netra only with packet captures and networks you are authorized to analyze.
 
 ## Project Structure
 
 ```txt
-backend/                 Django API, forensics app, workers, packet analysis
-frontend/                React/Vite investigation console served by nginx
-ml-services/             Phase 1 AI/anomaly package location
-sensor-agent/            Native Windows/Linux dumpcap capture companion
-database/                PostgreSQL and Elasticsearch notes/config space
-infra/docker/            Docker Compose orchestration
-infra/scripts/           One-command startup, logs, stop, validation scripts
-docs/                    Architecture, workflow, deployment, PCAP, Zeek guides
-samples/pcaps/           Local-only PCAP files for authorized demos (Git ignored)
-storage/                 Local evidence layout notes; runtime contents are Git ignored
+backend/          Django API, forensic analysis, and worker commands
+frontend/         React/Vite investigation console served by nginx
+infra/docker/     Unified production Docker Compose configuration
+infra/scripts/    Public production start, stop, and validation scripts
+ml-services/      Explainable anomaly-analysis package
+sensor-agent/     Native Windows/Linux capture companion
+storage/          Runtime storage layout; generated contents are Git ignored
 ```
 
 ## Prerequisites
 
 - Docker Desktop with Docker Compose
 - Node.js and npm
-- PowerShell on Windows for the bundled orchestration scripts
-- Optional: Wireshark `dumpcap` for bounded native sensor capture
+- PowerShell on Windows for the orchestration commands
+- A configured Supabase project
+- Optional: Wireshark `dumpcap` for bounded native capture
 
-## One-command Startup
+## Production Setup
 
-For the current Supabase data-plane workflow, run:
-
-```powershell
-npm run netra:start:supabase
-```
-
-This starts the officer console and Django API against Supabase Auth, Supabase Postgres, Supabase Storage, and Supabase Queues. Local PostgreSQL, Kafka, and Elasticsearch are stopped in this mode. Supabase Queues use `pgmq`; the compatibility queue endpoint verifies a real send/read/archive cycle. Create officer users manually in Supabase Auth, then open:
-
-```txt
-http://localhost:8080/login
-```
-
-Use:
+Create the local production environment file:
 
 ```powershell
-npm run netra:bootstrap:supabase
-npm run netra:validate:supabase
+Copy-Item .env.supabase.production.example .env.supabase.production.local
 ```
 
-to verify Supabase extensions, private Storage buckets, queues, login, upload, analysis, report, and export.
+Replace every `replace-*` value in `.env.supabase.production.local`. Never commit that local file. In particular, protect the Supabase service-role key, database password, Django secret, evidence key, sensor key, and webhook signing secret.
 
-Run from the repo root:
+Start the current production stack:
 
 ```powershell
 npm run netra:start
 ```
 
-The command builds and starts:
+This builds the frontend and backend against Supabase Auth, Postgres, Storage, Realtime, and Queues. When `NETRA_SUPABASE_START_WORKERS=1`, the production worker profile is started as well.
 
-- frontend
-- backend
-- postgres
-- elasticsearch
-- kafka
-- capture-worker
-- parser-worker
-- decoder-worker
-- session-worker
-- detection-worker
-- anomaly-worker
-- report-export-worker
-
-URLs:
+Open:
 
 ```txt
-Frontend:      http://localhost:8080
-Dashboard:     http://localhost:8080/app/dashboard
-Upload:        http://localhost:8080/app/upload
-Backend API:   http://localhost:8000/api/health
-Elasticsearch: http://localhost:9200
-Kafka:         localhost:9092
-PostgreSQL:    localhost:5432
+Console: http://localhost:8080
+Login:   http://localhost:8080/login
 ```
 
-Netra starts with no seeded users, cases, alerts, integrations, reports, or exports. On a fresh database, open:
-
-```txt
-http://localhost:8080/app/upload
-```
-
-Upload a real PCAP or PCAPNG file. Database rows are created only by real evidence analysis and investigator actions. The current local workflow intentionally has no sign-in screen or role selector.
-
-Useful commands:
+Useful public commands:
 
 ```powershell
-npm run netra:start:ops
-npm run netra:start:lan
-npm run netra:start:fleet
-npm run netra:logs
+npm run netra:start
 npm run netra:stop
 npm run netra:validate
-npm run netra:validate:phase4
-npm run netra:validate:phase5
-npm run netra:validate:phase6
 npm run netra:sensor:install
 npm run netra:sensor:check
 npm run netra:sensor:interfaces
 npm run netra:sensor:start
-npm run netra:backup
-npm run zeek:sample
 ```
 
 Equivalent direct Docker command:
 
 ```powershell
-docker compose -f infra/docker/docker-compose.yml up --build -d --remove-orphans
+docker compose --env-file .env.supabase.production.local -f infra/docker/compose.netra-production.yml --profile workers up --build -d --remove-orphans
 ```
 
-## Upload a PCAP
+## Evidence Upload
 
-Packet captures are intentionally excluded from Git because they can be large
-and may contain sensitive network data. Place an authorized capture in
-`samples/pcaps/`, then upload it:
-
-```powershell
-curl.exe -F "caseId=CYB-GJ-HYDRA-0001" -F "file=@samples\pcaps\hydra_ssh.pcap" http://localhost:8080/api/evidence/upload
-```
-
-Then open:
+Packet captures are excluded from Git because they can be large and contain sensitive network data. Upload an authorized PCAP or PCAPNG through the evidence intake screen:
 
 ```txt
-http://localhost:8080/app/dashboard
+http://localhost:8080/app/upload
 ```
 
-## Trusted LAN Mode
-
-For a private hackathon room or controlled lab network, run:
-
-```powershell
-npm run netra:start:lan
-```
-
-This serves the investigation console at `http://<laptop-ip>:8080` and proxies `/api` through the frontend Nginx container. Backend, Kafka, Elasticsearch, and native PostgreSQL stay local/debug-facing; do not expose this mode to the public internet. If another laptop cannot open the URL, allow inbound TCP `8080` on the Windows Private network profile only.
+Investigation records are created from real evidence and investigator actions. The repository does not ship captured traffic, credentials, or seeded operational data.
 
 ## Frontend Development
 
@@ -150,87 +85,40 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-Frontend dev URL:
-
-```txt
-http://127.0.0.1:5173/
-```
-
-## Backend Local Development
+Frontend checks:
 
 ```powershell
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate --run-syncdb
-python manage.py runserver
+npm test
+npm run lint
+npm run build
+npm run test:e2e
 ```
 
-Netra does not include an automatic or optional demo-data seeder. Investigation rows are created by real PCAP uploads and investigator actions.
+## Sensor Agent
 
-## Native Windows PostgreSQL
-
-For pgAdmin-visible local tables, install PostgreSQL on Windows, create a `netra` database and `netra` user, then run:
+The sensor agent supports explicitly authorized bounded capture. On Windows:
 
 ```powershell
-npm run netra:start:local-db
-npm run netra:validate:local-db
-```
-
-See [Local PostgreSQL Setup](docs/local-postgres-setup.md).
-
-Worker dry runs:
-
-```powershell
-python manage.py run_netra_worker parser --once
-python manage.py run_netra_worker detection --once
-python manage.py run_netra_worker anomaly --once
-```
-
-## Phase 5 Laptop Operations
-
-For the operational laptop workflow with pgAdmin-visible PostgreSQL:
-
-```powershell
-npm run netra:start:ops
 npm run netra:sensor:install
+npm run netra:sensor:check
+npm run netra:sensor:interfaces
 npm run netra:sensor:start
 ```
 
-Open `http://localhost:8080/app/upload`. The intake screen supports:
+Restrict any listening ports to trusted private networks and collect traffic only with authorization.
 
-- historical PCAP import
-- replaying an explicitly selected PCAP through the chunk-ingestion pipeline
-- bounded native capture from a registered Wireshark `dumpcap` sensor
+## Security Notes
 
-The UI receives persisted operational events over SSE with polling fallback. Capture
-chunks, final evidence, reports, and exports are encrypted at rest.
-
-See [Phase 5 Laptop Operations](docs/phase5-operations.md).
-See [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md).
+- Real `.env` files and local credentials are Git ignored.
+- Supabase service-role credentials must remain backend-only.
+- Runtime captures, logs, reports, exports, and evidence are Git ignored.
+- The backend is not published directly; nginx proxies API traffic from the frontend service.
+- Create officer accounts manually in Supabase Auth and rotate production secrets before deployment.
+- Review Supabase Row Level Security policies before allowing shared or internet-facing access.
 
 ## Current Limitations
 
-- Supabase Storage requires a current backend service-role key from the Supabase Dashboard. The publishable key is not enough for encrypted evidence upload.
-- Supabase Advisor reports RLS is disabled on Netra public tables. Do not enable RLS blindly; add explicit policies or move backend-only tables to a private schema before shared deployment.
-- The most reliable demo path remains stored PCAP upload. Replay and native bounded capture are operational additions.
-- Phase 4 intentionally removes automatic seeded data from normal startup.
-- Zeek is installed inside the backend container and is used during PCAP upload to generate structured forensic evidence.
-- Phase 2 adds PostgreSQL persistence, Elasticsearch indexing, case-scoped APIs, role/audit controls, and worker observability while keeping the reliable synchronous upload path.
-- Hybrid mode keeps synchronous final analysis reliable while workers publish heartbeats, idempotent stage receipts, and dead-letter records.
-- `ml-services/` is prepared for Phase 1 explainable anomaly work but is not a standalone ML service yet.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [API Contract](docs/api-contract.md)
-- [Detection Methods](docs/detection-methods.md)
-- [Forensic Workflow](docs/forensic-workflow.md)
-- [Deployment](docs/deployment.md)
-- [Supabase Mode](docs/supabase-migration.md)
-- [Local PostgreSQL Setup](docs/local-postgres-setup.md)
-- [PCAP Analysis Guide](docs/pcap-analysis-guide.md)
-- [Zeek Setup Guide](docs/zeek-setup-guide.md)
-- [Worker Processes](docs/worker-processes.md)
-- [Phase 7 Fleet Operations](docs/phase7-fleet-operations.md)
+- A current Supabase service-role key is required for encrypted evidence storage.
+- The most reliable intake path is stored PCAP upload.
+- The frontend production bundle is sizeable and would benefit from additional code splitting.
+- `ml-services/` is an integrated analysis package rather than an independently deployed service.

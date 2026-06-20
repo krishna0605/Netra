@@ -3,21 +3,17 @@ import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node, type No
 import {
   Activity,
   AlertTriangle,
-  Bell,
   Database,
   Download,
-  Eye,
   FileSearch,
   FileText,
   Fingerprint,
   History,
   Languages,
   Menu,
-  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Shield,
   Upload,
   UploadCloud,
 } from "lucide-react";
@@ -92,6 +88,15 @@ import type {
 } from "./lib/types";
 import { refreshStoredSupabaseSession, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
+import {
+  PublicAboutPage,
+  PublicContactPage,
+  PublicHomePage,
+  PublicNotFoundPage,
+  PublicPrivacyPage,
+  PublicTermsPage,
+  PublicUpdatesPage,
+} from "./public/PublicSite";
 
 type Dict = Record<string, string>;
 type ComplianceRecord = { item: string; status: string; detail: string };
@@ -793,31 +798,6 @@ const gu: Dict = {
 
 const translations: Record<Language, Dict> = { English: en, Hindi: hi, Gujarati: gu };
 
-const workflowIcons = [Upload, Database, AlertTriangle, Network, FileSearch, FileText] as const;
-const workflowKeys = [
-  ["workflowRegisterTitle", "workflowRegisterBody"],
-  ["workflowAnalyzeTitle", "workflowAnalyzeBody"],
-  ["workflowClassifyTitle", "workflowClassifyBody"],
-  ["workflowMapTitle", "workflowMapBody"],
-  ["workflowCaseTitle", "workflowCaseBody"],
-  ["workflowReportTitle", "workflowReportBody"],
-] as const;
-const storyKeys = [
-  ["story1Title", "story1Body"],
-  ["story2Title", "story2Body"],
-  ["story3Title", "story3Body"],
-  ["story4Title", "story4Body"],
-  ["story5Title", "story5Body"],
-] as const;
-const capabilityKeys = [
-  ["capLive", "capLiveBody"],
-  ["capEncrypted", "capEncryptedBody"],
-  ["capClassify", "capClassifyBody"],
-  ["capHistory", "capHistoryBody"],
-  ["capReports", "capReportsBody"],
-] as const;
-const marqueeKeys = ["marqueePcap", "marqueeDns", "marqueeTls", "marqueeJa3", "marqueeSni", "marqueeReport", "marqueeCustody"] as const;
-
 type AppState = {
   alertRecords: AlertRecord[];
   anomalies: AnomalyRecord[];
@@ -1256,11 +1236,18 @@ function App() {
           <Router>
             <Toaster position="top-right" />
             <Routes>
-              <Route path="/" element={<LandingPage />} />
+              <Route path="/" element={<PublicHomePage languageControl={<LanguageControl />} />} />
+              <Route path="/about" element={<PublicAboutPage languageControl={<LanguageControl />} />} />
+              <Route path="/updates" element={<PublicUpdatesPage languageControl={<LanguageControl />} />} />
+              <Route path="/changelog" element={<Navigate to="/updates" replace />} />
+              <Route path="/contact" element={<PublicContactPage languageControl={<LanguageControl />} />} />
+              <Route path="/privacy" element={<PublicPrivacyPage languageControl={<LanguageControl />} />} />
+              <Route path="/terms" element={<PublicTermsPage languageControl={<LanguageControl />} />} />
               <Route path="/demo" element={<Navigate to="/login" replace state={{ from: "/app/upload" }} />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/app/login" element={<Navigate to="/login" replace />} />
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
+              <Route path="*" element={<PublicNotFoundPage languageControl={<LanguageControl />} />} />
             </Routes>
           </Router>
         </div>
@@ -1306,8 +1293,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
   if (status === "checking") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4">
-        <section className="w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+      <main className="auth-shell flex min-h-screen items-center justify-center px-4">
+        <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
           <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
           <h1 className="mt-2 text-2xl font-bold text-strong">Checking session</h1>
           <p className="mt-2 text-sm leading-6 text-muted">Verifying your Supabase sign-in before opening the investigation console.</p>
@@ -1379,11 +1366,11 @@ function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4">
-      <section className="w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+    <main className="auth-shell flex min-h-screen items-center justify-center px-4">
+      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
         <div className="mb-6">
-          <p className="text-sm font-semibold text-accent">Netra Supabase</p>
-          <h1 className="mt-2 text-2xl font-bold text-strong">Sign in</h1>
+          <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Secure access</Link>
+          <h1 className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
           <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts are created in the Supabase project by an administrator.</p>
         </div>
         {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.</Alert>}
@@ -1413,123 +1400,6 @@ function LoginPage() {
   );
 }
 
-function LandingPage() {
-  const { t } = useNetra();
-  return (
-    <main className="min-h-screen overflow-hidden">
-      <LandingHeader />
-      <section className="px-4 pb-20 pt-16 sm:px-6 lg:pb-28 lg:pt-24">
-        <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="flex flex-col gap-8">
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-1">
-              {[
-                ["01", "heroPoint1Title", "heroPoint1Body"],
-                ["02", "heroPoint2Title", "heroPoint2Body"],
-                ["03", "heroPoint3Title", "heroPoint3Body"],
-              ].map(([number, titleKey, bodyKey], index) => (
-                <motion.div
-                  key={number}
-                  initial={{ opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.08 }}
-                  className="grid grid-cols-[3rem_1fr] gap-4 border-b border-[var(--border)] pb-4"
-                >
-                  <span className="text-sm font-bold text-accent">{number}</span>
-                  <div>
-                    <h3 className="font-semibold text-strong">{t(titleKey)}</h3>
-                    <p className="mt-1 text-sm leading-6 text-muted">{t(bodyKey)}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-            <motion.div initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className="flex flex-col gap-6">
-              <h1 className="max-w-4xl text-5xl font-black leading-[1.03] tracking-normal text-strong sm:text-7xl lg:text-8xl">
-                {t("landingHeadline")}
-              </h1>
-              <p className="max-w-2xl text-2xl font-semibold text-[var(--text)]">{t("landingSubhead")}</p>
-              <p className="max-w-2xl text-base leading-7 text-muted">{t("landingBody")}</p>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Button asChild size="lg">
-                  <Link to="/login" state={{ from: "/app/upload" }}>
-                    <Eye data-icon="inline-start" />
-                    {t("viewDemo")}
-                  </Link>
-                </Button>
-                <Button asChild variant="secondary" size="lg">
-                  <a href="#workflow">{t("exploreWorkflow")}</a>
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-          <motion.div initial={{ opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }} className="lg:pt-8">
-            <PremiumPreview />
-          </motion.div>
-        </div>
-      </section>
-      <EvidenceMarquee />
-      <ProofSection />
-      <RequirementCoverageSection />
-      <WorkflowSection />
-      <StorySection />
-      <CapabilitiesSection />
-      <LandingFooter />
-    </main>
-  );
-}
-
-function RequirementCoverageSection() {
-  const { t } = useNetra();
-  const items = [
-    ["Capture", "PCAP upload, real tshark parsing, filtering"],
-    ["DPI", "Protocol decoder and payload inspection"],
-    ["Detection", "Signatures, tunnels, malware C2, exfiltration"],
-    ["AI", "Baseline deviation and unknown attack indicators"],
-    ["Forensics", "Sessions, case evidence, exports, reports"],
-    ["Compliance", "Evidence integrity, access logs, custody controls"],
-  ];
-  return (
-    <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
-      <SectionHeading title={t("requirementCoverage")} description={t("requirementCoverageBody")} />
-      <div className="grid gap-4 md:grid-cols-3">
-        {items.map(([title, body]) => (
-          <div key={title} className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-5">
-            <div className="text-sm font-bold uppercase tracking-[0.16em] text-accent">{title}</div>
-            <p className="mt-3 text-sm leading-6 text-muted">{body}</p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function LandingHeader() {
-  const { t } = useNetra();
-  return (
-    <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[rgba(13,13,13,0.82)] backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Link className="flex items-center gap-3 font-bold text-strong" to="/">
-          <span className="flex size-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)]">
-            <Shield className="size-5 text-accent" />
-          </span>
-          Netra
-        </Link>
-        <nav className="hidden items-center gap-7 text-sm font-semibold text-muted md:flex">
-          <a href="#workflow">{t("workflow")}</a>
-          <a href="#capabilities">{t("capabilities")}</a>
-          <Link to="/login" state={{ from: "/app/upload" }}>{t("evidenceIntake")}</Link>
-          <Link to="/login" state={{ from: "/app/reports" }}>{t("reports")}</Link>
-        </nav>
-        <div className="flex items-center gap-2">
-          <LanguageControl />
-          <Button asChild>
-            <Link to="/login" state={{ from: "/app/upload" }}>{t("viewDemo")}</Link>
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
-}
-
 function LanguageControl() {
   const { language, setLanguage } = useNetra();
   return (
@@ -1547,219 +1417,10 @@ function LanguageControl() {
   );
 }
 
-function PremiumPreview() {
-  const { t, alertRecords, evidence, packets, trafficTimelineData } = useNetra();
-  const previewTimeline = trafficTimelineData.length ? trafficTimelineData : [{ time: "Ready", mb: 0, alerts: 0 }];
-  const topAlert = alertRecords[0];
-  return (
-    <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }} className="glass-panel overflow-hidden rounded-[2rem]">
-      <div className="flex items-center justify-between border-b border-[var(--border)] p-5">
-        <div className="flex items-center gap-2 font-semibold text-strong">
-          <Shield className="size-5 text-accent" />
-          {t("previewConsole")}
-        </div>
-        <Badge>{evidence ? "PCAP analyzed" : "Awaiting PCAP"}</Badge>
-      </div>
-      <div className="grid gap-5 p-5">
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            [t("previewPackets"), formatNumber(packets.length)],
-            [t("previewAlerts"), String(alertRecords.length).padStart(2, "0")],
-            [t("previewHash"), evidence?.sha256 ? t("previewVerified") : "Pending"],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-              <div className="text-xs text-muted">{label}</div>
-              <div className="mt-1 text-2xl font-black text-strong">{value}</div>
-            </div>
-          ))}
-        </div>
-        <ResponsiveContainer width="100%" height={210}>
-          <AreaChart data={previewTimeline}>
-            <defs>
-              <linearGradient id="previewOrange" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.42} />
-                <stop offset="95%" stopColor="var(--accent)" stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <XAxis dataKey="time" fontSize={11} tickLine={false} axisLine={false} stroke="var(--muted)" />
-            <YAxis hide />
-            <Area type="monotone" dataKey="mb" stroke="var(--accent)" fill="url(#previewOrange)" strokeWidth={2} />
-          </AreaChart>
-        </ResponsiveContainer>
-        <div className="rounded-2xl border border-[var(--accent-line)] bg-[var(--accent-soft)] p-4">
-          <div className="flex items-center gap-2 text-sm font-bold text-strong">
-            <Bell className="size-4 text-accent" />
-            {topAlert?.type ?? "Upload a PCAP to begin"}
-          </div>
-          <p className="mt-2 text-xs text-muted">{topAlert?.explanation ?? "Netra creates packet, protocol, alert, and anomaly rows only after real evidence is uploaded."}</p>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function EvidenceMarquee() {
-  const { t } = useNetra();
-  const items = [...marqueeKeys, ...marqueeKeys];
-  return (
-    <section className="border-y border-[var(--border)] py-6">
-      <div className="overflow-hidden">
-        <div className="marquee-track gap-4">
-          {items.map((key, index) => (
-            <span key={`${key}-${index}`} className="rounded-full border border-[var(--border)] px-6 py-3 text-sm font-bold uppercase tracking-[0.16em] text-muted">
-              {t(key)}
-            </span>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ProofSection() {
-  const { t } = useNetra();
-  const rows = [
-    [Fingerprint, "proofIntegrity", "proofIntegrityBody"],
-    [Shield, "proofEncrypted", "proofEncryptedBody"],
-    [Languages, "proofReports", "proofReportsBody"],
-  ] as const;
-  return (
-    <section className="mx-auto grid max-w-7xl gap-5 px-4 py-24 sm:px-6 lg:grid-cols-3">
-      {rows.map(([Icon, titleKey, bodyKey], index) => (
-        <motion.div key={titleKey} initial={{ opacity: 0.35, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: index * 0.06 }}>
-          <div className="surface h-full rounded-[1.5rem] p-6 transition hover:-translate-y-1 hover:border-[var(--accent-line)]">
-            <Icon className="mb-8 size-7 text-accent" />
-            <h3 className="text-2xl font-black text-strong">{t(titleKey)}</h3>
-            <p className="mt-3 text-sm leading-7 text-muted">{t(bodyKey)}</p>
-          </div>
-        </motion.div>
-      ))}
-    </section>
-  );
-}
-
-function WorkflowSection() {
-  const { t } = useNetra();
-  return (
-    <section id="workflow" className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
-      <SectionHeading title={t("workflowTitle")} description={t("workflowDescription")} />
-      <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-        {workflowKeys.map(([titleKey, bodyKey], index) => {
-          const Icon = workflowIcons[index];
-          return (
-            <motion.div
-              key={titleKey}
-              initial={{ opacity: 0.35, y: 18 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              whileHover={{ x: 4 }}
-              className="group grid gap-5 py-8 md:grid-cols-[6rem_1fr] md:items-center"
-            >
-              <div className="text-4xl font-black text-accent">0{index + 1}</div>
-              <div>
-                <div className="mb-3 flex items-center gap-3">
-                  <Icon className="size-5 text-accent" />
-                  <h3 className="text-3xl font-black text-strong">{t(titleKey)}</h3>
-                </div>
-                <p className="max-w-2xl text-sm leading-7 text-muted">{t(bodyKey)}</p>
-                <div className="mt-5 h-px w-24 bg-[var(--accent)] transition-all duration-500 group-hover:w-56" />
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function StorySection() {
-  const { t } = useNetra();
-  return (
-    <section className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
-      <SectionHeading title={t("storyTitle")} description={t("storyDescription")} />
-      <div className="surface rounded-[1.75rem] p-4 sm:p-5">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {storyKeys.map(([titleKey, bodyKey], index) => (
-            <motion.article
-              key={titleKey}
-              initial={{ opacity: 0.78, y: 14 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: index * 0.04 }}
-              whileHover={{ y: -4 }}
-              className="min-h-64 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-5 transition hover:border-[var(--accent-line)] hover:bg-[var(--accent-soft)]"
-            >
-              <Badge>0{index + 1}</Badge>
-              <h3 className="mt-5 text-2xl font-black leading-tight text-strong">{t(titleKey)}</h3>
-              <p className="mt-4 text-sm leading-7 text-muted">{t(bodyKey)}</p>
-            </motion.article>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CapabilitiesSection() {
-  const { t } = useNetra();
-  return (
-    <section id="capabilities" className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
-      <SectionHeading title={t("capTitle")} description={t("capDescription")} />
-      <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-        {capabilityKeys.map(([titleKey, bodyKey], index) => (
-          <motion.div key={titleKey} whileHover={{ x: 4 }} className="group grid gap-4 py-7 md:grid-cols-[4rem_1fr] md:items-center">
-            <span className="text-sm font-bold text-accent">0{index + 1}</span>
-            <div>
-              <h3 className="text-2xl font-black text-strong">{t(titleKey)}</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-7 text-muted">{t(bodyKey)}</p>
-              <div className="mt-4 h-px w-16 bg-[var(--accent)] opacity-60 transition-all duration-500 group-hover:w-40" />
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function LandingFooter() {
-  const { t } = useNetra();
-  return (
-    <footer className="border-t border-[var(--border)] px-4 py-14 sm:px-6">
-      <div className="mx-auto grid max-w-7xl gap-10 md:grid-cols-[1.4fr_0.8fr_0.8fr]">
-        <div>
-          <div className="flex items-center gap-3 text-2xl font-black text-strong">
-            <Shield className="size-6 text-accent" />
-            Netra
-          </div>
-          <p className="mt-4 max-w-md text-sm leading-7 text-muted">{t("footerSentence")}</p>
-          <p className="mt-8 text-xs text-muted">Netra ©2026</p>
-        </div>
-        <div>
-          <h4 className="font-bold text-strong">{t("footerNav")}</h4>
-          <div className="mt-4 grid gap-3 text-sm text-muted">
-            <a href="#workflow">{t("workflow")}</a>
-            <a href="#capabilities">{t("capabilities")}</a>
-            <Link to="/app/cases">{t("cases")}</Link>
-          </div>
-        </div>
-        <div>
-          <h4 className="font-bold text-strong">{t("footerDemo")}</h4>
-          <div className="mt-4 grid gap-3 text-sm text-muted">
-            <Link to="/app/upload">{t("startInvestigation")}</Link>
-            <Link to="/app/dashboard">{t("dashboard")}</Link>
-            <Link to="/app/cases">{t("reports")}</Link>
-          </div>
-          <p className="mt-6 text-xs leading-6 text-muted">{t("footerNote")}</p>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
 function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-[var(--charcoal-deep)]">
       <div className="flex">
         <motion.aside
           animate={{ width: sidebarCollapsed ? 80 : 288 }}
@@ -1769,7 +1430,7 @@ function AppShell() {
         </motion.aside>
         <div className={cn("min-w-0 flex-1 transition-[padding] duration-300", sidebarCollapsed ? "lg:pl-20" : "lg:pl-72")}>
           <TopBar />
-          <div className="p-4 sm:p-6">
+          <div className="app-main-canvas p-4 sm:p-6">
             <Routes>
               <Route index element={<Navigate to="upload" replace />} />
               <Route path="upload" element={<UploadPage />} />
@@ -1826,10 +1487,10 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
   ] as const;
   return (
     <>
-      <div className="mb-8 flex items-center justify-between gap-2">
-        <Link className="flex min-w-0 items-center gap-3" to="/">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)]">
-            <Shield className="size-5 text-accent" />
+      <div className={cn("mb-8 flex items-center", collapsed ? "flex-col gap-3" : "justify-between gap-2")}>
+        <Link className={cn("flex min-w-0 items-center gap-3", collapsed && "justify-center")} to="/">
+          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border)] bg-[#f3eadb] p-1">
+            <img className="size-full object-contain" src="/brand/netra-logo-mark.svg" alt="" aria-hidden="true" />
           </span>
           {!collapsed && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -1880,7 +1541,7 @@ function TopBar() {
   const { t } = useNetra();
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
-    <header className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[rgba(13,13,13,0.82)] px-4 py-3 backdrop-blur-xl sm:px-6">
+    <header className="technical-topbar no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 backdrop-blur-xl sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t("openNavigation")}>
@@ -1942,6 +1603,9 @@ function UploadPage() {
     normalizationCode === "evidence_type_not_analyzable" || (normalization.validForSelectedType && normalization.normalizedType !== "PCAP") ? "Parser not enabled" :
     normalization.validForSelectedType ? "Verified" :
     "Mismatch";
+  const activeCaptureJobId = captureJob?.jobId;
+  const activeCaptureMode = captureJob?.mode;
+  const activeCaptureStatus = captureJob?.status;
 
   useEffect(() => {
     apiGet<{ results: SensorRecord[] }>("/sensors")
@@ -1957,12 +1621,12 @@ function UploadPage() {
   }, []);
 
   useEffect(() => {
-    if (!captureJob || ["completed", "failed", "stopped"].includes(captureJob.status)) return;
-    const source = new EventSource(`${API_BASE}/events/stream?captureJobId=${encodeURIComponent(captureJob.jobId)}`);
+    if (!activeCaptureJobId || !activeCaptureMode || !activeCaptureStatus || ["completed", "failed", "stopped"].includes(activeCaptureStatus)) return;
+    const source = new EventSource(`${API_BASE}/events/stream?captureJobId=${encodeURIComponent(activeCaptureJobId)}`);
     let pollFailures = 0;
     const refreshStatus = async () => {
       try {
-        const path = captureJob.mode === "replay" ? `/capture/replay/${captureJob.jobId}/status` : `/capture/live/${captureJob.jobId}/status`;
+        const path = activeCaptureMode === "replay" ? `/capture/replay/${activeCaptureJobId}/status` : `/capture/live/${activeCaptureJobId}/status`;
         const current = await apiGet<CaptureJobRecord>(path);
         setCaptureJob(current);
         pollFailures = 0;
@@ -2004,7 +1668,7 @@ function UploadPage() {
       source.close();
       window.clearInterval(poll);
     };
-  }, [captureJob?.jobId, captureJob?.mode, captureJob?.status, reloadAnalysis]);
+  }, [activeCaptureJobId, activeCaptureMode, activeCaptureStatus, reloadAnalysis]);
 
   function update<K extends keyof EvidenceIntakeForm>(key: K, value: EvidenceIntakeForm[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -2532,7 +2196,7 @@ function PacketExplorerPage() {
         (severity === "all" || packet.severity === severity)
       );
     });
-  }, [destinationIp, port, protocol, query, sessionId, severity, sourceIp]);
+  }, [destinationIp, packets, port, protocol, query, sessionId, severity, sourceIp]);
 
   return (
     <PageFrame title={t("packetExplorer")} description={t("packetExplorerDesc")}>
@@ -3466,7 +3130,7 @@ function SystemPage() {
       apiGet<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string }>("/ml/model-status").then(setMlStatus).catch(() => undefined);
       apiGet<Record<string, number>>("/system/metrics").then(setMetrics).catch(() => undefined);
       apiGet<{ results: typeof deadLetters }>("/system/dead-letter").then((payload) => setDeadLetters(payload.results)).catch(() => undefined);
-      apiGet<{ processingMode?: string; queueProvider?: string; workerMode?: string; results: typeof workerStatus.results }>("/system/workers").then(setWorkerStatus).catch(() => undefined);
+      apiGet<{ processingMode?: string; queueProvider?: string; workerMode?: string; results: { name: string; status: string; lastSeen?: string; currentJobId?: string; replicaCount?: number }[] }>("/system/workers").then(setWorkerStatus).catch(() => undefined);
       apiGet<{ results: SensorRecord[] }>("/system/sensors").then((payload) => setSensors(payload.results)).catch(() => undefined);
       apiGet<CapacityRecord>("/system/capacity").then(setCapacity).catch(() => undefined);
     }
@@ -3929,7 +3593,10 @@ function CaseDetailPage() {
     };
   }, [applyWorkspace, caseId, setActiveCaseId]);
 
-  const availableTabs = workspace?.workspace.availableTabs ?? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true };
+  const availableTabs = useMemo(
+    () => workspace?.workspace.availableTabs ?? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true },
+    [workspace?.workspace.availableTabs],
+  );
   const dataMessages = workspace?.workspace.dataMessages ?? {};
   const tabVisible = useCallback((value: string) => {
     if (value === "activity") return availableTabs.suspiciousActivity;
@@ -4339,15 +4006,6 @@ function PageFrame({ title, description, children }: { title: string; descriptio
       </div>
       {children}
     </motion.main>
-  );
-}
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="mb-10 max-w-4xl">
-      <h2 className="text-4xl font-black tracking-normal text-strong md:text-5xl">{title}</h2>
-      <p className="mt-3 max-w-2xl text-sm leading-7 text-muted">{description}</p>
-    </div>
   );
 }
 
