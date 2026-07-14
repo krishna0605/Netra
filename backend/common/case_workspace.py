@@ -218,22 +218,49 @@ def refresh_case_workspace_snapshot(case: Case, job: ProcessingJob | None = None
     return snapshot
 
 
-def refresh_case_workspace_artifacts(case: Case) -> CaseAnalysisSnapshot:
+def refresh_case_workspace_artifacts(
+    case: Case,
+    *,
+    report: Report | None = None,
+    custody_event: CustodyLedgerEvent | None = None,
+) -> CaseAnalysisSnapshot:
     """Refresh report and custody sections without rebuilding analysis-derived data."""
-    snapshot = CaseAnalysisSnapshot.objects.filter(case=case).first()
+    snapshot = case._state.fields_cache.get("analysis_snapshot") or CaseAnalysisSnapshot.objects.filter(case=case).first()
     if not snapshot or not isinstance(snapshot.snapshot_json, dict) or not snapshot.snapshot_json:
         return refresh_case_workspace_snapshot(case)
 
     snapshot_json = deepcopy(snapshot.snapshot_json)
-    reports = [
-        _report_payload(report)
-        for report in Report.objects.select_related("case").filter(case=case).order_by("-created_at")[:50]
-    ]
-    custody_rows = [
-        custody_event_dict(row)
-        for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")[:20]
-    ]
-    custody_verification = verify_case_ledger(case) if custody_rows else {"verified": False, "eventCount": 0, "latestHash": ""}
+    existing_reports = snapshot_json.get("reports") if isinstance(snapshot_json.get("reports"), dict) else {}
+    reports = list(existing_reports.get("items") or [])
+    if report is not None:
+        report.case = case
+        new_report = _report_payload(report)
+        reports = [new_report, *[item for item in reports if item.get("id") != new_report["id"]]][:50]
+    else:
+        reports = [
+            _report_payload(row)
+            for row in Report.objects.select_related("case").filter(case=case).order_by("-created_at")[:50]
+        ]
+
+    existing_custody = snapshot_json.get("custody") if isinstance(snapshot_json.get("custody"), dict) else {}
+    custody_rows = list(existing_custody.get("eventsPreview") or [])
+    custody_verification = dict(existing_custody.get("verification") or {})
+    if custody_event is not None:
+        new_event = custody_event_dict(custody_event)
+        custody_rows = [new_event, *[item for item in custody_rows if item.get("id") != new_event["id"]]][:20]
+        prior_latest_hash = str(custody_verification.get("latestHash") or "")
+        chain_continues = not prior_latest_hash or custody_event.previous_hash == prior_latest_hash
+        custody_verification.update({
+            "verified": bool(custody_verification.get("verified", True) and chain_continues),
+            "eventCount": int(custody_verification.get("eventCount") or 0) + 1,
+            "latestHash": custody_event.event_hash,
+        })
+    else:
+        custody_rows = [
+            custody_event_dict(row)
+            for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")[:20]
+        ]
+        custody_verification = verify_case_ledger(case) if custody_rows else {"verified": False, "eventCount": 0, "latestHash": ""}
     snapshot_json["reports"] = {"latestReport": reports[0] if reports else None, "items": reports}
     snapshot_json["custody"] = {
         "status": "verified" if custody_verification.get("verified") else "pending",
