@@ -16,6 +16,7 @@ import {
   Search,
   Upload,
   UploadCloud,
+  type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -81,12 +82,12 @@ import type {
   CaptureJobRecord,
   CaptureScheduleRecord,
   CapacityRecord,
-  OperationalEventRecord,
   ReportRecord,
   SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
-import { refreshStoredSupabaseSession, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { beginResumableUpload, type DirectUploadSession, type ResumableUploadHandle } from "./lib/resumableUpload";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
 import {
   PublicAboutPage,
@@ -811,7 +812,7 @@ type AppState = {
   packets: PacketRecord[];
   payloadFindings: PayloadFinding[];
   protocolChartData: { name: string; value: number }[];
-  reloadAnalysis: () => Promise<void>;
+  reloadAnalysis: (caseIdOverride?: string | null) => Promise<void>;
   sessions: SessionRecord[];
   summary: DashboardSummary;
   trafficTimelineData: { time: string; mb: number; alerts: number }[];
@@ -825,11 +826,45 @@ type AppState = {
   accessLogRecords: AccessLogRecord[];
   complianceRecords: ComplianceRecord[];
   exportRecords: ExportRecord[];
+  deploymentAccess: DeploymentAccess;
+};
+
+type DeploymentModuleKey = "lab" | "sensors" | "schedules" | "integrations" | "retention" | "system";
+type DeploymentModuleAccess = { enabled: boolean; visible: boolean; reason: string };
+type DeploymentAccess = {
+  verified: boolean;
+  user: string;
+  role: string;
+  profile: string;
+  hostCaptureEnabled: boolean;
+  modules: Record<DeploymentModuleKey, DeploymentModuleAccess>;
+};
+
+const DEFAULT_DEPLOYMENT_ACCESS: DeploymentAccess = {
+  verified: false,
+  user: "",
+  role: "Viewer",
+  profile: import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local",
+  hostCaptureEnabled: false,
+  modules: {
+    lab: { enabled: false, visible: false, reason: "Lab access has not been verified." },
+    sensors: { enabled: false, visible: false, reason: "Sensor access has not been verified." },
+    schedules: { enabled: false, visible: false, reason: "Scheduling access has not been verified." },
+    integrations: { enabled: false, visible: false, reason: "Integration access has not been verified." },
+    retention: { enabled: false, visible: false, reason: "Retention access has not been verified." },
+    system: { enabled: false, visible: false, reason: "Administrator access has not been verified." },
+  },
 };
 
 const NetraContext = createContext<AppState | null>(null);
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const DEPLOYMENT_PROFILE = import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local";
+const HACKATHON_CORE = DEPLOYMENT_PROFILE === "hackathon-core";
+const BPF_FILTER_ENABLED = import.meta.env.VITE_BPF_FILTER_ENABLED === "1";
+const DIRECT_UPLOAD_ENABLED = import.meta.env.VITE_DIRECT_UPLOAD_ENABLED === "1";
+const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
+const ACTIVE_UPLOAD_JOB_KEY = "netra-active-upload-job";
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
 const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
   "Auto-detect": [".pcap", ".pcapng", ".log", ".txt", ".csv", ".json", ".ndjson", ".zip"],
@@ -857,6 +892,87 @@ type EvidenceNormalizationPreview = {
   signals: string[];
   features?: { extension?: string; magicType?: string; lineFormat?: string | null; sampleSignals?: string[] };
 };
+
+type UploadStage = "idle" | "uploading" | "processing" | "queued" | "complete" | "failed";
+type UploadTransferState = {
+  bytesUploaded: number;
+  speedBytesPerSecond: number;
+  etaSeconds: number | null;
+  paused: boolean;
+  retryAttempt: number;
+  message: string;
+};
+type EvidenceUploadPayload = Partial<EvidenceNormalizationPreview> & {
+  error?: string;
+  reason?: string;
+  caseId?: string;
+  status?: string;
+  sha256?: string;
+  encrypted_sha256?: string;
+  keyId?: string;
+  jobId?: string;
+  job?: { steps?: { name: string; status: string }[] };
+  detectedAttackClasses?: string[];
+  riskLevel?: string;
+  analysis?: {
+    packets?: number;
+    sessions?: number;
+    protocolsDecoded?: number;
+    payloadFindings?: number;
+    alerts?: number;
+  };
+};
+
+type UploadResult = {
+  topClass?: string;
+  risk?: string;
+  hash?: string;
+  encryptedHash?: string;
+  keyId?: string;
+  jobId?: string;
+  filename?: string;
+  packets?: number;
+  sessions?: number;
+  protocolsDecoded?: number;
+  payloadFindings?: number;
+  alerts?: number;
+  steps?: { name: string; status: string }[];
+};
+
+function formatEta(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds)) return "calculating ETA";
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) return `${whole}s remaining`;
+  const minutes = Math.floor(whole / 60);
+  const remainder = whole % 60;
+  return `${minutes}m ${remainder}s remaining`;
+}
+
+function uploadFormWithProgress<T>(path: string, form: FormData, onProgress: (percent: number) => void, onUploaded: () => void) {
+  return new Promise<{ ok: boolean; status: number; payload: T }>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_BASE}${path}`);
+    new Headers(netraHeaders()).forEach((value, name) => request.setRequestHeader(name, value));
+    request.timeout = 240_000;
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    };
+    request.upload.onload = () => {
+      onProgress(100);
+      onUploaded();
+    };
+    request.onload = () => {
+      try {
+        resolve({ ok: request.status >= 200 && request.status < 300, status: request.status, payload: JSON.parse(request.responseText) as T });
+      } catch {
+        reject(new Error(`Upload returned an unreadable response (${request.status || "network error"}).`));
+      }
+    };
+    request.onerror = () => reject(new Error("Upload failed before the server responded."));
+    request.ontimeout = () => reject(new Error("Upload timed out while the server was processing the evidence."));
+    request.send(form);
+  });
+}
 
 function createDefaultIntakeForm(): EvidenceIntakeForm {
   const now = new Date();
@@ -946,13 +1062,17 @@ function localNormalizationPreview(file: File, selectedType: EvidenceIntakeForm[
 }
 
 async function apiGet<T>(path: string): Promise<T> {
+  if (SUPABASE_AUTH_ENABLED && !getCurrentAccessToken()) {
+    const token = await ensureCurrentAccessToken();
+    if (!token) throw new Error(`API ${path} requires an authenticated session`);
+  }
   const response = await fetch(`${API_BASE}${path}`, { headers: netraHeaders() });
   if (!response.ok) throw new Error(`API ${path} failed with ${response.status}`);
   return response.json() as Promise<T>;
 }
 
 function netraHeaders(extra?: HeadersInit): HeadersInit {
-  const token = window.localStorage.getItem("netra-supabase-access-token");
+  const token = getCurrentAccessToken();
   return {
     ...(extra ?? {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1073,6 +1193,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
   const [trafficTimelineDataState, setTrafficTimelineDataState] = useState<{ time: string; mb: number; alerts: number }[]>([]);
   const [zeekState, setZeekState] = useState<ZeekEvidence | null>(null);
   const [activeCaseId, setActiveCaseIdState] = useState<string | null>(() => window.localStorage.getItem("netra-active-case"));
+  const [deploymentAccess, setDeploymentAccess] = useState<DeploymentAccess>(DEFAULT_DEPLOYMENT_ACCESS);
   const refreshTimerRef = useRef<number | null>(null);
   const [language, setLanguage] = useState<Language>(() => {
     const stored = window.localStorage.getItem("netra-language");
@@ -1083,14 +1204,31 @@ function NetraProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem("netra-language", language);
   }, [language]);
 
+  const refreshDeploymentAccess = useCallback(async () => {
+    const payload = await apiGet<{
+      user: string;
+      role: string;
+      deployment: { profile: string; hostCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
+    }>("/auth/me");
+    setDeploymentAccess({
+      verified: true,
+      user: payload.user,
+      role: payload.role,
+      profile: payload.deployment.profile,
+      hostCaptureEnabled: payload.deployment.hostCaptureEnabled,
+      modules: payload.deployment.modules,
+    });
+  }, []);
+
   const setActiveCaseId = useCallback((caseId: string | null) => {
     setActiveCaseIdState(caseId);
     if (caseId) window.localStorage.setItem("netra-active-case", caseId);
     else window.localStorage.removeItem("netra-active-case");
   }, []);
 
-  const reloadAnalysis = useCallback(async () => {
-    const data = await loadAnalysisData(activeCaseId);
+  const reloadAnalysis = useCallback(async (caseIdOverride?: string | null) => {
+    const requestedCaseId = caseIdOverride === undefined ? activeCaseId : caseIdOverride;
+    const data = await loadAnalysisData(requestedCaseId);
     setAccessLogRecordsState(data.accessLogs);
     setComplianceRecordsState(data.complianceRecords);
     setAlertRecords(data.alerts);
@@ -1122,9 +1260,10 @@ function NetraProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !window.localStorage.getItem("netra-supabase-access-token"))) return;
+    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !getCurrentAccessToken())) return;
+    refreshDeploymentAccess().catch(() => setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS));
     reloadAnalysis().catch(() => undefined);
-  }, [reloadAnalysis]);
+  }, [refreshDeploymentAccess, reloadAnalysis]);
 
   useEffect(() => {
     if (!SUPABASE_AUTH_ENABLED || !supabase) return undefined;
@@ -1134,14 +1273,18 @@ function NetraProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = client.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
-        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        setCurrentAccessToken(session.access_token);
+        refreshDeploymentAccess().catch(() => setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS));
         reloadAnalysis().catch(() => undefined);
       } else {
-        window.localStorage.removeItem("netra-supabase-access-token");
+        setCurrentAccessToken();
+        setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
       }
     });
     if (!SUPABASE_REALTIME_ENABLED) {
+      const pollTimer = window.setInterval(scheduleRefresh, 5000);
       return () => {
+        window.clearInterval(pollTimer);
         subscription.unsubscribe();
       };
     }
@@ -1156,7 +1299,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe();
       client.removeChannel(channel);
     };
-  }, [reloadAnalysis, scheduleRefresh]);
+  }, [refreshDeploymentAccess, reloadAnalysis, scheduleRefresh]);
 
   const addCaseNote = useCallback(
     (caseId: string, note: string) => {
@@ -1216,13 +1359,14 @@ function NetraProvider({ children }: { children: ReactNode }) {
       trafficTimelineData: trafficTimelineDataState,
       zeek: zeekState,
       complianceRecords: complianceRecordsState,
+      deploymentAccess,
       t: (key: string) => translations[language][key] ?? key,
       setLanguage,
       setIntakeForm,
       setActiveCaseId,
       addCaseNote,
     }),
-    [accessLogRecordsState, activeCaseId, addCaseNote, alertRecords, anomaliesState, caseRecords, complianceRecordsState, decodedProtocolsState, detectionMatchesState, evidenceState, exportRecordsState, intakeForm, language, networkFlowsState, packetsState, payloadFindingsState, protocolChartDataState, reloadAnalysis, sessionsState, summaryState, trafficTimelineDataState, setActiveCaseId, zeekState],
+    [accessLogRecordsState, activeCaseId, addCaseNote, alertRecords, anomaliesState, caseRecords, complianceRecordsState, decodedProtocolsState, deploymentAccess, detectionMatchesState, evidenceState, exportRecordsState, intakeForm, language, networkFlowsState, packetsState, payloadFindingsState, protocolChartDataState, reloadAnalysis, sessionsState, summaryState, trafficTimelineDataState, setActiveCaseId, zeekState],
   );
 
   return <NetraContext.Provider value={value}>{children}</NetraContext.Provider>;
@@ -1278,10 +1422,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
-        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        setCurrentAccessToken(session.access_token);
         setStatus("signed-in");
       } else {
-        window.localStorage.removeItem("netra-supabase-access-token");
+        setCurrentAccessToken();
         setStatus("signed-out");
       }
     });
@@ -1297,7 +1441,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
         <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
           <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
           <h1 className="mt-2 text-2xl font-bold text-strong">Checking session</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">Verifying your Supabase sign-in before opening the investigation console.</p>
+          <p className="mt-2 text-sm leading-6 text-muted">Verifying your secure session before opening the investigation console.</p>
         </section>
       </main>
     );
@@ -1353,14 +1497,14 @@ function LoginPage() {
       toast.error(error.message);
       return;
     }
-    if (data.session?.access_token) window.localStorage.setItem("netra-supabase-access-token", data.session.access_token);
-    toast.success("Signed in to Supabase");
+    setCurrentAccessToken(data.session?.access_token);
+    toast.success("Secure session verified");
     navigate(from, { replace: true });
   }
 
   async function signOut() {
     if (supabase) await supabase.auth.signOut();
-    window.localStorage.removeItem("netra-supabase-access-token");
+    setCurrentAccessToken();
     setHasSession(false);
     toast.success("Signed out");
   }
@@ -1371,7 +1515,7 @@ function LoginPage() {
         <div className="mb-6">
           <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Secure access</Link>
           <h1 className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
-          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts are created in the Supabase project by an administrator.</p>
+          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
         </div>
         {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.</Alert>}
         {checkingSession && <Alert>Checking whether this browser already has an active Netra session.</Alert>}
@@ -1417,6 +1561,28 @@ function LanguageControl() {
   );
 }
 
+function ModuleRoute({ module, children }: { module: DeploymentModuleKey; children: ReactNode }) {
+  const { deploymentAccess } = useNetra();
+  const access = deploymentAccess.modules[module];
+  if (!deploymentAccess.verified) {
+    return <PageFrame title="Checking access" description="Verifying your role and the active deployment profile."><div /></PageFrame>;
+  }
+  if (!access.visible) return <Navigate to="/app/upload" replace />;
+  if (!access.enabled) {
+    return (
+      <PageFrame title="Not configured" description={access.reason}>
+        <Alert>{module === "lab" ? "Use normal evidence upload for this deployment. Native capture must run through an enrolled external sensor and replay requires an isolated lab environment." : "This operation is intentionally unavailable in the active deployment profile. No action was simulated or queued."}</Alert>
+        <div className="surface rounded-[1.5rem] p-5">
+          <MetadataRow label="Deployment profile" value={deploymentAccess.profile} />
+          <MetadataRow label="Module" value={module} />
+          <MetadataRow label="Status" value="Disabled" />
+        </div>
+      </PageFrame>
+    );
+  }
+  return <>{children}</>;
+}
+
 function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   return (
@@ -1451,12 +1617,13 @@ function AppShell() {
               <Route path="reports" element={<EvidenceReportPage />} />
               <Route path="reports/:caseId" element={<ReportPage />} />
               <Route path="exports" element={<ExportCenterPage />} />
-              <Route path="integrations" element={<IntegrationsPage />} />
+              <Route path="lab" element={<ModuleRoute module="lab"><LabToolsPage /></ModuleRoute>} />
+              <Route path="integrations" element={<ModuleRoute module="integrations"><IntegrationsPage /></ModuleRoute>} />
               <Route path="compliance" element={<CompliancePage />} />
-              <Route path="system" element={<SystemPage />} />
-              <Route path="sensors" element={<SensorsPage />} />
-              <Route path="schedules" element={<SchedulesPage />} />
-              <Route path="retention" element={<RetentionPage />} />
+              <Route path="system" element={<ModuleRoute module="system"><SystemPage /></ModuleRoute>} />
+              <Route path="sensors" element={<ModuleRoute module="sensors"><SensorsPage /></ModuleRoute>} />
+              <Route path="schedules" element={<ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>} />
+              <Route path="retention" element={<ModuleRoute module="retention"><RetentionPage /></ModuleRoute>} />
             </Routes>
           </div>
         </div>
@@ -1466,25 +1633,34 @@ function AppShell() {
 }
 
 function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
-  const { t } = useNetra();
-  const navGroups = [
+  const { t, deploymentAccess } = useNetra();
+  const navItem = (icon: LucideIcon, label: string, href: string): [LucideIcon, string, string] => [icon, label, href];
+  const navGroups: { label: string; items: [LucideIcon, string, string][] }[] = [
     {
       label: t("mainWorkflow"),
       items: [
-        [Upload, "Start Investigation", "/app/upload"],
-        [FileSearch, t("cases"), "/app/cases"],
-        [FileText, t("evidenceReport"), "/app/reports"],
-        [AlertTriangle, t("suspiciousActivity"), "/app/activity"],
-        [Database, t("trafficEvidence"), "/app/evidence"],
+        navItem(Upload, "Start Investigation", "/app/upload"),
+        navItem(FileSearch, t("cases"), "/app/cases"),
+        navItem(FileText, t("evidenceReport"), "/app/reports"),
+        navItem(AlertTriangle, t("suspiciousActivity"), "/app/activity"),
+        navItem(Database, t("trafficEvidence"), "/app/evidence"),
       ],
     },
-    {
-      label: t("advancedTools"),
+    ...(deploymentAccess.modules.lab.visible ? [{
+      label: "Lab Tools",
+      items: [navItem(Activity, "Capture and Replay", "/app/lab")],
+    }] : []),
+    ...(deploymentAccess.modules.system.visible ? [{
+      label: "Administration",
       items: [
-        [Activity, t("systemTools"), "/app/system"],
+        navItem(Activity, t("systemTools"), "/app/system"),
+        navItem(Database, "Sensors", "/app/sensors"),
+        navItem(History, "Schedules", "/app/schedules"),
+        navItem(FileText, "Integrations", "/app/integrations"),
+        navItem(Fingerprint, "Retention", "/app/retention"),
       ],
-    },
-  ] as const;
+    }] : []),
+  ];
   return (
     <>
       <div className={cn("mb-8 flex items-center", collapsed ? "flex-col gap-3" : "justify-between gap-2")}>
@@ -1572,106 +1748,71 @@ function UploadPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<EvidenceIntakeForm>(intakeForm);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [replayFile, setReplayFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadTransfer, setUploadTransfer] = useState<UploadTransferState>({
+    bytesUploaded: 0,
+    speedBytesPerSecond: 0,
+    etaSeconds: null,
+    paused: false,
+    retryAttempt: 0,
+    message: "",
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [sensors, setSensors] = useState<SensorRecord[]>([]);
-  const [sensorId, setSensorId] = useState("");
-  const [interfaceName, setInterfaceName] = useState("");
-  const [captureJob, setCaptureJob] = useState<CaptureJobRecord | null>(null);
-  const [events, setEvents] = useState<OperationalEventRecord[]>([]);
-  const [uploadResult, setUploadResult] = useState<{ topClass?: string; risk?: string; hash?: string; encryptedHash?: string; keyId?: string; jobId?: string; steps?: { name: string; status: string }[] } | null>(null);
+  const resumableUploadRef = useRef<ResumableUploadHandle | null>(null);
+  const transferSampleRef = useRef({ bytes: 0, timestamp: 0, speed: 0 });
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [normalization, setNormalization] = useState<EvidenceNormalizationPreview | null>(null);
-  const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
+  const [uploadIdempotencyKey, setUploadIdempotencyKey] = useState(() => window.crypto.randomUUID());
+  const activeJobPollRef = useRef<string | null>(null);
   const selectedFileExtensionAllowed = selectedFile ? fileExtensionAllowed(selectedFile, draft.evidenceType) : true;
+  const selectedFileTooLarge = Boolean(selectedFile && selectedFile.size > MAX_UPLOAD_MB * 1024 * 1024);
   const effectiveExtensionAllowed = normalization ? normalization.extensionAllowed !== false : selectedFileExtensionAllowed;
   const normalizationCode = normalization?.code ?? "";
   const normalizationBlocked = Boolean(
     selectedFile && (
+      selectedFileTooLarge ||
       !effectiveExtensionAllowed ||
       normalization?.extensionAllowed === false ||
-      normalization?.validForSelectedType === false ||
-      (normalization?.validForSelectedType === true && normalization.normalizedType !== "PCAP") ||
-      normalizationCode === "evidence_type_not_analyzable"
+      normalization?.validForSelectedType === false
     )
   );
   const normalizationTone: "normal" | "danger" | "success" = selectedFile && normalizationBlocked ? "danger" : selectedFile && normalization?.validForSelectedType ? "success" : "normal";
+  const bpfAvailableForEvidence = BPF_FILTER_ENABLED && (
+    draft.evidenceType === "PCAP" ||
+    (draft.evidenceType === "Auto-detect" && (!normalization || normalization.normalizedType === "PCAP"))
+  );
   const normalizationLabel =
     !selectedFile ? "" :
     !normalization ? "Checking" :
+    normalizationCode === "upload_too_large" ? "File too large" :
     normalizationCode === "unsupported_evidence_extension" || normalization.extensionAllowed === false ? "Unsupported file type" :
-    normalizationCode === "evidence_type_not_analyzable" || (normalization.validForSelectedType && normalization.normalizedType !== "PCAP") ? "Parser not enabled" :
     normalization.validForSelectedType ? "Verified" :
     "Mismatch";
-  const activeCaptureJobId = captureJob?.jobId;
-  const activeCaptureMode = captureJob?.mode;
-  const activeCaptureStatus = captureJob?.status;
-
-  useEffect(() => {
-    apiGet<{ results: SensorRecord[] }>("/sensors")
-      .then((payload) => {
-        setSensors(payload.results);
-        const online = payload.results.find((sensor) => sensor.status === "online");
-        if (online) {
-          setSensorId((current) => current || online.id);
-          setInterfaceName((current) => current || online.interfaces[0]?.name || "");
-        }
-      })
-      .catch(() => setSensors([]));
-  }, []);
-
-  useEffect(() => {
-    if (!activeCaptureJobId || !activeCaptureMode || !activeCaptureStatus || ["completed", "failed", "stopped"].includes(activeCaptureStatus)) return;
-    const source = new EventSource(`${API_BASE}/events/stream?captureJobId=${encodeURIComponent(activeCaptureJobId)}`);
-    let pollFailures = 0;
-    const refreshStatus = async () => {
-      try {
-        const path = activeCaptureMode === "replay" ? `/capture/replay/${activeCaptureJobId}/status` : `/capture/live/${activeCaptureJobId}/status`;
-        const current = await apiGet<CaptureJobRecord>(path);
-        setCaptureJob(current);
-        pollFailures = 0;
-        if (current.status === "completed") {
-          await reloadAnalysis();
-          toast.success("Capture finalized into immutable encrypted evidence.");
-        }
-      } catch {
-        pollFailures += 1;
-      }
-    };
-    const handleOperationalEvent = (message: MessageEvent) => {
-      const event = JSON.parse(message.data) as OperationalEventRecord;
-      setEvents((current) => [event, ...current].slice(0, 24));
-      void refreshStatus();
-    };
-    const eventTypes = [
-      "sensor.connected",
-      "sensor.heartbeat",
-      "capture.started",
-      "capture.chunk_received",
-      "capture.chunk_parsed",
-      "capture.progress",
-      "analysis.started",
-      "analysis.completed",
-      "capture.completed",
-      "capture.failed",
-      "worker.warning",
-    ];
-    source.onmessage = handleOperationalEvent;
-    eventTypes.forEach((eventType) => source.addEventListener(eventType, handleOperationalEvent as EventListener));
-    source.onerror = () => {
-      pollFailures += 1;
-      if (pollFailures > 2) source.close();
-    };
-    const poll = window.setInterval(() => void refreshStatus(), 5000);
-    return () => {
-      eventTypes.forEach((eventType) => source.removeEventListener(eventType, handleOperationalEvent as EventListener));
-      source.close();
-      window.clearInterval(poll);
-    };
-  }, [activeCaptureJobId, activeCaptureMode, activeCaptureStatus, reloadAnalysis]);
+  const uploadStageLabel: Record<UploadStage, string> = {
+    idle: "Ready",
+    uploading: "Uploading evidence",
+    processing: "Upload complete — validating, hashing, encrypting, and analyzing",
+    queued: "Encrypted and queued for analysis",
+    complete: "Evidence analysis complete",
+    failed: "Evidence processing failed",
+  };
 
   function update<K extends keyof EvidenceIntakeForm>(key: K, value: EvidenceIntakeForm[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectEvidenceFile(file: File | null) {
+    setSelectedFile(file);
+    setNormalization(null);
+    setUploadResult(null);
+    setUploadStage("idle");
+    setUploadProgress(0);
+    setUploadTransfer({ bytesUploaded: 0, speedBytesPerSecond: 0, etaSeconds: null, paused: false, retryAttempt: 0, message: "" });
+    resumableUploadRef.current = null;
+    transferSampleRef.current = { bytes: 0, timestamp: 0, speed: 0 };
+    setUploadIdempotencyKey(window.crypto.randomUUID());
   }
 
   useEffect(() => {
@@ -1679,9 +1820,30 @@ function UploadPage() {
       setNormalization(null);
       return;
     }
+    if (selectedFileTooLarge) {
+      const reason = `This deployment accepts files up to ${MAX_UPLOAD_MB} MiB. The selected file is ${formatBytes(selectedFile.size)}.`;
+      setNormalization({
+        code: "upload_too_large",
+        selectedType: draft.evidenceType,
+        detectedType: "Not checked",
+        normalizedType: "Unknown",
+        recommendedType: draft.evidenceType,
+        validForSelectedType: false,
+        valid: false,
+        confidence: 0,
+        parser: "none",
+        reason,
+        message: reason,
+        signals: ["client-size-limit"],
+      });
+      return;
+    }
     let cancelled = false;
     const form = new FormData();
-    form.append("file", selectedFile);
+    const previewFile = DIRECT_UPLOAD_ENABLED && selectedFile.size > 256 * 1024
+      ? new File([selectedFile.slice(0, 256 * 1024)], selectedFile.name, { type: selectedFile.type, lastModified: selectedFile.lastModified })
+      : selectedFile;
+    form.append("file", previewFile);
     form.append("evidenceType", draft.evidenceType);
     fetch(`${API_BASE}/evidence/normalize-preview`, { method: "POST", headers: netraHeaders(), body: form })
       .then(async (response) => {
@@ -1695,11 +1857,113 @@ function UploadPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedFile, draft.evidenceType]);
+  }, [selectedFile, selectedFileTooLarge, draft.evidenceType]);
+
+  async function startResumableProcessing(file: File) {
+    const accessToken = await ensureCurrentAccessToken();
+    if (!accessToken) throw new Error("Your sign-in session expired. Sign in again before uploading evidence.");
+    const createResponse = await fetch(`${API_BASE}/evidence/upload-sessions`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json", "Idempotency-Key": uploadIdempotencyKey }),
+      body: JSON.stringify({
+        caseId: draft.caseNumber,
+        filename: file.name,
+        sizeBytes: file.size,
+        contentType: file.type || "application/octet-stream",
+        lastModified: String(file.lastModified),
+        evidenceType: draft.evidenceType,
+        sourceLocation: draft.sourceLocation,
+        priority: draft.priority,
+        remarks: draft.remarks,
+        flags: draft.flags ?? [],
+        sourceIp: draft.sourceIp,
+        destinationIp: draft.destinationIp,
+        protocol: draft.protocol,
+        port: draft.port,
+        durationSeconds: draft.durationSeconds,
+        packetLimit: draft.packetLimit,
+        bpfFilter: draft.bpfFilter,
+      }),
+    });
+    const created = await createResponse.json() as DirectUploadSession & { error?: string };
+    if (!createResponse.ok) throw new Error(created.error ?? "A resumable upload session could not be created.");
+
+    transferSampleRef.current = { bytes: 0, timestamp: performance.now(), speed: 0 };
+    const handle = beginResumableUpload(file, created, accessToken, {
+      onProgress: ({ bytesUploaded, bytesTotal, percentage }) => {
+        const now = performance.now();
+        const previous = transferSampleRef.current;
+        const elapsedSeconds = Math.max(0.001, (now - previous.timestamp) / 1000);
+        let speed = previous.speed;
+        if (bytesUploaded >= previous.bytes && elapsedSeconds >= 0.2) {
+          const instantSpeed = (bytesUploaded - previous.bytes) / elapsedSeconds;
+          speed = previous.speed > 0 ? previous.speed * 0.7 + instantSpeed * 0.3 : instantSpeed;
+          transferSampleRef.current = { bytes: bytesUploaded, timestamp: now, speed };
+        }
+        setUploadProgress(Math.min(100, Math.round(percentage)));
+        setUploadTransfer((current) => ({
+          ...current,
+          bytesUploaded,
+          speedBytesPerSecond: speed,
+          etaSeconds: speed > 0 ? Math.max(0, (bytesTotal - bytesUploaded) / speed) : null,
+          paused: false,
+          message: current.retryAttempt > 0 ? "Connection restored; upload is continuing." : "Resumable upload active.",
+        }));
+      },
+      onRetry: (attempt) => {
+        setUploadTransfer((current) => ({
+          ...current,
+          retryAttempt: attempt,
+          message: `Network interruption detected. Automatic retry ${attempt} is scheduled.`,
+        }));
+      },
+      onResumed: () => {
+        setUploadTransfer((current) => ({ ...current, message: "A previous partial upload was found and resumed." }));
+      },
+    });
+    resumableUploadRef.current = handle;
+    await handle.completion;
+    resumableUploadRef.current = null;
+    setUploadProgress(100);
+    setUploadStage("processing");
+    setUploadTransfer((current) => ({ ...current, bytesUploaded: file.size, etaSeconds: 0, message: "Upload complete. Server validation is running." }));
+
+    const finalizeResponse = await fetch(`${API_BASE}/evidence/upload-sessions/${created.id}/finalize`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    const finalized = await finalizeResponse.json() as DirectUploadSession & { error?: string };
+    if (!finalizeResponse.ok) throw new Error(finalized.error ?? "The uploaded evidence could not be finalized.");
+    if (!finalized.jobId) throw new Error("The upload was verified, but durable analysis has not been queued yet.");
+
+    setActiveCaseId(finalized.caseId);
+    setUploadStage("queued");
+    setUploadResult({ jobId: finalized.jobId, filename: file.name });
+    window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: finalized.jobId, caseId: finalized.caseId }));
+    toast.success("Resumable evidence upload verified and queued for analysis.");
+    void followUploadJob(finalized.jobId, finalized.caseId);
+  }
+
+  async function toggleResumablePause() {
+    const handle = resumableUploadRef.current;
+    if (!handle) return;
+    if (handle.isPaused()) {
+      handle.resume();
+      setUploadTransfer((current) => ({ ...current, paused: false, message: "Upload resumed." }));
+      return;
+    }
+    await handle.pause();
+    setUploadTransfer((current) => ({ ...current, paused: true, message: "Upload paused. Resume when the connection is ready." }));
+  }
 
   async function startProcessing() {
     if (!selectedFile) {
       toast.error("Choose an evidence file first.");
+      return;
+    }
+    if (selectedFileTooLarge) {
+      toast.error(`Choose a file no larger than ${MAX_UPLOAD_MB} MiB for this deployment.`);
       return;
     }
     if (normalizationBlocked) {
@@ -1708,6 +1972,8 @@ function UploadPage() {
     }
     setIntakeForm(draft);
     setProcessing(true);
+    setUploadStage("uploading");
+    setUploadProgress(0);
     const form = new FormData();
     form.append("caseId", draft.caseNumber);
     form.append("file", selectedFile);
@@ -1725,115 +1991,109 @@ function UploadPage() {
     form.append("packetLimit", draft.packetLimit);
     form.append("bpfFilter", draft.bpfFilter);
     form.append("flags", JSON.stringify(draft.flags ?? []));
+    form.append("idempotencyKey", uploadIdempotencyKey);
     try {
-      const response = await fetch(`${API_BASE}/evidence/upload`, { method: "POST", headers: netraHeaders(), body: form });
-      const payload = await response.json();
-      if (!response.ok) {
-        if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap" || payload.code === "evidence_type_not_analyzable") {
-          setNormalization(payload);
-        }
-        throw new Error(payload.reason ?? payload.error ?? "Upload failed");
-      }
-      setActiveCaseId(payload.caseId);
-      if (payload.status === "queued") {
-        setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
-        toast.success("Evidence encrypted and queued for async worker analysis.");
-        navigate("/app/overview");
-        void followUploadJob(payload.jobId);
+      if (DIRECT_UPLOAD_ENABLED) {
+        await startResumableProcessing(selectedFile);
         return;
       }
-      await reloadAnalysis();
-      setUploadResult({ topClass: payload.detectedAttackClasses?.[0], risk: payload.riskLevel, hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
+      const response = await uploadFormWithProgress<EvidenceUploadPayload>(
+        "/evidence/upload",
+        form,
+        setUploadProgress,
+        () => setUploadStage("processing"),
+      );
+      const payload = response.payload;
+      if (!response.ok) {
+        if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap") {
+          setNormalization(payload as EvidenceNormalizationPreview);
+        }
+        setUploadStage("failed");
+        throw new Error(payload.reason ?? payload.error ?? "Upload failed");
+      }
+      setActiveCaseId(payload.caseId ?? null);
+      if (payload.status === "queued") {
+        setUploadStage("queued");
+        setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: payload.keyId, jobId: payload.jobId, steps: payload.job?.steps });
+        toast.success("Evidence encrypted and queued for async worker analysis.");
+        if (payload.jobId) {
+          window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: payload.jobId, caseId: payload.caseId }));
+          void followUploadJob(payload.jobId, payload.caseId);
+        }
+        return;
+      }
+      await reloadAnalysis(payload.caseId ?? null);
+      setUploadStage("complete");
+      setUploadResult({
+        topClass: payload.detectedAttackClasses?.[0],
+        risk: payload.riskLevel,
+        hash: payload.sha256,
+        encryptedHash: payload.encrypted_sha256,
+        keyId: payload.keyId,
+        jobId: payload.jobId,
+        filename: selectedFile.name,
+        packets: payload.analysis?.packets,
+        sessions: payload.analysis?.sessions,
+        protocolsDecoded: payload.analysis?.protocolsDecoded,
+        payloadFindings: payload.analysis?.payloadFindings,
+        alerts: payload.analysis?.alerts,
+        steps: payload.job?.steps,
+      });
       toast.success(t("evidenceToast"));
-      navigate("/app/overview");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "PCAP analysis failed");
+      setUploadStage("failed");
+      toast.error(error instanceof Error ? error.message : "Evidence analysis failed");
     } finally {
       setProcessing(false);
     }
   }
 
-  async function followUploadJob(jobId: string) {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 2000));
-      const job = await apiGet<{ status: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
-      if (!job) continue;
-      setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
-      if (job.status === "completed") {
-        await reloadAnalysis();
-        toast.success("Async evidence analysis completed.");
-        return;
+  const followUploadJob = useCallback(async (jobId: string, caseId?: string) => {
+    if (activeJobPollRef.current === jobId) return;
+    activeJobPollRef.current = jobId;
+    try {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const job = await apiGet<{ status: string; progress?: number; error?: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
+        if (job) {
+          setUploadProgress(Math.max(0, Math.min(100, job.progress ?? 0)));
+          setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
+          if (job.status === "completed") {
+            window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
+            setUploadStage("complete");
+            await reloadAnalysis(caseId);
+            toast.success("Async evidence analysis completed.");
+            return;
+          }
+          if (job.status === "failed" || job.status === "canceled") {
+            window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
+            setUploadStage("failed");
+            toast.error(job.error || `Async evidence analysis ${job.status}.`);
+            return;
+          }
+          setUploadStage("queued");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
-      if (job.status === "failed") {
-        toast.error("Async evidence analysis failed. Recovery fallback is available in the job record.");
-        return;
-      }
+      toast.error("Async analysis is still queued. Check System Monitor for worker health.");
+    } finally {
+      if (activeJobPollRef.current === jobId) activeJobPollRef.current = null;
     }
-    toast.error("Async analysis is still queued. Check System Monitor for worker health.");
-  }
+  }, [reloadAnalysis]);
 
-  async function startReplay() {
-    if (!replayFile) {
-      toast.error("Choose a PCAP file to replay.");
-      return;
+  useEffect(() => {
+    const raw = window.localStorage.getItem(ACTIVE_UPLOAD_JOB_KEY);
+    if (!raw) return;
+    try {
+      const active = JSON.parse(raw) as { jobId?: string; caseId?: string };
+      if (!active.jobId) return;
+      setUploadStage("queued");
+      setUploadResult((current) => ({ ...(current ?? {}), jobId: active.jobId }));
+      if (active.caseId) setActiveCaseId(active.caseId);
+      void followUploadJob(active.jobId, active.caseId);
+    } catch {
+      window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
     }
-    const form = new FormData();
-    form.append("file", replayFile);
-    form.append("caseId", draft.caseNumber);
-    form.append("speed", "5x");
-    form.append("chunkIntervalSeconds", "5");
-    form.append("packetLimit", draft.packetLimit || "10000");
-    const response = await fetch(`${API_BASE}/capture/replay/start`, { method: "POST", headers: netraHeaders(), body: form });
-    const payload = await response.json();
-    if (!response.ok) {
-      toast.error(payload.error ?? "Replay could not start");
-      return;
-    }
-    setCaptureJob(payload);
-    setActiveCaseId(payload.caseId);
-    toast.success("Replay feed started.");
-  }
-
-  async function startCapture() {
-    if (!sensorId || !interfaceName) {
-      toast.error("Start the native sensor and select one of its interfaces.");
-      return;
-    }
-    const response = await fetch(`${API_BASE}/capture/live/start`, {
-      method: "POST",
-      headers: netraHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        caseId: draft.caseNumber,
-        sensorId,
-        interfaceName,
-        durationSeconds: Number(draft.durationSeconds || 60),
-        packetLimit: Number(draft.packetLimit || 10000),
-        chunkIntervalSeconds: 5,
-        bpfFilter: draft.bpfFilter,
-        sourceIp: draft.sourceIp,
-        destinationIp: draft.destinationIp,
-        protocol: draft.protocol,
-        port: draft.port,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      toast.error(payload.error ?? "Live capture could not start");
-      return;
-    }
-    setCaptureJob(payload);
-    setActiveCaseId(payload.caseId);
-    toast.success("Bounded sensor capture queued.");
-  }
-
-  async function stopActiveCapture() {
-    if (!captureJob) return;
-    const family = captureJob.mode === "replay" ? "replay" : "live";
-    const response = await fetch(`${API_BASE}/capture/${family}/${captureJob.jobId}/stop`, { method: "POST", headers: netraHeaders() });
-    const payload = await response.json();
-    if (!response.ok) toast.error(payload.error ?? "Capture could not be stopped");
-    else setCaptureJob(payload);
-  }
+  }, [followUploadJob, setActiveCaseId]);
 
   return (
     <PageFrame title={t("uploadTitle")} description={t("uploadDesc")}>
@@ -1847,12 +2107,12 @@ function UploadPage() {
             </div>
             <UploadCloud className="size-9 text-accent" aria-hidden="true" />
           </div>
-          <input ref={fileInputRef} className="hidden" type="file" accept={acceptForEvidenceType(draft.evidenceType)} onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+          <input ref={fileInputRef} className="hidden" type="file" accept={acceptForEvidenceType(draft.evidenceType)} onChange={(event) => selectEvidenceFile(event.target.files?.[0] ?? null)} />
           <div className="mt-6 rounded-[1.25rem] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-5">
             <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
               <div>
                 <div className="text-sm font-bold text-strong">{selectedFile?.name ?? "No file selected"}</div>
-                <div className="mt-1 text-xs text-muted">{selectedFile ? `${formatBytes(selectedFile.size)} | ${fileExtension(selectedFile) || "no extension"}` : evidenceTypeHelper(draft.evidenceType)}</div>
+                <div className="mt-1 text-xs text-muted">{selectedFile ? `${formatBytes(selectedFile.size)} | ${fileExtension(selectedFile) || "no extension"} | ${MAX_UPLOAD_MB} MiB deployment limit` : `${evidenceTypeHelper(draft.evidenceType)}. Maximum ${MAX_UPLOAD_MB} MiB.`}</div>
               </div>
               <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="size-4" />
@@ -1864,13 +2124,42 @@ function UploadPage() {
                 Unsupported file type {fileExtension(selectedFile) || "(none)"}. {evidenceTypeHelper(draft.evidenceType)}.
               </div>
             )}
+            {selectedFileTooLarge && (
+              <div className="mt-4 rounded-xl border border-[#7f2f23] bg-[#2b1410] px-4 py-3 text-sm text-[#ffd0c4]">
+                The selected file is {formatBytes(selectedFile?.size ?? 0)}. This deployment is verified for files up to {MAX_UPLOAD_MB} MiB.
+              </div>
+            )}
             <div className="mt-5 flex flex-wrap items-center gap-3">
-              <Button onClick={startProcessing} disabled={processing || !selectedFile || normalizationBlocked}>
-                {processing ? "Analyzing evidence..." : "Analyze Evidence"}
+              <Button onClick={startProcessing} disabled={processing || !selectedFile || normalizationBlocked || selectedFileTooLarge}>
+                {processing ? uploadStageLabel[uploadStage] : "Analyze Evidence"}
               </Button>
               {selectedFile && <Badge variant={normalizationBlocked ? "destructive" : "secondary"}>{normalizationBlocked ? normalizationLabel : "Ready to analyze"}</Badge>}
             </div>
           </div>
+          {uploadStage !== "idle" && (
+            <div className={cn("mt-5 rounded-[1.25rem] border p-4", uploadStage === "failed" ? "border-[#7f2f23] bg-[#2b1410]" : "border-[var(--border)] bg-[var(--surface-muted)]")} aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-strong">{uploadStageLabel[uploadStage]}</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted">
+                    {uploadStage === "uploading" && DIRECT_UPLOAD_ENABLED
+                      ? `${formatBytes(uploadTransfer.bytesUploaded)} of ${formatBytes(selectedFile?.size ?? 0)} · ${uploadTransfer.speedBytesPerSecond > 0 ? `${formatBytes(uploadTransfer.speedBytesPerSecond)}/s` : "measuring speed"} · ${formatEta(uploadTransfer.etaSeconds)}`
+                      : uploadStage === "uploading" ? `${uploadProgress}% of file bytes sent to Netra.` : uploadStage === "processing" ? "The browser upload is finished. Server-side evidence checks and analysis are still running." : uploadStage === "queued" ? "The worker status below will update automatically." : uploadStage === "complete" ? "Hashes, case records, findings, and report data are ready." : "Review the error message, correct the file or metadata, and retry."}
+                  </p>
+                  {DIRECT_UPLOAD_ENABLED && uploadTransfer.message && <p className="mt-1 text-xs leading-5 text-muted">{uploadTransfer.message}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {DIRECT_UPLOAD_ENABLED && uploadStage === "uploading" && resumableUploadRef.current && (
+                    <Button type="button" variant="secondary" onClick={() => void toggleResumablePause()}>
+                      {uploadTransfer.paused ? "Resume" : "Pause"}
+                    </Button>
+                  )}
+                  <Badge variant={uploadStage === "failed" ? "destructive" : "secondary"}>{uploadStage === "uploading" ? `${uploadProgress}%` : uploadStage}</Badge>
+                </div>
+              </div>
+              <Progress className="mt-4" value={uploadProgress} aria-label="Evidence upload byte progress" />
+            </div>
+          )}
           {selectedFile && (
             <div
               className={cn(
@@ -1902,7 +2191,7 @@ function UploadPage() {
             </div>
           )}
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {[[t("packetsParsed"), formatNumber(packets.length)], [t("sessionsReconstructed"), sessions.length], [t("protocolsDecoded"), decodedProtocols.length], [t("payloadFindings"), payloadFindings.length], [t("alertsGenerated"), alertRecords.length]].map(([label, value]) => (
+            {[[t("packetsParsed"), formatNumber(uploadResult?.packets ?? packets.length)], [t("sessionsReconstructed"), uploadResult?.sessions ?? sessions.length], [t("protocolsDecoded"), uploadResult?.protocolsDecoded ?? decodedProtocols.length], [t("payloadFindings"), uploadResult?.payloadFindings ?? payloadFindings.length], [t("alertsGenerated"), uploadResult?.alerts ?? alertRecords.length]].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3">
                 <div className="text-xs uppercase text-muted">{label}</div>
                 <div className="mt-1 text-xl font-black text-strong">{value}</div>
@@ -1912,7 +2201,7 @@ function UploadPage() {
         </div>
         <div className="surface rounded-[1.5rem] p-5">
           <h2 className="text-xl font-black text-strong">Case Details</h2>
-          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are already prepared for local investigation.</p>
+          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are prepared for the current investigation.</p>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <Field label={t("caseNumber")} value={draft.caseNumber} onChange={(value) => update("caseNumber", value)} disabled />
             <Field label={t("investigator")} value={draft.investigator} onChange={(value) => update("investigator", value)} />
@@ -1967,77 +2256,20 @@ function UploadPage() {
               <Field label="Duration limit (seconds)" value={draft.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
               <Field label="Packet limit" value={draft.packetLimit} onChange={(value) => update("packetLimit", value)} />
               <div className="md:col-span-2">
-                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} />
-                <p className="mt-2 text-xs text-muted">Use only if you know packet filter syntax. Most investigations should leave this blank.</p>
+                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} disabled={!bpfAvailableForEvidence} />
+                <p className="mt-2 text-xs text-muted">
+                  {!BPF_FILTER_ENABLED
+                    ? "Offline BPF filtering is unavailable in this deployment. Use the source, destination, protocol, port, duration, and packet-limit filters above."
+                    : bpfAvailableForEvidence
+                      ? "Applied by tcpdump to the complete PCAP before packet parsing. Most investigations should leave this blank."
+                      : "BPF is available only for PCAP or PCAPNG evidence; the other analysis filters still apply to structured evidence."}
+                </p>
               </div>
             </div>
           </div>
         </div>
       </details>
 
-      <details className="surface rounded-[1.5rem] p-5">
-        <summary className="cursor-pointer text-lg font-black text-strong">Advanced Capture And Demo Tools</summary>
-        <div className="mt-5 grid gap-5 lg:grid-cols-2">
-          <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <h2 className="text-lg font-black text-strong">Capture from sensor</h2>
-            <p className="mt-1 text-sm text-muted">{sensors.length ? "Run a bounded native capture from a connected sensor interface." : "No capture sensor connected. Start the native sensor agent to enable live capture."}</p>
-            {sensors.length > 0 && (
-              <>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <SelectField label="Sensor" value={sensorId || "none"} values={sensors.map((sensor) => sensor.id)} onChange={(value) => {
-                    setSensorId(value);
-                    const sensor = sensors.find((item) => item.id === value);
-                    setInterfaceName(sensor?.interfaces[0]?.name ?? "");
-                  }} />
-                  <SelectField label="Interface" value={interfaceName || "none"} values={selectedSensor?.interfaces.length ? selectedSensor.interfaces.map((item) => item.name) : ["none"]} onChange={(value) => setInterfaceName(value === "none" ? "" : value)} />
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <Button onClick={startCapture} disabled={!sensorId || !interfaceName}>Start bounded capture</Button>
-                  <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{selectedSensor ? `${selectedSensor.name}: ${selectedSensor.status}` : "No sensor selected"}</Badge>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <h2 className="text-lg font-black text-strong">Replay PCAP for demo/testing</h2>
-            <p className="mt-1 text-sm text-muted">Replay is not live capture. It streams a selected PCAP through the demo ingestion path for validation.</p>
-            <div className="mt-4 flex flex-col gap-3">
-              <Input type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" onChange={(event) => setReplayFile(event.target.files?.[0] ?? null)} />
-              <Button className="w-fit" onClick={startReplay} disabled={!replayFile}>Start replay feed</Button>
-            </div>
-          </div>
-        </div>
-      </details>
-      {captureJob && (
-        <div className="surface rounded-[1.5rem] p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-black text-strong">Live evidence feed</h2>
-              <p className="mt-1 text-sm text-muted">{captureJob.source} | {captureJob.status} | {captureJob.jobId}</p>
-            </div>
-            {!["completed", "failed", "stopped"].includes(captureJob.status) && <Button variant="secondary" onClick={stopActiveCapture}>Stop capture</Button>}
-          </div>
-          <div className="mt-5 grid gap-3 md:grid-cols-4">
-            <MetricTile label="Packets" value={formatNumber(captureJob.packetsReceived)} detail="Received from real chunks" />
-            <MetricTile label="Chunks" value={captureJob.chunksReceived} detail="Encrypted at rest" />
-            <MetricTile label="Progress" value={`${captureJob.progress}%`} detail="Server-reported capture progress" />
-            <MetricTile label="Status" value={captureJob.status} detail={captureJob.finalEvidenceId ? `Evidence ${captureJob.finalEvidenceId}` : "Awaiting finalization"} />
-          </div>
-          <Progress className="mt-5" value={captureJob.progress} />
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Time</th><th>Event</th><th>Details</th></tr></thead>
-              <tbody>
-                {(events.length ? events : [{ id: 0, eventType: "capture.awaiting_events", createdAt: "-", caseId: "", payload: { detail: "Waiting for persisted SSE events" } }]).map((event) => (
-                  <tr key={`${event.id}-${event.eventType}`} className="border-b border-[var(--border)]">
-                    <td className="py-3">{event.createdAt}</td><td>{event.eventType}</td><td className="font-mono text-xs">{JSON.stringify(event.payload)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
       {(uploadResult || evidence) && (
         <div className="surface rounded-[1.5rem] p-5 text-sm">
           <div className="font-bold text-strong">Latest immutable evidence</div>
@@ -2054,6 +2286,7 @@ function UploadPage() {
               <Badge key={step.name} variant={step.status === "completed" ? "secondary" : "warning"}>{step.name}: {step.status}</Badge>
             ))}
           </div>
+          {uploadStage === "complete" && <Button className="mt-4" onClick={() => navigate("/app/overview")}>Open case overview</Button>}
         </div>
       )}
       <EvidenceCard />
@@ -3010,6 +3243,186 @@ function ExportCenterPage() {
   );
 }
 
+function LabToolsPage() {
+  const { activeCaseId, deploymentAccess, intakeForm, reloadAnalysis, setActiveCaseId } = useNetra();
+  const [sensors, setSensors] = useState<SensorRecord[]>([]);
+  const [sensorId, setSensorId] = useState("");
+  const [interfaceName, setInterfaceName] = useState("");
+  const [replayFile, setReplayFile] = useState<File | null>(null);
+  const [durationSeconds, setDurationSeconds] = useState(intakeForm.durationSeconds || "60");
+  const [packetLimit, setPacketLimit] = useState(intakeForm.packetLimit || "10000");
+  const [bpfFilter, setBpfFilter] = useState(intakeForm.bpfFilter || "");
+  const [captureJob, setCaptureJob] = useState<CaptureJobRecord | null>(null);
+  const [labError, setLabError] = useState("");
+  const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
+  const terminal = captureJob ? ["completed", "failed", "stopped"].includes(captureJob.status) : true;
+
+  const loadSensors = useCallback(async () => {
+    try {
+      const payload = await apiGet<{ results: SensorRecord[] }>("/sensors");
+      setSensors(payload.results);
+      const online = payload.results.find((sensor) => sensor.status === "online");
+      if (online) {
+        setSensorId((current) => current || online.id);
+        setInterfaceName((current) => current || online.interfaces[0]?.name || "");
+      }
+      setLabError("");
+    } catch (error) {
+      setSensors([]);
+      setLabError(error instanceof Error ? error.message : "Sensor inventory could not be loaded.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSensors();
+  }, [loadSensors]);
+
+  useEffect(() => {
+    if (!captureJob || terminal) return undefined;
+    let mounted = true;
+    const refresh = async () => {
+      const family = captureJob.mode === "replay" ? "replay" : "live";
+      try {
+        const current = await apiGet<CaptureJobRecord>(`/capture/${family}/${captureJob.jobId}/status`);
+        if (!mounted) return;
+        setCaptureJob(current);
+        setLabError("");
+        if (current.status === "completed") {
+          await reloadAnalysis(current.caseId);
+          toast.success("Lab job finalized into encrypted evidence.");
+        }
+      } catch (error) {
+        if (mounted) setLabError(error instanceof Error ? error.message : "Lab job status could not be refreshed.");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [captureJob?.jobId, captureJob?.mode, terminal, reloadAnalysis]);
+
+  async function startReplay() {
+    if (!replayFile) {
+      setLabError("Choose a PCAP or PCAPNG file before starting replay.");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", replayFile);
+    form.append("caseId", activeCaseId || intakeForm.caseNumber);
+    form.append("speed", "5x");
+    form.append("chunkIntervalSeconds", "5");
+    form.append("packetLimit", packetLimit || "10000");
+    const response = await fetch(`${API_BASE}/capture/replay/start`, { method: "POST", headers: netraHeaders(), body: form });
+    const payload = await response.json().catch(() => ({})) as CaptureJobRecord & { error?: string };
+    if (!response.ok) {
+      setLabError(payload.error || "Replay could not start.");
+      return;
+    }
+    setCaptureJob(payload);
+    setActiveCaseId(payload.caseId);
+    setLabError("");
+    toast.success("PCAP replay started in the lab pipeline.");
+  }
+
+  async function startSensorCapture() {
+    if (!selectedSensor || selectedSensor.status !== "online" || !interfaceName) {
+      setLabError("An online enrolled sensor and a reported capture interface are required.");
+      return;
+    }
+    const response = await fetch(`${API_BASE}/capture/live/start`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        caseId: activeCaseId || intakeForm.caseNumber,
+        sensorId: selectedSensor.id,
+        interfaceName,
+        durationSeconds: Number(durationSeconds || 60),
+        packetLimit: Number(packetLimit || 10000),
+        chunkIntervalSeconds: 5,
+        bpfFilter,
+      }),
+    });
+    const payload = await response.json().catch(() => ({})) as CaptureJobRecord & { error?: string };
+    if (!response.ok) {
+      setLabError(payload.error || "Sensor capture could not be queued.");
+      return;
+    }
+    setCaptureJob(payload);
+    setActiveCaseId(payload.caseId);
+    setLabError("");
+    toast.success("Bounded capture command queued for the external sensor.");
+  }
+
+  async function stopLabJob() {
+    if (!captureJob) return;
+    const family = captureJob.mode === "replay" ? "replay" : "live";
+    const response = await fetch(`${API_BASE}/capture/${family}/${captureJob.jobId}/stop`, { method: "POST", headers: netraHeaders() });
+    const payload = await response.json().catch(() => ({})) as CaptureJobRecord & { error?: string };
+    if (!response.ok) {
+      setLabError(payload.error || "Lab job could not be stopped.");
+      return;
+    }
+    setCaptureJob(payload);
+  }
+
+  return (
+    <PageFrame title="Lab Tools" description="Isolated PCAP replay and bounded native-sensor capture for authorized operators. Browser upload remains the normal investigation path.">
+      <Alert>
+        Railway host capture is {deploymentAccess.hostCaptureEnabled ? "enabled by configuration" : "disabled"}. Native packets must be captured by an enrolled sensor running on an authorized Windows or Linux host; NETRA does not pretend the Railway container can see your LAN.
+      </Alert>
+      {labError && <Alert>{labError}</Alert>}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="surface rounded-[1.5rem] p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div><h2 className="text-xl font-black text-strong">Native sensor capture</h2><p className="mt-1 text-sm leading-6 text-muted">Requires the sensor agent, dumpcap or tcpdump, capture permission, the Railway API URL, and the configured sensor key.</p></div>
+            <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{selectedSensor?.status ?? "not connected"}</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <SelectField label="Sensor" value={sensorId || "none"} values={sensors.length ? sensors.map((sensor) => sensor.id) : ["none"]} onChange={(value) => {
+              const nextId = value === "none" ? "" : value;
+              setSensorId(nextId);
+              setInterfaceName(sensors.find((sensor) => sensor.id === nextId)?.interfaces[0]?.name || "");
+            }} />
+            <SelectField label="Interface" value={interfaceName || "none"} values={selectedSensor?.interfaces.length ? selectedSensor.interfaces.map((item) => item.name) : ["none"]} onChange={(value) => setInterfaceName(value === "none" ? "" : value)} />
+            <Field label="Duration (seconds)" value={durationSeconds} onChange={setDurationSeconds} />
+            <Field label="Packet limit" value={packetLimit} onChange={setPacketLimit} />
+            <div className="md:col-span-2"><Field label="BPF filter" value={bpfFilter} onChange={setBpfFilter} disabled={!BPF_FILTER_ENABLED} /></div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={startSensorCapture} disabled={!selectedSensor || selectedSensor.status !== "online" || !interfaceName}>Queue bounded capture</Button>
+            <Button variant="secondary" onClick={loadSensors}>Refresh sensors</Button>
+          </div>
+        </div>
+        <div className="surface rounded-[1.5rem] p-5">
+          <h2 className="text-xl font-black text-strong">PCAP replay</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">Replay is a validation tool, not live network capture. It processes a supplied PCAP through the isolated replay path and reports real server status.</p>
+          <div className="mt-4 grid gap-3">
+            <Input type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" onChange={(event) => setReplayFile(event.target.files?.[0] ?? null)} />
+            <Button className="w-fit" onClick={startReplay} disabled={!replayFile}>Start PCAP replay</Button>
+          </div>
+        </div>
+      </div>
+      {captureJob && (
+        <div className="surface rounded-[1.5rem] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-xl font-black text-strong">Current lab job</h2><p className="mt-1 text-sm text-muted">{captureJob.jobId} · {captureJob.mode} · {captureJob.status}</p></div>
+            {!terminal && <Button variant="secondary" onClick={stopLabJob}>Stop job</Button>}
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
+            <MetricTile label="Packets" value={formatNumber(captureJob.packetsReceived)} detail="Server-reported" />
+            <MetricTile label="Chunks" value={captureJob.chunksReceived} detail="Persisted chunks" />
+            <MetricTile label="Progress" value={`${captureJob.progress}%`} detail="Reload-safe status" />
+            <MetricTile label="Evidence" value={captureJob.finalEvidenceId || "not finalized"} detail={captureJob.status} />
+          </div>
+          <Progress className="mt-5" value={captureJob.progress} />
+        </div>
+      )}
+    </PageFrame>
+  );
+}
+
 function SensorsPage() {
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
   const [groups, setGroups] = useState<SensorGroupRecord[]>([]);
@@ -3113,6 +3526,7 @@ function RetentionPage() {
 }
 
 function SystemPage() {
+  const { deploymentAccess } = useNetra();
   const [health, setHealth] = useState<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string; rbac?: string; devRoleHeaders?: boolean; serviceRoleBackendOnly?: boolean; serviceRoleConfigured?: boolean; adminProfiles?: number }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; authorization?: string; publicInternet: string; actor?: string; role?: string }; incidentReadiness?: { status: string; summary: Record<string, number>; checks: { name: string; status: string; detail: string }[]; recommendedActions: string[] } } | null>(null);
   const [statusMatrix, setStatusMatrix] = useState<{ results: { area: string; targetStatus: string; detail: string; validation: string[] }[]; summary: { total: number; validated: number; gated: number } } | null>(null);
   const [mlStatus, setMlStatus] = useState<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string } | null>(null);
@@ -3140,6 +3554,20 @@ function SystemPage() {
   }, []);
   return (
     <PageFrame title="Technical Status" description="Operator diagnostics for Supabase, packet-analysis tools, workers, storage, and sensors. Officers do not need this page for normal investigations.">
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-xl font-black text-strong">Deployment profile</h2><p className="mt-1 text-sm text-muted">Authoritative module gates returned by the backend for the signed-in administrator.</p></div>
+          <Badge>{deploymentAccess.profile}</Badge>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Object.entries(deploymentAccess.modules).map(([name, module]) => (
+            <div key={name} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+              <div className="flex items-center justify-between gap-2"><h3 className="font-bold capitalize text-strong">{name}</h3><Badge variant={module.enabled ? "secondary" : "warning"}>{module.enabled ? "enabled" : "not configured"}</Badge></div>
+              <p className="mt-2 text-xs leading-5 text-muted">{module.reason}</p>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         {Object.entries(health?.checks ?? {}).map(([key, value]) => <MetricTile key={key} label={key} value={value.status} detail={value.detail ?? (value.latencyMs !== undefined ? `${value.latencyMs} ms` : "Live deep-health probe")} />)}
       </div>

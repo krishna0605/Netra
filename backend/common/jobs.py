@@ -52,4 +52,11 @@ def job_status_payload(job: ProcessingJob) -> dict[str, Any]:
         "expectedChunks": job.expected_chunk_count,
         "searchCompleteness": job.completeness_status,
         "lastProgressAt": job.last_progress_at.isoformat() if job.last_progress_at else None,
+        "attemptCount": job.attempt_count,
+        "maxAttempts": job.max_attempts,
+        "nextAttemptAt": job.next_attempt_at.isoformat() if job.next_attempt_at else None,
+        "cancelRequested": bool(job.cancel_requested_at),
+        "cancelRequestedAt": job.cancel_requested_at.isoformat() if job.cancel_requested_at else None,
+        "errorCode": job.error_code,
+        "error": job.error_message,
     }

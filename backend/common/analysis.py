@@ -1,12 +1,14 @@
 import csv
 import html
 import json
+import shlex
 import shutil
 import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from hashlib import sha1
+from hashlib import sha256
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from django.conf import settings
@@ -85,16 +87,108 @@ def empty_analysis() -> dict[str, Any]:
 
 
 def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: str, saved: dict[str, Any]) -> dict[str, Any]:
-    pcap_path = Path(pcap_path)
-    observed_packet_count = _count_observed_packets(pcap_path)
-    rows = _read_packets_with_tshark(pcap_path)
-    observed_packet_count = observed_packet_count or len(rows)
-    search_completeness = "truncated-search-index" if observed_packet_count > len(rows) else "complete"
-    packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
-    packets = _apply_intake_filters(packets, saved.get("intake", {}))
+    source_path = Path(pcap_path)
+    filtered_path: Path | None = None
+    try:
+        source_packet_count = _count_observed_packets(source_path)
+        bpf_filter = str(saved.get("intake", {}).get("bpfFilter") or "").strip()
+        analysis_path = source_path
+        if bpf_filter:
+            filtered_path = apply_offline_bpf(source_path, bpf_filter)
+            analysis_path = filtered_path
+        observed_packet_count = _count_observed_packets(analysis_path)
+        rows = _read_packets_with_tshark(analysis_path)
+        observed_packet_count = observed_packet_count if observed_packet_count is not None else len(rows)
+        packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
+        packets = _apply_intake_filters(packets, saved.get("intake", {}))
+        active_filters = [
+            name for name in ("sourceIp", "destinationIp", "protocol", "port", "durationSeconds", "packetLimit")
+            if str(saved.get("intake", {}).get(name) or "").strip()
+        ]
+        search_completeness = "filtered-view" if bpf_filter or active_filters else ("truncated-search-index" if observed_packet_count > len(packets) else "complete")
+        zeek = run_zeek_analysis(analysis_path, job_id)
+        return assemble_analysis(
+            packets,
+            observed_packet_count,
+            case_id,
+            evidence_id,
+            job_id,
+            saved,
+            zeek=zeek,
+            source_label="PCAP",
+            search_completeness=search_completeness,
+            filter_summary={
+                "fullInputScanned": True,
+                "bpfApplied": bool(bpf_filter),
+                "sourcePacketCount": source_packet_count,
+                "bpfPacketCount": observed_packet_count,
+                "parsedPacketCount": len(rows),
+                "returnedPacketCount": len(packets),
+                "activeFilters": (["bpfFilter"] if bpf_filter else []) + active_filters,
+            },
+        )
+    finally:
+        if filtered_path:
+            filtered_path.unlink(missing_ok=True)
+
+
+def _bpf_tokens(expression: str) -> list[str]:
+    if not expression or len(expression) > 255 or any(ord(character) < 32 for character in expression):
+        raise ValueError("BPF filter must contain 1 to 255 printable characters.")
+    try:
+        tokens = shlex.split(expression, posix=True)
+    except ValueError as exc:
+        raise ValueError("BPF filter contains invalid quoting.") from exc
+    if not tokens or len(tokens) > 64:
+        raise ValueError("BPF filter is empty or too complex.")
+    return tokens
+
+
+def validate_bpf_expression(expression: str) -> None:
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
+    result = subprocess.run([tcpdump, "-d", *_bpf_tokens(expression)], check=False, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise ValueError("BPF filter syntax is invalid.")
+
+
+def apply_offline_bpf(path: Path, expression: str) -> Path:
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
+    with NamedTemporaryFile(delete=False, suffix=".pcap") as handle:
+        target = Path(handle.name)
+    result = subprocess.run(
+        [tcpdump, "-nn", "-r", str(path), "-w", str(target), *_bpf_tokens(expression)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        target.unlink(missing_ok=True)
+        raise ValueError("BPF filter could not be applied to this capture.")
+    return target
+
+
+def assemble_analysis(
+    packets: list[dict[str, Any]],
+    observed_record_count: int,
+    case_id: str,
+    evidence_id: str,
+    job_id: str,
+    saved: dict[str, Any],
+    *,
+    zeek: dict[str, Any] | None = None,
+    source_label: str = "PCAP",
+    search_completeness: str = "complete",
+    structured_summary: dict[str, Any] | None = None,
+    filter_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     indexed_packet_count = len(packets)
     sessions = _build_sessions(packets)
-    zeek = run_zeek_analysis(pcap_path, job_id)
+    zeek = zeek or _empty_zeek("not-applicable")
     features = extract_features(packets=packets, sessions=sessions, zeek=zeek, filename=saved["filename"])
     normalization = saved.get("normalization") or {
         "selectedType": "PCAP",
@@ -113,6 +207,14 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "normalizationSignals": normalization.get("signals") or normalization.get("features", {}).get("sampleSignals", []),
         }
     )
+    if structured_summary:
+        features["structuredEvidence"] = structured_summary
+        features["summary"].update(
+            {
+                "structuredRecordCount": structured_summary.get("recordCount", observed_record_count),
+                "structuredRejectedCount": structured_summary.get("rejectedCount", 0),
+            }
+        )
     alerts, detection_matches = _build_detections(packets, sessions, features, zeek, saved["filename"])
     payload_findings = _build_payload_findings(packets, alerts)
     decoded_protocols = _build_protocols(packets, sessions, zeek)
@@ -151,7 +253,7 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "storageUri": saved.get("stored_path", ""),
             "uploadedAt": now,
             "capturedAt": packets[0]["timestamp"] if packets else now,
-            "investigator": "Uploaded PCAP",
+            "investigator": saved.get("intake", {}).get("investigator") or f"Uploaded {source_label}",
             "status": "verified" if packets else "failed",
             "evidenceType": normalization.get("normalizedType", "PCAP"),
             "normalization": normalization,
@@ -160,14 +262,14 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "case": {
             "id": case_id,
             "title": f"{top_attack_class}: {saved['filename']}",
-            "investigator": "Uploaded PCAP",
+            "investigator": saved.get("intake", {}).get("investigator") or f"Uploaded {source_label}",
             "status": "reviewing" if alerts else "open",
             "evidenceFileId": evidence_id,
             "alertIds": [alert["id"] for alert in alerts],
             "notes": [
-                f"Parsed {len(packets)} indexed packet metadata row(s) and reconstructed {len(sessions)} sessions from real PCAP evidence.",
+                f"Parsed {len(packets)} indexed network metadata row(s) and reconstructed {len(sessions)} sessions from {source_label} evidence.",
                 f"Top classification: {top_attack_class}. Zeek status: {zeek['status']}.",
-                f"Search completeness: {search_completeness}. Observed packets: {observed_packet_count}; indexed packet metadata rows: {indexed_packet_count}.",
+                f"Search completeness: {search_completeness}. Observed records: {observed_record_count}; indexed network metadata rows: {indexed_packet_count}.",
             ],
             "history": [
                 {
@@ -181,8 +283,8 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
                     "id": f"hist-{job_id}-analysis",
                     "timestamp": now,
                     "actor": "Netra analysis engine",
-                    "action": "Real PCAP analyzed",
-                    "details": f"tshark parsed packets, Zeek produced {len(zeek.get('logs', []))} log file(s), and detectors generated {len(alerts)} alert(s).",
+                    "action": f"{source_label} analyzed",
+                    "details": f"Netra parsed {observed_record_count} record(s), reconstructed sessions, and generated {len(alerts)} alert(s).",
                 },
             ],
             "createdAt": now,
@@ -198,13 +300,15 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "trafficTimeline": traffic_timeline,
         "protocolChartData": protocol_chart,
         "graph": graph,
+        "structuredEvidence": structured_summary or {},
+        "filterExecution": filter_summary or {},
         "searchCompleteness": search_completeness,
-        "observedPackets": observed_packet_count,
+        "observedPackets": observed_record_count,
         "indexedPackets": indexed_packet_count,
         "packetMetadataLimit": MAX_PACKETS,
         "summary": {
             "packets": len(packets),
-            "observedPackets": observed_packet_count,
+            "observedPackets": observed_record_count,
             "indexedPackets": indexed_packet_count,
             "packetMetadataLimit": MAX_PACKETS,
             "searchCompleteness": search_completeness,
@@ -218,6 +322,7 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "riskLevel": risk_level,
             "toolStatus": tool_status,
             "zeek": {"status": zeek["status"], "summary": zeek["summary"], "logs": zeek["logs"]},
+            "filterExecution": filter_summary or {},
         },
     }
     save_analysis(analysis)
@@ -235,9 +340,13 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
     filtered = [
         packet
         for packet in packets
-        if (not source_ip or source_ip in str(packet.get("sourceIp", "")).lower())
-        and (not destination_ip or destination_ip in str(packet.get("destinationIp", "")).lower())
-        and (not protocol or protocol == str(packet.get("protocol", "")).upper())
+        if (not source_ip or source_ip == str(packet.get("sourceIp", "")).lower())
+        and (not destination_ip or destination_ip == str(packet.get("destinationIp", "")).lower())
+        and (
+            not protocol
+            or protocol == str(packet.get("protocol", "")).upper()
+            or protocol == str(packet.get("transportProtocol", "")).upper()
+        )
         and (not port or port in {int(packet.get("sourcePort") or 0), int(packet.get("destinationPort") or 0)})
     ]
     if duration_seconds and filtered:
@@ -250,9 +359,8 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
             ]
         except Exception:
             pass
-    if packet_limit:
-        filtered = filtered[: max(1, min(MAX_PACKETS, packet_limit))]
-    return filtered
+    result_limit = max(1, min(MAX_PACKETS, packet_limit or MAX_PACKETS))
+    return filtered[:result_limit]
 
 
 def run_zeek_analysis(pcap_path: Path, job_id: str) -> dict[str, Any]:
@@ -341,7 +449,7 @@ def _top_external_hosts(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
     command = [
-        "tshark", "-r", str(path), "-c", str(MAX_PACKETS), "-T", "fields", "-E", "separator=\t", "-E", "occurrence=f",
+        "tshark", "-r", str(path), "-T", "fields", "-E", "separator=\t", "-E", "occurrence=f",
         "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ipv6.src", "-e", "ip.dst", "-e", "ipv6.dst",
         "-e", "tcp.srcport", "-e", "udp.srcport", "-e", "tcp.dstport", "-e", "udp.dstport", "-e", "_ws.col.Protocol",
         "-e", "frame.len", "-e", "tcp.flags", "-e", "dns.qry.name", "-e", "tls.handshake.extensions_server_name",
@@ -351,7 +459,7 @@ def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
         "-e", "tls.handshake.ciphersuite", "-e", "icmp.type", "-e", "icmp.code", "-e", "_ws.expert.message",
         "-e", "_ws.col.Info",
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise ValueError(result.stderr.strip() or "tshark could not parse the PCAP")
     fields = [
@@ -374,6 +482,13 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
     destination = row["ip_dst"] or row["ipv6_dst"] or row["dns_query"] or row["sni"] or row["http_host"] or "unknown"
     source_port = _int(row["tcp_srcport"] or row["udp_srcport"])
     destination_port = _int(row["tcp_dstport"] or row["udp_dstport"])
+    transport_protocol = (
+        "TCP"
+        if row["tcp_srcport"] or row["tcp_dstport"]
+        else "UDP"
+        if row["udp_srcport"] or row["udp_dstport"]
+        else (row["protocol"] or "UNKNOWN").upper()
+    )
     protocol = _normalize_protocol(row["protocol"], destination_port, source_port)
     size = _int(row["size"])
     risk, severity, reason = _score_packet(protocol, destination_port, size, row)
@@ -388,6 +503,7 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
         "sourcePort": source_port,
         "destinationPort": destination_port,
         "protocol": protocol,
+        "transportProtocol": transport_protocol,
         "size": size,
         "flags": row["flags"] or "-",
         "sessionId": session_id,
@@ -1051,7 +1167,7 @@ def build_alert_csv(analysis: dict[str, Any]) -> str:
 
 
 def _session_id(source: str, destination: str, source_port: int, destination_port: int, protocol: str) -> str:
-    digest = sha1(f"{source}|{destination}|{source_port}|{destination_port}|{protocol}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{source}|{destination}|{source_port}|{destination_port}|{protocol}".encode("utf-8")).hexdigest()
     return f"sess-{digest[:10]}"
 
 

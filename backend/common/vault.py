@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import BinaryIO
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 from django.conf import settings
 
 from common.hashing import sha256_file, sha256_text
@@ -24,10 +24,16 @@ PCAP_MAGIC = {
 }
 
 
-def fernet() -> Fernet:
-    raw = settings.NETRA_EVIDENCE_KEY.encode("utf-8")
+def _fernet_for_secret(secret: str) -> Fernet:
+    raw = secret.encode("utf-8")
     key = base64.urlsafe_b64encode(raw.ljust(32, b"0")[:32])
     return Fernet(key)
+
+
+def fernet() -> MultiFernet:
+    # Encrypt with the active key and retain decrypt-only access to prior keys.
+    secrets = [settings.NETRA_EVIDENCE_KEY, *settings.NETRA_EVIDENCE_PREVIOUS_KEYS]
+    return MultiFernet([_fernet_for_secret(secret) for secret in dict.fromkeys(secrets) if secret])
 
 
 def validate_pcap_upload(upload) -> None:
@@ -60,6 +66,11 @@ def encrypt_file(source: str | Path, target: str | Path) -> None:
 def decrypt_file(source: str | Path, target: str | Path) -> None:
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    if str(source).endswith("/manifest.v2.json"):
+        from common.vault_v2 import decrypt_evidence_v2
+
+        decrypt_evidence_v2(source, target_path)
+        return
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on":
         with storage_provider.open_encrypted(source, "rb") as handle:
             target_path.write_bytes(handle.read())
@@ -69,6 +80,12 @@ def decrypt_file(source: str | Path, target: str | Path) -> None:
 
 
 def read_encrypted_or_plain(source: str | Path) -> bytes:
+    if str(source).endswith("/manifest.v2.json"):
+        temporary = temporary_decrypted_copy(source)
+        try:
+            return Path(temporary).read_bytes()
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     with storage_provider.open_encrypted(source, "rb") as handle:
         content = handle.read()
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or not str(source).endswith(".enc"):
@@ -94,8 +111,8 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
         "sizeBytes": saved["size_bytes"],
         "plaintextSha256": saved["plaintext_sha256"],
         "encryptedSha256": saved["encrypted_sha256"],
-        "encryptionAlgorithm": "Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none",
-        "keyId": settings.NETRA_EVIDENCE_KEY_ID,
+        "encryptionAlgorithm": saved.get("encryption_algorithm") or ("Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none"),
+        "keyId": saved.get("key_id") or settings.NETRA_EVIDENCE_KEY_ID,
     }
     if saved.get("normalization"):
         payload["normalization"] = saved["normalization"]
@@ -103,8 +120,9 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
     return payload
 
 
-def save_encrypted_upload(upload: BinaryIO, folder: Path, stored_name: str) -> dict:
-    validate_pcap_upload(upload)
+def save_encrypted_upload(upload: BinaryIO, folder: Path, stored_name: str, *, validate_pcap: bool = True) -> dict:
+    if validate_pcap:
+        validate_pcap_upload(upload)
     folder.mkdir(parents=True, exist_ok=True)
     plaintext_path = folder / f"{stored_name}.work"
     encrypted_path = folder / f"{stored_name}.enc"
