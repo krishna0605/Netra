@@ -109,8 +109,9 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
     return payload
 
 
-def save_encrypted_upload(upload: BinaryIO, folder: Path, stored_name: str) -> dict:
-    validate_pcap_upload(upload)
+def save_encrypted_upload(upload: BinaryIO, folder: Path, stored_name: str, *, validate_pcap: bool = True) -> dict:
+    if validate_pcap:
+        validate_pcap_upload(upload)
     folder.mkdir(parents=True, exist_ok=True)
     plaintext_path = folder / f"{stored_name}.work"
     encrypted_path = folder / f"{stored_name}.enc"

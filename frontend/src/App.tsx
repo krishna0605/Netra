@@ -1672,9 +1672,7 @@ function UploadPage() {
       selectedFileTooLarge ||
       !effectiveExtensionAllowed ||
       normalization?.extensionAllowed === false ||
-      normalization?.validForSelectedType === false ||
-      (normalization?.validForSelectedType === true && normalization.normalizedType !== "PCAP") ||
-      normalizationCode === "evidence_type_not_analyzable"
+      normalization?.validForSelectedType === false
     )
   );
   const normalizationTone: "normal" | "danger" | "success" = selectedFile && normalizationBlocked ? "danger" : selectedFile && normalization?.validForSelectedType ? "success" : "normal";
@@ -1683,7 +1681,6 @@ function UploadPage() {
     !normalization ? "Checking" :
     normalizationCode === "upload_too_large" ? "File too large" :
     normalizationCode === "unsupported_evidence_extension" || normalization.extensionAllowed === false ? "Unsupported file type" :
-    normalizationCode === "evidence_type_not_analyzable" || (normalization.validForSelectedType && normalization.normalizedType !== "PCAP") ? "Parser not enabled" :
     normalization.validForSelectedType ? "Verified" :
     "Mismatch";
   const activeCaptureJobId = captureJob?.jobId;
@@ -1860,7 +1857,7 @@ function UploadPage() {
       );
       const payload = response.payload;
       if (!response.ok) {
-        if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap" || payload.code === "evidence_type_not_analyzable") {
+        if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap") {
           setNormalization(payload as EvidenceNormalizationPreview);
         }
         setUploadStage("failed");
@@ -1897,7 +1894,7 @@ function UploadPage() {
       toast.success(t("evidenceToast"));
     } catch (error) {
       setUploadStage("failed");
-      toast.error(error instanceof Error ? error.message : "PCAP analysis failed");
+      toast.error(error instanceof Error ? error.message : "Evidence analysis failed");
     } finally {
       setProcessing(false);
     }

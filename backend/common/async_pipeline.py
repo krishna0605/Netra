@@ -18,6 +18,7 @@ from common.kafka import publish_event
 from common.persistence import case_origin, is_validator_case, persist_analysis
 from common.postgres_jobs import JobCancellationRequested
 from common.storage import save_uploaded_file
+from common.structured_analysis import analyze_structured_evidence
 from common.vault import build_manifest_payload, temporary_decrypted_copy
 
 
@@ -134,7 +135,12 @@ def process_queued_evidence(payload: dict) -> ProcessingJob:
         job.save(update_fields=["status", "step", "progress", "last_progress_at", "started_at", "updated_at"])
         append_job_event(job, "async.analysis.started", "pcap-ingestion-worker started immutable evidence analysis.")
         chunks = _prepare_large_analysis_chunks(job, Path(temporary))
-        analysis = analyze_pcap(temporary, job.case_id, job.evidence_file_id, job.id, saved)
+        evidence_type = (saved.get("normalization") or {}).get("normalizedType", "PCAP")
+        analysis = (
+            analyze_pcap(temporary, job.case_id, job.evidence_file_id, job.id, saved)
+            if evidence_type == EvidenceFile.EvidenceType.PCAP
+            else analyze_structured_evidence(temporary, job.case_id, job.evidence_file_id, job.id, saved)
+        )
         job.refresh_from_db(fields=["cancel_requested_at"])
         if job.cancel_requested_at:
             raise JobCancellationRequested("Job cancellation was requested during analysis.")

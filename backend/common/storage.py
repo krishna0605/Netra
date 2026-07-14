@@ -14,6 +14,7 @@ STORAGE_FOLDERS = {
     "report": "reports",
     "export": "exports",
     "log": "logs",
+    "structured": "structured",
     "filtered_pcap": "filtered_pcaps",
 }
 
@@ -25,10 +26,13 @@ def ensure_storage_tree() -> None:
 
 def save_uploaded_file(upload, folder_key: str = "pcap") -> dict:
     ensure_storage_tree()
+    max_bytes = settings.NETRA_MAX_UPLOAD_MB * 1024 * 1024
+    if upload.size and upload.size > max_bytes:
+        raise OverflowError(f"Upload exceeds NETRA_MAX_UPLOAD_MB={settings.NETRA_MAX_UPLOAD_MB}.")
     folder = settings.NETRA_STORAGE_ROOT / STORAGE_FOLDERS[folder_key]
     safe_name = Path(upload.name).name
     stored_name = f"{uuid4().hex}-{safe_name}"
-    saved = save_encrypted_upload(upload, folder, stored_name)
+    saved = save_encrypted_upload(upload, folder, stored_name, validate_pcap=folder_key not in {"log", "structured"})
     saved["stored_path"] = storage_uri(saved["stored_path"])
     return {
         "filename": safe_name,

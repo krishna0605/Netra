@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -228,3 +229,34 @@ class HackathonGoldenPathTests(TestCase):
                 request_job_cancellation(claimed.id)
                 canceled = mark_job_failure(claimed.id, "test-worker", JobCancellationRequested("cancel"))
                 self.assertEqual(canceled.status, ProcessingJob.Status.CANCELED)
+
+    def test_mixed_structured_evidence_runs_the_analysis_flow(self):
+        records = [
+            {
+                "timestamp": "2026-07-14T10:00:00Z", "src_ip": "10.0.0.5", "dst_ip": "203.0.113.10", "action": "allow",
+                "qname": "login.example.test", "query": "login.example.test", "dns": True, "rrtype": "A", "rcode": "NOERROR",
+                "sni": "login.example.test", "ja3": "demo", "tls_version": "TLSv1.3", "cipher": "TLS_AES_256_GCM_SHA384", "handshake": "client_hello",
+                "dst_port": 443, "protocol": "TCP", "bytes": 900,
+            },
+            {"timestamp": "2026-07-14T10:00:01Z", "client_ip": "10.0.0.5", "resolver_ip": "10.0.0.53", "qname": "dns.example.test", "dst_port": 53, "protocol": "UDP"},
+            {"timestamp": "2026-07-14T10:00:02Z", "source_ip": "10.0.0.9", "destination_ip": "198.51.100.20", "action": "deny", "destination_port": 22, "protocol": "TCP"},
+        ]
+        with tempfile.TemporaryDirectory(prefix="netra-structured-storage-") as storage:
+            with self.settings(NETRA_STORAGE_ROOT=Path(storage)):
+                response = self.client.post(
+                    "/api/evidence/upload",
+                    data={
+                        "caseId": "CASE-MIXED-EVIDENCE",
+                        "evidenceType": "Auto-detect",
+                        "file": SimpleUploadedFile("mixed.json", json.dumps(records).encode("utf-8"), content_type="application/json"),
+                    },
+                    **self.headers,
+                )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["normalization"]["normalizedType"], "Mixed Evidence")
+        job = ProcessingJob.objects.get(pk=payload["jobId"])
+        structured = job.stats["analysis"]["structuredEvidence"]
+        self.assertEqual(structured["acceptedCount"], 3)
+        self.assertEqual(set(structured["recordTypes"]), {"Firewall Logs", "DNS Logs", "TLS Metadata"})
