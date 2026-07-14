@@ -19,7 +19,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-[var(--accent)] !text-[var(--charcoal-deep)] shadow-sm [clip-path:polygon(0_0,calc(100%_-_8px)_0,100%_8px,100%_100%,8px_100%,0_calc(100%_-_8px))] hover:brightness-110 hover:shadow-md",
-        secondary: "border border-[var(--border-strong)] bg-[var(--cream-primary)] text-[var(--charcoal-deep)] hover:border-[var(--accent-line)] hover:bg-[var(--cream-bright)]",
+        secondary: "border border-[var(--border-strong)] bg-[var(--cream-primary)] !text-[var(--charcoal-deep)] hover:border-[var(--accent-line)] hover:bg-[var(--cream-bright)]",
         ghost: "text-[var(--text)] hover:bg-[var(--surface-muted)]",
         destructive: "border border-[var(--border-strong)] bg-[var(--text-strong)] text-[var(--bg)] hover:opacity-90",
         outline: "border border-[var(--border)] bg-transparent text-[var(--text)] hover:bg-[var(--surface-muted)]",
