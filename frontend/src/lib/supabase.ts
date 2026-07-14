@@ -28,6 +28,7 @@ export function readStoredAccessToken(
 }
 
 let currentAccessToken = typeof window === "undefined" ? "" : readStoredAccessToken(window.sessionStorage);
+let sessionRefreshPromise: ReturnType<typeof refreshStoredSupabaseSession> | null = null;
 
 export const supabase = SUPABASE_AUTH_ENABLED
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -77,4 +78,16 @@ export async function refreshStoredSupabaseSession() {
 
   setCurrentAccessToken(session.access_token);
   return session;
+}
+
+export async function ensureCurrentAccessToken() {
+  if (currentAccessToken) return currentAccessToken;
+  if (!supabase) return "";
+  if (!sessionRefreshPromise) {
+    sessionRefreshPromise = refreshStoredSupabaseSession().finally(() => {
+      sessionRefreshPromise = null;
+    });
+  }
+  const session = await sessionRefreshPromise;
+  return session?.access_token ?? "";
 }
