@@ -66,6 +66,11 @@ def encrypt_file(source: str | Path, target: str | Path) -> None:
 def decrypt_file(source: str | Path, target: str | Path) -> None:
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    if str(source).endswith("/manifest.v2.json"):
+        from common.vault_v2 import decrypt_evidence_v2
+
+        decrypt_evidence_v2(source, target_path)
+        return
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on":
         with storage_provider.open_encrypted(source, "rb") as handle:
             target_path.write_bytes(handle.read())
@@ -75,6 +80,12 @@ def decrypt_file(source: str | Path, target: str | Path) -> None:
 
 
 def read_encrypted_or_plain(source: str | Path) -> bytes:
+    if str(source).endswith("/manifest.v2.json"):
+        temporary = temporary_decrypted_copy(source)
+        try:
+            return Path(temporary).read_bytes()
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     with storage_provider.open_encrypted(source, "rb") as handle:
         content = handle.read()
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or not str(source).endswith(".enc"):
@@ -100,8 +111,8 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
         "sizeBytes": saved["size_bytes"],
         "plaintextSha256": saved["plaintext_sha256"],
         "encryptedSha256": saved["encrypted_sha256"],
-        "encryptionAlgorithm": "Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none",
-        "keyId": settings.NETRA_EVIDENCE_KEY_ID,
+        "encryptionAlgorithm": saved.get("encryption_algorithm") or ("Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none"),
+        "keyId": saved.get("key_id") or settings.NETRA_EVIDENCE_KEY_ID,
     }
     if saved.get("normalization"):
         payload["normalization"] = saved["normalization"]

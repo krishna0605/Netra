@@ -45,7 +45,9 @@ from common.operations import capture_job_payload, create_capture_job, emit_oper
 from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
 from common.structured_analysis import analyze_structured_evidence
-from common.vault import fernet, read_encrypted_or_plain
+from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
+from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
+from common.vault_v2 import verify_evidence_v2
 
 
 logger = logging.getLogger(__name__)
@@ -915,6 +917,59 @@ def evidence_normalize_preview(request):
     return JsonResponse(normalization)
 
 
+def _upload_session_problem_response(problem: UploadSessionProblem) -> JsonResponse:
+    return JsonResponse({"error": problem.message, "code": problem.code}, status=problem.status)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def evidence_upload_sessions(request):
+    denied = require_permission(request, "upload", resource_type="EvidenceUploadSession")
+    if denied:
+        return denied
+    if len(request.body) > 64 * 1024:
+        return JsonResponse({"error": "Upload session metadata is too large.", "code": "upload_metadata_too_large"}, status=413)
+    try:
+        payload = _json_body(request)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({"error": "Request body must be valid JSON.", "code": "invalid_json"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "Request body must be a JSON object.", "code": "invalid_json"}, status=400)
+    try:
+        session, replayed = create_upload_session(
+            actor_from_request(request),
+            payload,
+            (request.headers.get("Idempotency-Key") or "").strip(),
+        )
+        return JsonResponse(upload_session_payload(session, idempotent_replay=replayed), status=200 if replayed else 201)
+    except UploadSessionProblem as problem:
+        return _upload_session_problem_response(problem)
+
+
+@require_http_methods(["GET"])
+def evidence_upload_session_detail(request, upload_session_id):
+    denied = require_permission(request, "view", resource_type="EvidenceUploadSession", resource_id=str(upload_session_id))
+    if denied:
+        return denied
+    try:
+        return JsonResponse(upload_session_payload(get_upload_session(actor_from_request(request), upload_session_id)))
+    except UploadSessionProblem as problem:
+        return _upload_session_problem_response(problem)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def evidence_upload_session_finalize(request, upload_session_id):
+    denied = require_permission(request, "upload", resource_type="EvidenceUploadSession", resource_id=str(upload_session_id))
+    if denied:
+        return denied
+    try:
+        session = finalize_upload_session(actor_from_request(request), upload_session_id)
+        return JsonResponse(upload_session_payload(session))
+    except UploadSessionProblem as problem:
+        return _upload_session_problem_response(problem)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def evidence_upload(request):
@@ -1083,9 +1138,14 @@ def evidence_verify_integrity(request, evidence_id: str):
     manifest = getattr(evidence, "manifest", None)
     if not manifest:
         return JsonResponse({"verified": False, "error": "manifest missing"}, status=404)
-    stat = storage_provider.stat(evidence.stored_path)
-    encrypted_hash = stat.sha256
-    encrypted_verified = bool(encrypted_hash and encrypted_hash == manifest.encrypted_sha256)
+    if evidence.stored_path.endswith("/manifest.v2.json"):
+        v2_verification = verify_evidence_v2(evidence.stored_path)
+        encrypted_hash = v2_verification.get("encryptedStorageHash", "")
+        encrypted_verified = bool(v2_verification.get("verified") and encrypted_hash == manifest.encrypted_sha256)
+    else:
+        stat = storage_provider.stat(evidence.stored_path)
+        encrypted_hash = stat.sha256
+        encrypted_verified = bool(encrypted_hash and encrypted_hash == manifest.encrypted_sha256)
     canonical_manifest = {key: value for key, value in manifest.manifest_json.items() if key != "manifestHash"}
     calculated_manifest_hash = sha256_text(json.dumps(canonical_manifest, sort_keys=True))
     manifest_verified = calculated_manifest_hash == manifest.manifest_hash == manifest.manifest_json.get("manifestHash")
@@ -1104,7 +1164,23 @@ def evidence_download(request, evidence_id: str):
     if denied:
         return denied
     record_custody_event(evidence.case, actor_from_request(request), "Evidence downloaded", {"filename": evidence.filename, "sha256": evidence.sha256}, evidence, "EvidenceFile", evidence.id)
-    return HttpResponse(read_encrypted_or_plain(evidence.stored_path), headers={"Content-Disposition": f'attachment; filename="{evidence.filename}"'}, content_type="application/vnd.tcpdump.pcap")
+    temporary = Path(temporary_decrypted_copy(evidence.stored_path))
+    response = FileResponse(
+        temporary.open("rb"),
+        as_attachment=True,
+        filename=Path(evidence.filename).name,
+        content_type="application/vnd.tcpdump.pcap" if evidence.evidence_type == EvidenceFile.EvidenceType.PCAP else "application/octet-stream",
+    )
+    original_close = response.close
+
+    def close_and_remove() -> None:
+        try:
+            original_close()
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    response.close = close_and_remove
+    return response
 
 
 @csrf_exempt

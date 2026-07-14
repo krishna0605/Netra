@@ -87,6 +87,7 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NETRA_STORAGE_ROOT = Path(os.getenv("NETRA_STORAGE_ROOT", REPO_ROOT / "storage"))
+NETRA_TEMP_ROOT = Path(os.getenv("NETRA_TEMP_ROOT", REPO_ROOT / ".netra-tmp"))
 NETRA_DATABASE_PROVIDER = os.getenv("NETRA_DATABASE_PROVIDER", "postgres").lower()
 NETRA_STORAGE_PROVIDER = os.getenv("NETRA_STORAGE_PROVIDER", "local").lower()
 NETRA_QUEUE_PROVIDER = os.getenv("NETRA_QUEUE_PROVIDER", "kafka").lower()
@@ -106,6 +107,7 @@ SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS = os.getenv("SUPABASE_STORAGE_BUCKET_ANA
 SUPABASE_STORAGE_BUCKET_ZEEK_LOGS = os.getenv("SUPABASE_STORAGE_BUCKET_ZEEK_LOGS", "netra-zeek-logs")
 SUPABASE_STORAGE_BUCKET_REPORTS = os.getenv("SUPABASE_STORAGE_BUCKET_REPORTS", "netra-reports")
 SUPABASE_STORAGE_BUCKET_EXPORTS = os.getenv("SUPABASE_STORAGE_BUCKET_EXPORTS", "netra-exports")
+SUPABASE_STORAGE_BUCKET_EVIDENCE_QUARANTINE = os.getenv("SUPABASE_STORAGE_BUCKET_EVIDENCE_QUARANTINE", "evidence-quarantine")
 SUPABASE_QUEUE_VISIBILITY_SECONDS = int(os.getenv("SUPABASE_QUEUE_VISIBILITY_SECONDS", "60"))
 SUPABASE_QUEUE_BATCH_SIZE = int(os.getenv("SUPABASE_QUEUE_BATCH_SIZE", "10"))
 NETRA_SUPABASE_START_WORKERS = os.getenv("NETRA_SUPABASE_START_WORKERS", "0") == "1"
@@ -132,11 +134,20 @@ NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-e
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
 NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
 NETRA_MAX_UPLOAD_MB = int(os.getenv("NETRA_MAX_UPLOAD_MB", "25" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "500"))
+NETRA_DIRECT_UPLOAD_ENABLED = os.getenv("NETRA_DIRECT_UPLOAD_ENABLED", "0") == "1"
+NETRA_DIRECT_UPLOAD_MAX_MB = max(1, min(int(os.getenv("NETRA_DIRECT_UPLOAD_MAX_MB", "500")), 500))
+NETRA_UPLOAD_SESSION_TTL_SECONDS = max(300, min(int(os.getenv("NETRA_UPLOAD_SESSION_TTL_SECONDS", "86400")), 86400))
+NETRA_UPLOAD_TUS_CHUNK_BYTES = 6 * 1024 * 1024
+NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES = 8 * 1024 * 1024
+NETRA_MAX_QUEUED_ANALYSES_PER_ORG = max(1, int(os.getenv("NETRA_MAX_QUEUED_ANALYSES_PER_ORG", "5")))
 NETRA_BPF_FILTER_ENABLED = os.getenv("NETRA_BPF_FILTER_ENABLED", "0") == "1"
 NETRA_ENABLE_HOST_CAPTURE = os.getenv("NETRA_ENABLE_HOST_CAPTURE", "0") == "1"
 NETRA_WORKER_MAX_RETRIES = max(1, int(os.getenv("NETRA_WORKER_MAX_RETRIES", "3")))
 NETRA_JOB_LEASE_SECONDS = max(60, int(os.getenv("NETRA_JOB_LEASE_SECONDS", "900")))
 NETRA_JOB_POLL_SECONDS = max(1, int(os.getenv("NETRA_JOB_POLL_SECONDS", "2")))
+NETRA_JOB_HEARTBEAT_SECONDS = max(5, min(int(os.getenv("NETRA_JOB_HEARTBEAT_SECONDS", "10")), 15))
+NETRA_QUARANTINE_ORPHAN_SECONDS = max(3600, int(os.getenv("NETRA_QUARANTINE_ORPHAN_SECONDS", "3600")))
+NETRA_CLEANUP_INTERVAL_SECONDS = max(300, int(os.getenv("NETRA_CLEANUP_INTERVAL_SECONDS", "900")))
 NETRA_SENSOR_SHARED_KEY = os.getenv("NETRA_SENSOR_SHARED_KEY", "netra-phase5-local-sensor-key")
 NETRA_SYNC_FALLBACK_ENABLED = os.getenv("NETRA_SYNC_FALLBACK_ENABLED", "1") == "1"
 NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS = int(os.getenv("NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS", "180"))
@@ -194,5 +205,12 @@ if not DEBUG:
         raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY are required for Supabase authentication")
     if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-phase3-development-evidence-key":
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
+    if NETRA_DIRECT_UPLOAD_ENABLED:
+        if NETRA_DEPLOYMENT_PROFILE != "full":
+            raise RuntimeError("NETRA_DIRECT_UPLOAD_ENABLED requires NETRA_DEPLOYMENT_PROFILE=full")
+        if NETRA_STORAGE_PROVIDER != "supabase" or NETRA_AUTH_PROVIDER != "supabase":
+            raise RuntimeError("Direct evidence upload requires Supabase Auth and Storage")
+        if not SUPABASE_SERVICE_ROLE_KEY:
+            raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY is required for quarantine validation")
     if NETRA_DEPLOYMENT_PROFILE == "full" and NETRA_SENSOR_SHARED_KEY == "netra-phase5-local-sensor-key":
         raise RuntimeError("NETRA_SENSOR_SHARED_KEY must be replaced for the full deployment profile")

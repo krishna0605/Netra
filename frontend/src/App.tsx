@@ -87,6 +87,7 @@ import type {
   ZeekEvidence,
 } from "./lib/types";
 import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { beginResumableUpload, type DirectUploadSession, type ResumableUploadHandle } from "./lib/resumableUpload";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
 import {
   PublicAboutPage,
@@ -833,6 +834,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const DEPLOYMENT_PROFILE = import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local";
 const HACKATHON_CORE = DEPLOYMENT_PROFILE === "hackathon-core";
 const BPF_FILTER_ENABLED = import.meta.env.VITE_BPF_FILTER_ENABLED === "1";
+const DIRECT_UPLOAD_ENABLED = import.meta.env.VITE_DIRECT_UPLOAD_ENABLED === "1";
 const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
 const ACTIVE_UPLOAD_JOB_KEY = "netra-active-upload-job";
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
@@ -864,6 +866,14 @@ type EvidenceNormalizationPreview = {
 };
 
 type UploadStage = "idle" | "uploading" | "processing" | "queued" | "complete" | "failed";
+type UploadTransferState = {
+  bytesUploaded: number;
+  speedBytesPerSecond: number;
+  etaSeconds: number | null;
+  paused: boolean;
+  retryAttempt: number;
+  message: string;
+};
 type EvidenceUploadPayload = Partial<EvidenceNormalizationPreview> & {
   error?: string;
   reason?: string;
@@ -900,6 +910,15 @@ type UploadResult = {
   alerts?: number;
   steps?: { name: string; status: string }[];
 };
+
+function formatEta(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds)) return "calculating ETA";
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) return `${whole}s remaining`;
+  const minutes = Math.floor(whole / 60);
+  const remainder = whole % 60;
+  return `${minutes}m ${remainder}s remaining`;
+}
 
 function uploadFormWithProgress<T>(path: string, form: FormData, onProgress: (percent: number) => void, onUploaded: () => void) {
   return new Promise<{ ok: boolean; status: number; payload: T }>((resolve, reject) => {
@@ -1652,7 +1671,17 @@ function UploadPage() {
   const [processing, setProcessing] = useState(false);
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadTransfer, setUploadTransfer] = useState<UploadTransferState>({
+    bytesUploaded: 0,
+    speedBytesPerSecond: 0,
+    etaSeconds: null,
+    paused: false,
+    retryAttempt: 0,
+    message: "",
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const resumableUploadRef = useRef<ResumableUploadHandle | null>(null);
+  const transferSampleRef = useRef({ bytes: 0, timestamp: 0, speed: 0 });
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
   const [sensorId, setSensorId] = useState("");
   const [interfaceName, setInterfaceName] = useState("");
@@ -1773,6 +1802,9 @@ function UploadPage() {
     setUploadResult(null);
     setUploadStage("idle");
     setUploadProgress(0);
+    setUploadTransfer({ bytesUploaded: 0, speedBytesPerSecond: 0, etaSeconds: null, paused: false, retryAttempt: 0, message: "" });
+    resumableUploadRef.current = null;
+    transferSampleRef.current = { bytes: 0, timestamp: 0, speed: 0 };
     setUploadIdempotencyKey(window.crypto.randomUUID());
   }
 
@@ -1801,7 +1833,10 @@ function UploadPage() {
     }
     let cancelled = false;
     const form = new FormData();
-    form.append("file", selectedFile);
+    const previewFile = DIRECT_UPLOAD_ENABLED && selectedFile.size > 256 * 1024
+      ? new File([selectedFile.slice(0, 256 * 1024)], selectedFile.name, { type: selectedFile.type, lastModified: selectedFile.lastModified })
+      : selectedFile;
+    form.append("file", previewFile);
     form.append("evidenceType", draft.evidenceType);
     fetch(`${API_BASE}/evidence/normalize-preview`, { method: "POST", headers: netraHeaders(), body: form })
       .then(async (response) => {
@@ -1816,6 +1851,104 @@ function UploadPage() {
       cancelled = true;
     };
   }, [selectedFile, selectedFileTooLarge, draft.evidenceType]);
+
+  async function startResumableProcessing(file: File) {
+    const accessToken = await ensureCurrentAccessToken();
+    if (!accessToken) throw new Error("Your sign-in session expired. Sign in again before uploading evidence.");
+    const createResponse = await fetch(`${API_BASE}/evidence/upload-sessions`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json", "Idempotency-Key": uploadIdempotencyKey }),
+      body: JSON.stringify({
+        caseId: draft.caseNumber,
+        filename: file.name,
+        sizeBytes: file.size,
+        contentType: file.type || "application/octet-stream",
+        lastModified: String(file.lastModified),
+        evidenceType: draft.evidenceType,
+        sourceLocation: draft.sourceLocation,
+        priority: draft.priority,
+        remarks: draft.remarks,
+        flags: draft.flags ?? [],
+        sourceIp: draft.sourceIp,
+        destinationIp: draft.destinationIp,
+        protocol: draft.protocol,
+        port: draft.port,
+        durationSeconds: draft.durationSeconds,
+        packetLimit: draft.packetLimit,
+        bpfFilter: draft.bpfFilter,
+      }),
+    });
+    const created = await createResponse.json() as DirectUploadSession & { error?: string };
+    if (!createResponse.ok) throw new Error(created.error ?? "A resumable upload session could not be created.");
+
+    transferSampleRef.current = { bytes: 0, timestamp: performance.now(), speed: 0 };
+    const handle = beginResumableUpload(file, created, accessToken, {
+      onProgress: ({ bytesUploaded, bytesTotal, percentage }) => {
+        const now = performance.now();
+        const previous = transferSampleRef.current;
+        const elapsedSeconds = Math.max(0.001, (now - previous.timestamp) / 1000);
+        let speed = previous.speed;
+        if (bytesUploaded >= previous.bytes && elapsedSeconds >= 0.2) {
+          const instantSpeed = (bytesUploaded - previous.bytes) / elapsedSeconds;
+          speed = previous.speed > 0 ? previous.speed * 0.7 + instantSpeed * 0.3 : instantSpeed;
+          transferSampleRef.current = { bytes: bytesUploaded, timestamp: now, speed };
+        }
+        setUploadProgress(Math.min(100, Math.round(percentage)));
+        setUploadTransfer((current) => ({
+          ...current,
+          bytesUploaded,
+          speedBytesPerSecond: speed,
+          etaSeconds: speed > 0 ? Math.max(0, (bytesTotal - bytesUploaded) / speed) : null,
+          paused: false,
+          message: current.retryAttempt > 0 ? "Connection restored; upload is continuing." : "Resumable upload active.",
+        }));
+      },
+      onRetry: (attempt) => {
+        setUploadTransfer((current) => ({
+          ...current,
+          retryAttempt: attempt,
+          message: `Network interruption detected. Automatic retry ${attempt} is scheduled.`,
+        }));
+      },
+      onResumed: () => {
+        setUploadTransfer((current) => ({ ...current, message: "A previous partial upload was found and resumed." }));
+      },
+    });
+    resumableUploadRef.current = handle;
+    await handle.completion;
+    resumableUploadRef.current = null;
+    setUploadProgress(100);
+    setUploadStage("processing");
+    setUploadTransfer((current) => ({ ...current, bytesUploaded: file.size, etaSeconds: 0, message: "Upload complete. Server validation is running." }));
+
+    const finalizeResponse = await fetch(`${API_BASE}/evidence/upload-sessions/${created.id}/finalize`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    const finalized = await finalizeResponse.json() as DirectUploadSession & { error?: string };
+    if (!finalizeResponse.ok) throw new Error(finalized.error ?? "The uploaded evidence could not be finalized.");
+    if (!finalized.jobId) throw new Error("The upload was verified, but durable analysis has not been queued yet.");
+
+    setActiveCaseId(finalized.caseId);
+    setUploadStage("queued");
+    setUploadResult({ jobId: finalized.jobId, filename: file.name });
+    window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: finalized.jobId, caseId: finalized.caseId }));
+    toast.success("Resumable evidence upload verified and queued for analysis.");
+    void followUploadJob(finalized.jobId, finalized.caseId);
+  }
+
+  async function toggleResumablePause() {
+    const handle = resumableUploadRef.current;
+    if (!handle) return;
+    if (handle.isPaused()) {
+      handle.resume();
+      setUploadTransfer((current) => ({ ...current, paused: false, message: "Upload resumed." }));
+      return;
+    }
+    await handle.pause();
+    setUploadTransfer((current) => ({ ...current, paused: true, message: "Upload paused. Resume when the connection is ready." }));
+  }
 
   async function startProcessing() {
     if (!selectedFile) {
@@ -1853,6 +1986,10 @@ function UploadPage() {
     form.append("flags", JSON.stringify(draft.flags ?? []));
     form.append("idempotencyKey", uploadIdempotencyKey);
     try {
+      if (DIRECT_UPLOAD_ENABLED) {
+        await startResumableProcessing(selectedFile);
+        return;
+      }
       const response = await uploadFormWithProgress<EvidenceUploadPayload>(
         "/evidence/upload",
         form,
@@ -2061,10 +2198,20 @@ function UploadPage() {
                 <div>
                   <h3 className="text-sm font-black text-strong">{uploadStageLabel[uploadStage]}</h3>
                   <p className="mt-1 text-xs leading-5 text-muted">
-                    {uploadStage === "uploading" ? `${uploadProgress}% of file bytes sent to Netra.` : uploadStage === "processing" ? "The browser upload is finished. Server-side evidence checks and analysis are still running." : uploadStage === "queued" ? "The worker status below will update automatically." : uploadStage === "complete" ? "Hashes, case records, findings, and report data are ready." : "Review the error message, correct the file or metadata, and retry."}
+                    {uploadStage === "uploading" && DIRECT_UPLOAD_ENABLED
+                      ? `${formatBytes(uploadTransfer.bytesUploaded)} of ${formatBytes(selectedFile?.size ?? 0)} · ${uploadTransfer.speedBytesPerSecond > 0 ? `${formatBytes(uploadTransfer.speedBytesPerSecond)}/s` : "measuring speed"} · ${formatEta(uploadTransfer.etaSeconds)}`
+                      : uploadStage === "uploading" ? `${uploadProgress}% of file bytes sent to Netra.` : uploadStage === "processing" ? "The browser upload is finished. Server-side evidence checks and analysis are still running." : uploadStage === "queued" ? "The worker status below will update automatically." : uploadStage === "complete" ? "Hashes, case records, findings, and report data are ready." : "Review the error message, correct the file or metadata, and retry."}
                   </p>
+                  {DIRECT_UPLOAD_ENABLED && uploadTransfer.message && <p className="mt-1 text-xs leading-5 text-muted">{uploadTransfer.message}</p>}
                 </div>
-                <Badge variant={uploadStage === "failed" ? "destructive" : "secondary"}>{uploadStage === "uploading" ? `${uploadProgress}%` : uploadStage}</Badge>
+                <div className="flex items-center gap-2">
+                  {DIRECT_UPLOAD_ENABLED && uploadStage === "uploading" && resumableUploadRef.current && (
+                    <Button type="button" variant="secondary" onClick={() => void toggleResumablePause()}>
+                      {uploadTransfer.paused ? "Resume" : "Pause"}
+                    </Button>
+                  )}
+                  <Badge variant={uploadStage === "failed" ? "destructive" : "secondary"}>{uploadStage === "uploading" ? `${uploadProgress}%` : uploadStage}</Badge>
+                </div>
               </div>
               <Progress className="mt-4" value={uploadProgress} aria-label="Evidence upload byte progress" />
             </div>

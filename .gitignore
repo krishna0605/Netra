@@ -42,6 +42,7 @@ credentials/
 *.cap
 storage/*
 !storage/README.md
+.netra-tmp/
 capture_chunks/
 filtered_pcaps/
 reports/

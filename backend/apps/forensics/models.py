@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from uuid import uuid4
 
 
 class TimeStampedModel(models.Model):
@@ -97,6 +98,64 @@ class CaseMembership(TimeStampedModel):
 
     class Meta:
         unique_together = ("case", "user")
+
+
+class EvidenceUploadSession(TimeStampedModel):
+    class Status(models.TextChoices):
+        CREATED = "created", "Created"
+        UPLOADING = "uploading", "Uploading"
+        UPLOADED = "uploaded", "Uploaded"
+        FINALIZED = "finalized", "Finalized"
+        QUEUED = "queued", "Queued"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+        CANCELED = "canceled", "Canceled"
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="netra_upload_sessions", on_delete=models.CASCADE)
+    external_user_id = models.CharField(max_length=128, db_index=True)
+    organization = models.CharField(max_length=160)
+    case = models.ForeignKey(Case, related_name="upload_sessions", on_delete=models.CASCADE)
+    expected_filename = models.CharField(max_length=255)
+    expected_size_bytes = models.BigIntegerField()
+    expected_evidence_type = models.CharField(max_length=64)
+    expected_content_type = models.CharField(max_length=160, default="application/octet-stream")
+    storage_path = models.CharField(max_length=500, unique=True)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.CREATED)
+    expires_at = models.DateTimeField()
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    fingerprint = models.CharField(max_length=64)
+    actual_size_bytes = models.BigIntegerField(null=True, blank=True)
+    actual_content_type = models.CharField(max_length=160, blank=True)
+    actual_sha256 = models.CharField(max_length=64, blank=True)
+    failure_code = models.CharField(max_length=64, blank=True)
+    intake_json = models.JSONField(default=dict, blank=True)
+    normalization_json = models.JSONField(default=dict, blank=True)
+    idempotency_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    processing_job = models.ForeignKey(
+        "ProcessingJob",
+        null=True,
+        blank=True,
+        related_name="upload_sessions",
+        on_delete=models.SET_NULL,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(status__in=["created", "uploading", "uploaded", "finalized", "queued", "processing"]),
+                name="netra_one_active_upload_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="netra_upload_user_status_idx"),
+            models.Index(fields=["organization", "status"], name="netra_upload_org_status_idx"),
+            models.Index(fields=["expires_at", "status"], name="netra_upload_expiry_idx"),
+            models.Index(fields=["case", "created_at"], name="netra_upload_case_created_idx"),
+        ]
 
 
 class EvidenceFile(TimeStampedModel):
