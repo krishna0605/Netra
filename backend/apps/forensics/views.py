@@ -3,6 +3,7 @@ import logging
 import os
 import hmac
 import hashlib
+import ipaddress
 import tempfile
 import time
 import urllib.error
@@ -24,7 +25,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
 from common.audit import access_log_dict, actor_from_request, add_history, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
-from common.analysis import analyze_pcap, empty_analysis
+from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
 from common.case_workspace import bump_case_list_cache_version, case_list_cache_version, workspace_for_case
@@ -876,6 +877,31 @@ def _normalization_error_response(normalization: dict) -> JsonResponse:
     )
 
 
+def _analysis_filter_error(request, normalized_type: str, requested_bpf: str) -> JsonResponse | None:
+    try:
+        for field in ("sourceIp", "destinationIp"):
+            value = (request.POST.get(field) or "").strip()
+            if value:
+                ipaddress.ip_address(value)
+        protocol = (request.POST.get("protocol") or "").strip().upper()
+        if protocol and protocol not in {"DNS", "TLS", "HTTP", "HTTPS", "SSH", "FTP", "SMTP", "SMB", "TCP", "UDP", "ICMP"}:
+            raise ValueError("Protocol filter is not supported.")
+        for field, maximum in (("port", 65535), ("durationSeconds", 86400), ("packetLimit", settings.NETRA_PACKET_INDEX_CAP)):
+            raw = (request.POST.get(field) or "").strip()
+            if not raw:
+                continue
+            value = int(raw)
+            if value < 1 or value > maximum:
+                raise ValueError(f"{field} must be between 1 and {maximum}.")
+        if requested_bpf:
+            if normalized_type != EvidenceFile.EvidenceType.PCAP:
+                raise ValueError("BPF filters can only be applied to PCAP or PCAPNG evidence.")
+            validate_bpf_expression(requested_bpf)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        return JsonResponse({"error": str(exc), "code": "invalid_analysis_filter"}, status=400)
+    return None
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def evidence_normalize_preview(request):
@@ -945,6 +971,9 @@ def evidence_upload(request):
     normalization = normalization_result.to_dict()
     if not normalization_result.valid:
         return _normalization_error_response(normalization)
+    filter_error = _analysis_filter_error(request, normalization_result.normalized_type, requested_bpf)
+    if filter_error:
+        return filter_error
     try:
         saved = save_uploaded_file(upload, "pcap" if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP else "structured")
     except OverflowError as exc:

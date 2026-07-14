@@ -1676,6 +1676,10 @@ function UploadPage() {
     )
   );
   const normalizationTone: "normal" | "danger" | "success" = selectedFile && normalizationBlocked ? "danger" : selectedFile && normalization?.validForSelectedType ? "success" : "normal";
+  const bpfAvailableForEvidence = BPF_FILTER_ENABLED && (
+    draft.evidenceType === "PCAP" ||
+    (draft.evidenceType === "Auto-detect" && (!normalization || normalization.normalizedType === "PCAP"))
+  );
   const normalizationLabel =
     !selectedFile ? "" :
     !normalization ? "Checking" :
@@ -2161,11 +2165,13 @@ function UploadPage() {
               <Field label="Duration limit (seconds)" value={draft.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
               <Field label="Packet limit" value={draft.packetLimit} onChange={(value) => update("packetLimit", value)} />
               <div className="md:col-span-2">
-                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} disabled={!BPF_FILTER_ENABLED} />
+                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} disabled={!bpfAvailableForEvidence} />
                 <p className="mt-2 text-xs text-muted">
-                  {BPF_FILTER_ENABLED
-                    ? "Use only if you know packet filter syntax. Most investigations should leave this blank."
-                    : "Offline BPF filtering is unavailable in this deployment. Use the source, destination, protocol, port, duration, and packet-limit filters above."}
+                  {!BPF_FILTER_ENABLED
+                    ? "Offline BPF filtering is unavailable in this deployment. Use the source, destination, protocol, port, duration, and packet-limit filters above."
+                    : bpfAvailableForEvidence
+                      ? "Applied by tcpdump to the complete PCAP before packet parsing. Most investigations should leave this blank."
+                      : "BPF is available only for PCAP or PCAPNG evidence; the other analysis filters still apply to structured evidence."}
                 </p>
               </div>
             </div>

@@ -1,12 +1,14 @@
 import csv
 import html
 import json
+import shlex
 import shutil
 import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from django.conf import settings
@@ -85,25 +87,75 @@ def empty_analysis() -> dict[str, Any]:
 
 
 def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: str, saved: dict[str, Any]) -> dict[str, Any]:
-    pcap_path = Path(pcap_path)
-    observed_packet_count = _count_observed_packets(pcap_path)
-    rows = _read_packets_with_tshark(pcap_path)
-    observed_packet_count = observed_packet_count or len(rows)
-    search_completeness = "truncated-search-index" if observed_packet_count > len(rows) else "complete"
-    packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
-    packets = _apply_intake_filters(packets, saved.get("intake", {}))
-    zeek = run_zeek_analysis(pcap_path, job_id)
-    return assemble_analysis(
-        packets,
-        observed_packet_count,
-        case_id,
-        evidence_id,
-        job_id,
-        saved,
-        zeek=zeek,
-        source_label="PCAP",
-        search_completeness=search_completeness,
+    source_path = Path(pcap_path)
+    filtered_path: Path | None = None
+    try:
+        bpf_filter = str(saved.get("intake", {}).get("bpfFilter") or "").strip()
+        analysis_path = source_path
+        if bpf_filter:
+            filtered_path = apply_offline_bpf(source_path, bpf_filter)
+            analysis_path = filtered_path
+        observed_packet_count = _count_observed_packets(analysis_path)
+        rows = _read_packets_with_tshark(analysis_path)
+        observed_packet_count = observed_packet_count if observed_packet_count is not None else len(rows)
+        packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
+        packets = _apply_intake_filters(packets, saved.get("intake", {}))
+        search_completeness = "truncated-search-index" if observed_packet_count > len(packets) else "complete"
+        zeek = run_zeek_analysis(analysis_path, job_id)
+        return assemble_analysis(
+            packets,
+            observed_packet_count,
+            case_id,
+            evidence_id,
+            job_id,
+            saved,
+            zeek=zeek,
+            source_label="PCAP",
+            search_completeness=search_completeness,
+        )
+    finally:
+        if filtered_path:
+            filtered_path.unlink(missing_ok=True)
+
+
+def _bpf_tokens(expression: str) -> list[str]:
+    if not expression or len(expression) > 255 or any(ord(character) < 32 for character in expression):
+        raise ValueError("BPF filter must contain 1 to 255 printable characters.")
+    try:
+        tokens = shlex.split(expression, posix=True)
+    except ValueError as exc:
+        raise ValueError("BPF filter contains invalid quoting.") from exc
+    if not tokens or len(tokens) > 64:
+        raise ValueError("BPF filter is empty or too complex.")
+    return tokens
+
+
+def validate_bpf_expression(expression: str) -> None:
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
+    result = subprocess.run([tcpdump, "-d", *_bpf_tokens(expression)], check=False, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise ValueError("BPF filter syntax is invalid.")
+
+
+def apply_offline_bpf(path: Path, expression: str) -> Path:
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
+    with NamedTemporaryFile(delete=False, suffix=".pcap") as handle:
+        target = Path(handle.name)
+    result = subprocess.run(
+        [tcpdump, "-nn", "-r", str(path), "-w", str(target), *_bpf_tokens(expression)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS,
     )
+    if result.returncode != 0:
+        target.unlink(missing_ok=True)
+        raise ValueError("BPF filter could not be applied to this capture.")
+    return target
 
 
 def assemble_analysis(
@@ -271,8 +323,8 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
     filtered = [
         packet
         for packet in packets
-        if (not source_ip or source_ip in str(packet.get("sourceIp", "")).lower())
-        and (not destination_ip or destination_ip in str(packet.get("destinationIp", "")).lower())
+        if (not source_ip or source_ip == str(packet.get("sourceIp", "")).lower())
+        and (not destination_ip or destination_ip == str(packet.get("destinationIp", "")).lower())
         and (
             not protocol
             or protocol == str(packet.get("protocol", "")).upper()
@@ -290,9 +342,8 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
             ]
         except Exception:
             pass
-    if packet_limit:
-        filtered = filtered[: max(1, min(MAX_PACKETS, packet_limit))]
-    return filtered
+    result_limit = max(1, min(MAX_PACKETS, packet_limit or MAX_PACKETS))
+    return filtered[:result_limit]
 
 
 def run_zeek_analysis(pcap_path: Path, job_id: str) -> dict[str, Any]:
@@ -381,7 +432,7 @@ def _top_external_hosts(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
     command = [
-        "tshark", "-r", str(path), "-c", str(MAX_PACKETS), "-T", "fields", "-E", "separator=\t", "-E", "occurrence=f",
+        "tshark", "-r", str(path), "-T", "fields", "-E", "separator=\t", "-E", "occurrence=f",
         "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ipv6.src", "-e", "ip.dst", "-e", "ipv6.dst",
         "-e", "tcp.srcport", "-e", "udp.srcport", "-e", "tcp.dstport", "-e", "udp.dstport", "-e", "_ws.col.Protocol",
         "-e", "frame.len", "-e", "tcp.flags", "-e", "dns.qry.name", "-e", "tls.handshake.extensions_server_name",
@@ -391,7 +442,7 @@ def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
         "-e", "tls.handshake.ciphersuite", "-e", "icmp.type", "-e", "icmp.code", "-e", "_ws.expert.message",
         "-e", "_ws.col.Info",
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise ValueError(result.stderr.strip() or "tshark could not parse the PCAP")
     fields = [
