@@ -20,7 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { BrowserRouter as Router, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Area,
@@ -61,6 +61,7 @@ import {
 import type {
   AlertRecord,
   AccessLogRecord,
+  AnalysisStatus,
   AnomalyRecord,
   AttackClass,
   CaseChartsRecord,
@@ -102,6 +103,51 @@ import {
 
 type Dict = Record<string, string>;
 type ComplianceRecord = { item: string; status: string; detail: string };
+
+const VIEW_REFS = {
+  upload: "7b9914d4-53ef-482f-9f85-9cc5cf17bf69",
+  overview: "7cab94c3-622f-46b0-b3e4-7e8ea6df0831",
+  activity: "1310f49a-114e-4c91-ae05-587c23f65dc9",
+  evidence: "1b438ac1-72e9-4413-a28d-cc87ea35ab54",
+  reports: "dca32a39-8348-4f14-b62a-fdba9987e234",
+  packets: "fd194142-3050-41dc-938c-1250cc494ca4",
+  sessions: "7655d88f-d7b9-40cb-86fa-53b7b6129229",
+  decoder: "d8caac3c-b968-4421-9009-658a6073ced6",
+  payloads: "301d2ced-af42-4548-b874-7c366d72dc69",
+  detection: "67c443d2-77c3-44d5-a600-cd5a75f2b78f",
+  aiAnomaly: "6bb1857c-2064-484e-9762-624ca850d238",
+  graph: "0ec62c3f-47b7-4638-a452-a25a688d41f3",
+  cases: "14e61a2b-40b2-4c73-bd5c-d75b832322ad",
+  exports: "53f8cbfa-e55f-4406-b83b-d19f8d491455",
+  lab: "e7e7d465-e28f-474d-959a-e12136db52aa",
+  compliance: "d5bb3600-c3bb-4279-bd02-cb8025d10fc9",
+  settings: "4c1bed57-4a3b-4c98-a7ee-778b5500eb91",
+  technicalStatus: "9f26eb92-724c-4c78-98d4-672f111c7a96",
+  sensors: "b65a8685-7123-4133-8b1d-b23c85bd568c",
+  schedules: "ad7da1a0-e32c-43db-af37-ed6ec02ba7ac",
+  integrations: "9d11e611-5ad8-4e39-8aa0-1ba5ca622bbe",
+  retention: "dd7f47ca-7efc-41ca-9972-e0132292208b",
+} as const;
+
+type ViewName = keyof typeof VIEW_REFS;
+const appViewRoute = (view: ViewName) => `/app/v/${VIEW_REFS[view]}`;
+const caseWorkspaceRoute = (routeRef: string) => `/app/w/${routeRef}`;
+
+type ActiveUploadWorkflow = {
+  caseId: string;
+  routeRef: string;
+  filename: string;
+  sizeBytes: number;
+  uploadSessionId?: string;
+  jobId?: string;
+  state: AnalysisStatus["state"];
+  progress: number;
+  bytesUploaded: number;
+  speedBytesPerSecond: number;
+  step: string;
+  steps: { name: string; status: string }[];
+  error?: string;
+};
 
 const en: Dict = {
   viewDemo: "Open Investigation Console",
@@ -828,6 +874,8 @@ type AppState = {
   complianceRecords: ComplianceRecord[];
   exportRecords: ExportRecord[];
   deploymentAccess: DeploymentAccess;
+  activeUpload: ActiveUploadWorkflow | null;
+  setActiveUpload: Dispatch<SetStateAction<ActiveUploadWorkflow | null>>;
 };
 
 type DeploymentModuleKey = "lab" | "sensors" | "schedules" | "integrations" | "retention" | "system";
@@ -915,6 +963,7 @@ type EvidenceUploadPayload = Partial<EvidenceNormalizationPreview> & {
   error?: string;
   reason?: string;
   caseId?: string;
+  routeRef?: string;
   status?: string;
   sha256?: string;
   encrypted_sha256?: string;
@@ -1202,6 +1251,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
   const [trafficTimelineDataState, setTrafficTimelineDataState] = useState<{ time: string; mb: number; alerts: number }[]>([]);
   const [zeekState, setZeekState] = useState<ZeekEvidence | null>(null);
   const [activeCaseId, setActiveCaseIdState] = useState<string | null>(() => window.localStorage.getItem("netra-active-case"));
+  const [activeUpload, setActiveUpload] = useState<ActiveUploadWorkflow | null>(null);
   const [deploymentAccess, setDeploymentAccess] = useState<DeploymentAccess>(DEFAULT_DEPLOYMENT_ACCESS);
   const refreshTimerRef = useRef<number | null>(null);
   const [language, setLanguage] = useState<Language>(() => {
@@ -1378,8 +1428,10 @@ function NetraProvider({ children }: { children: ReactNode }) {
       setIntakeForm,
       setActiveCaseId,
       addCaseNote,
+      activeUpload,
+      setActiveUpload,
     }),
-    [accessLogRecordsState, activeCaseId, addCaseNote, alertRecords, anomaliesState, caseRecords, complianceRecordsState, decodedProtocolsState, deploymentAccess, detectionMatchesState, evidenceState, exportRecordsState, intakeForm, language, networkFlowsState, packetsState, payloadFindingsState, protocolChartDataState, reloadAnalysis, sessionsState, summaryState, trafficTimelineDataState, setActiveCaseId, zeekState],
+    [accessLogRecordsState, activeCaseId, activeUpload, addCaseNote, alertRecords, anomaliesState, caseRecords, complianceRecordsState, decodedProtocolsState, deploymentAccess, detectionMatchesState, evidenceState, exportRecordsState, intakeForm, language, networkFlowsState, packetsState, payloadFindingsState, protocolChartDataState, reloadAnalysis, sessionsState, summaryState, trafficTimelineDataState, setActiveCaseId, zeekState],
   );
 
   return <NetraContext.Provider value={value}>{children}</NetraContext.Provider>;
@@ -1400,7 +1452,7 @@ function App() {
               <Route path="/contact" element={<PublicContactPage languageControl={<LanguageControl />} />} />
               <Route path="/privacy" element={<PublicPrivacyPage languageControl={<LanguageControl />} />} />
               <Route path="/terms" element={<PublicTermsPage languageControl={<LanguageControl />} />} />
-              <Route path="/demo" element={<Navigate to="/login" replace state={{ from: "/app/upload" }} />} />
+              <Route path="/demo" element={<Navigate to="/login" replace state={{ from: appViewRoute("upload") }} />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/app/login" element={<Navigate to="/login" replace />} />
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
@@ -1475,7 +1527,7 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
-  const from = typeof location.state === "object" && location.state && "from" in location.state ? String(location.state.from) : "/app/upload";
+  const from = typeof location.state === "object" && location.state && "from" in location.state ? String(location.state.from) : appViewRoute("upload");
 
   useEffect(() => {
     if (!SUPABASE_AUTH_ENABLED || !supabase) {
@@ -1580,7 +1632,7 @@ function ModuleRoute({ module, children }: { module: DeploymentModuleKey; childr
   if (!deploymentAccess.verified) {
     return <PageFrame title="Checking access" description="Verifying your role and the active deployment profile."><div /></PageFrame>;
   }
-  if (!access.visible) return <Navigate to="/app/upload" replace />;
+  if (!access.visible) return <Navigate to={appViewRoute("upload")} replace />;
   if (!access.enabled) {
     return (
       <PageFrame title="Not configured" description={access.reason}>
@@ -1594,6 +1646,41 @@ function ModuleRoute({ module, children }: { module: DeploymentModuleKey; childr
     );
   }
   return <>{children}</>;
+}
+
+function OpaqueViewRoute() {
+  const { viewRef = "" } = useParams();
+  if (viewRef === VIEW_REFS.upload) return <UploadPage />;
+  if (viewRef === VIEW_REFS.overview) return <DashboardPage />;
+  if (viewRef === VIEW_REFS.activity) return <SuspiciousActivityPage />;
+  if (viewRef === VIEW_REFS.evidence) return <TrafficEvidencePage />;
+  if (viewRef === VIEW_REFS.reports) return <EvidenceReportPage />;
+  if (viewRef === VIEW_REFS.packets) return <PacketExplorerPage />;
+  if (viewRef === VIEW_REFS.sessions) return <SessionsPage />;
+  if (viewRef === VIEW_REFS.decoder) return <ProtocolDecoderPage />;
+  if (viewRef === VIEW_REFS.payloads) return <PayloadInspectionPage />;
+  if (viewRef === VIEW_REFS.detection) return <ThreatDetectionPage />;
+  if (viewRef === VIEW_REFS.aiAnomaly) return <AiAnomalyPage />;
+  if (viewRef === VIEW_REFS.graph) return <GraphPage />;
+  if (viewRef === VIEW_REFS.cases) return <CasesPage />;
+  if (viewRef === VIEW_REFS.exports) return <ExportCenterPage />;
+  if (viewRef === VIEW_REFS.lab) return <ModuleRoute module="lab"><LabToolsPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.compliance) return <CompliancePage />;
+  if (viewRef === VIEW_REFS.settings) return <ModuleRoute module="system"><SettingsPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.technicalStatus) return <ModuleRoute module="system"><SystemPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.sensors) return <ModuleRoute module="sensors"><SensorsPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.schedules) return <ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.integrations) return <ModuleRoute module="integrations"><IntegrationsPage /></ModuleRoute>;
+  if (viewRef === VIEW_REFS.retention) return <ModuleRoute module="retention"><RetentionPage /></ModuleRoute>;
+  return <Navigate to={appViewRoute("upload")} replace />;
+}
+
+function LegacyCaseRedirect() {
+  const { caseId = "" } = useParams();
+  const { caseRecords } = useNetra();
+  const record = caseRecords.find((item) => item.id === caseId);
+  if (record?.routeRef) return <Navigate to={caseWorkspaceRoute(record.routeRef)} replace />;
+  return <PageFrame title="Opening case" description="Resolving the secure case workspace."><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Checking case access…</div></PageFrame>;
 }
 
 function AppShell() {
@@ -1611,38 +1698,41 @@ function AppShell() {
           <TopBar />
           <div className="app-main-canvas p-4 sm:p-6">
             <Routes>
-              <Route index element={<Navigate to="upload" replace />} />
-              <Route path="upload" element={<UploadPage />} />
-              <Route path="overview" element={<DashboardPage />} />
-              <Route path="activity" element={<SuspiciousActivityPage />} />
-              <Route path="evidence" element={<TrafficEvidencePage />} />
-              <Route path="report" element={<Navigate to="/app/reports" replace />} />
-              <Route path="packets" element={<PacketExplorerPage />} />
-              <Route path="sessions" element={<SessionsPage />} />
-              <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="decoder" element={<ProtocolDecoderPage />} />
-              <Route path="payloads" element={<PayloadInspectionPage />} />
-              <Route path="detection" element={<ThreatDetectionPage />} />
-              <Route path="ai-anomaly" element={<AiAnomalyPage />} />
-              <Route path="graph" element={<GraphPage />} />
-              <Route path="cases" element={<CasesPage />} />
-              <Route path="cases/:caseId" element={<CaseDetailPage />} />
-              <Route path="reports" element={<EvidenceReportPage />} />
-              <Route path="reports/:caseId" element={<ReportPage />} />
-              <Route path="exports" element={<ExportCenterPage />} />
-              <Route path="lab" element={<ModuleRoute module="lab"><LabToolsPage /></ModuleRoute>} />
-              <Route path="compliance" element={<CompliancePage />} />
-              <Route path="settings" element={<ModuleRoute module="system"><SettingsPage /></ModuleRoute>} />
-              <Route path="settings/technical-status" element={<ModuleRoute module="system"><SystemPage /></ModuleRoute>} />
-              <Route path="settings/sensors" element={<ModuleRoute module="sensors"><SensorsPage /></ModuleRoute>} />
-              <Route path="settings/schedules" element={<ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>} />
-              <Route path="settings/integrations" element={<ModuleRoute module="integrations"><IntegrationsPage /></ModuleRoute>} />
-              <Route path="settings/retention" element={<ModuleRoute module="retention"><RetentionPage /></ModuleRoute>} />
-              <Route path="system" element={<Navigate to="/app/settings/technical-status" replace />} />
-              <Route path="sensors" element={<Navigate to="/app/settings/sensors" replace />} />
-              <Route path="schedules" element={<Navigate to="/app/settings/schedules" replace />} />
-              <Route path="integrations" element={<Navigate to="/app/settings/integrations" replace />} />
-              <Route path="retention" element={<Navigate to="/app/settings/retention" replace />} />
+              <Route index element={<Navigate to={appViewRoute("upload")} replace />} />
+              <Route path="v/:viewRef" element={<OpaqueViewRoute />} />
+              <Route path="w/:routeRef" element={<CaseDetailPage />} />
+              <Route path="d/:routeRef" element={<ReportPage />} />
+              <Route path="cases/:caseId" element={<LegacyCaseRedirect />} />
+              <Route path="reports/:caseId" element={<Navigate to={appViewRoute("reports")} replace />} />
+              <Route path="upload" element={<Navigate to={appViewRoute("upload")} replace />} />
+              <Route path="overview" element={<Navigate to={appViewRoute("overview")} replace />} />
+              <Route path="dashboard" element={<Navigate to={appViewRoute("overview")} replace />} />
+              <Route path="activity" element={<Navigate to={appViewRoute("activity")} replace />} />
+              <Route path="evidence" element={<Navigate to={appViewRoute("evidence")} replace />} />
+              <Route path="report" element={<Navigate to={appViewRoute("reports")} replace />} />
+              <Route path="reports" element={<Navigate to={appViewRoute("reports")} replace />} />
+              <Route path="packets" element={<Navigate to={appViewRoute("packets")} replace />} />
+              <Route path="sessions" element={<Navigate to={appViewRoute("sessions")} replace />} />
+              <Route path="decoder" element={<Navigate to={appViewRoute("decoder")} replace />} />
+              <Route path="payloads" element={<Navigate to={appViewRoute("payloads")} replace />} />
+              <Route path="detection" element={<Navigate to={appViewRoute("detection")} replace />} />
+              <Route path="ai-anomaly" element={<Navigate to={appViewRoute("aiAnomaly")} replace />} />
+              <Route path="graph" element={<Navigate to={appViewRoute("graph")} replace />} />
+              <Route path="cases" element={<Navigate to={appViewRoute("cases")} replace />} />
+              <Route path="exports" element={<Navigate to={appViewRoute("exports")} replace />} />
+              <Route path="lab" element={<Navigate to={appViewRoute("lab")} replace />} />
+              <Route path="compliance" element={<Navigate to={appViewRoute("compliance")} replace />} />
+              <Route path="settings" element={<Navigate to={appViewRoute("settings")} replace />} />
+              <Route path="settings/technical-status" element={<Navigate to={appViewRoute("technicalStatus")} replace />} />
+              <Route path="settings/sensors" element={<Navigate to={appViewRoute("sensors")} replace />} />
+              <Route path="settings/schedules" element={<Navigate to={appViewRoute("schedules")} replace />} />
+              <Route path="settings/integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />
+              <Route path="settings/retention" element={<Navigate to={appViewRoute("retention")} replace />} />
+              <Route path="system" element={<Navigate to={appViewRoute("technicalStatus")} replace />} />
+              <Route path="sensors" element={<Navigate to={appViewRoute("sensors")} replace />} />
+              <Route path="schedules" element={<Navigate to={appViewRoute("schedules")} replace />} />
+              <Route path="integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />
+              <Route path="retention" element={<Navigate to={appViewRoute("retention")} replace />} />
             </Routes>
           </div>
         </div>
@@ -1658,20 +1748,20 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
     {
       label: t("mainWorkflow"),
       items: [
-        navItem(Upload, "Start Investigation", "/app/upload"),
-        navItem(FileSearch, t("cases"), "/app/cases"),
-        navItem(FileText, t("evidenceReport"), "/app/reports"),
-        navItem(AlertTriangle, t("suspiciousActivity"), "/app/activity"),
-        navItem(Database, t("trafficEvidence"), "/app/evidence"),
+        navItem(Upload, "Start Investigation", appViewRoute("upload")),
+        navItem(FileSearch, t("cases"), appViewRoute("cases")),
+        navItem(FileText, t("evidenceReport"), appViewRoute("reports")),
+        navItem(AlertTriangle, t("suspiciousActivity"), appViewRoute("activity")),
+        navItem(Database, t("trafficEvidence"), appViewRoute("evidence")),
       ],
     },
     ...(deploymentAccess.modules.lab.visible ? [{
       label: "Lab Tools",
-      items: [navItem(Activity, "Capture and Replay", "/app/lab")],
+      items: [navItem(Activity, "Capture and Replay", appViewRoute("lab"))],
     }] : []),
     ...(deploymentAccess.modules.system.visible ? [{
       label: "Settings",
-      items: [navItem(SettingsIcon, "Settings", "/app/settings")],
+      items: [navItem(SettingsIcon, "Settings", appViewRoute("settings"))],
     }] : []),
   ];
   return (
@@ -1727,7 +1817,9 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
 }
 
 function TopBar() {
-  const { t } = useNetra();
+  const { t, activeCaseId, caseRecords } = useNetra();
+  const navigate = useNavigate();
+  const activeCase = caseRecords.find((record) => record.id === activeCaseId);
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
     <header className="technical-topbar no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 backdrop-blur-xl sm:px-6">
@@ -1748,16 +1840,14 @@ function TopBar() {
       </div>
       <div className="flex items-center gap-3">
         <LanguageControl />
-        <Button asChild>
-          <Link to="/app/reports">{t("generateReport")}</Link>
-        </Button>
+        <Button onClick={() => navigate(appViewRoute("reports"))} disabled={!activeCase?.reportEligible} title={activeCase?.reportBlockedReason ?? "Select a completed case first."}>{t("generateReport")}</Button>
       </div>
     </header>
   );
 }
 
 function UploadPage() {
-  const { t, alertRecords, decodedProtocols, deploymentAccess, evidence, intakeForm, packets, payloadFindings, reloadAnalysis, sessions, setActiveCaseId, setIntakeForm, summary } = useNetra();
+  const { t, alertRecords, decodedProtocols, deploymentAccess, evidence, intakeForm, packets, payloadFindings, reloadAnalysis, sessions, setActiveCaseId, setActiveUpload, setIntakeForm, summary } = useNetra();
   const navigate = useNavigate();
   const [draft, setDraft] = useState<EvidenceIntakeForm>(intakeForm);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -1823,6 +1913,26 @@ function UploadPage() {
 
   function update<K extends keyof EvidenceIntakeForm>(key: K, value: EvidenceIntakeForm[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function ensureCaseForAnalysis(file: File): Promise<CaseRecord> {
+    const response = await fetch(`${API_BASE}/cases`, {
+      method: "POST",
+      headers: netraHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        caseNumber: draft.caseNumber,
+        title: `Evidence intake: ${file.name}`,
+        priority: draft.priority,
+        sourceLocation: draft.sourceLocation,
+        remarks: draft.remarks,
+        flags: draft.flags ?? [],
+        origin: "officer_upload",
+      }),
+    });
+    if (response.status === 409) return apiGet<CaseRecord>(`/cases/${encodeURIComponent(draft.caseNumber)}`);
+    const payload = await response.json() as CaseRecord & { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? "The investigation case could not be created.");
+    return payload;
   }
 
   function selectEvidenceFile(file: File | null) {
@@ -1909,6 +2019,7 @@ function UploadPage() {
     });
     const created = await createResponse.json() as DirectUploadSession & { error?: string };
     if (!createResponse.ok) throw new Error(created.error ?? "A resumable upload session could not be created.");
+    setActiveUpload((current) => current?.caseId === created.caseId ? { ...current, routeRef: created.routeRef, uploadSessionId: created.id, state: "uploading", step: "uploading" } : current);
 
     transferSampleRef.current = { bytes: 0, timestamp: performance.now(), speed: 0 };
     const handle = beginResumableUpload(file, created, accessToken, {
@@ -1923,6 +2034,7 @@ function UploadPage() {
           transferSampleRef.current = { bytes: bytesUploaded, timestamp: now, speed };
         }
         setUploadProgress(Math.min(100, Math.round(percentage)));
+        setActiveUpload((current) => current?.caseId === created.caseId ? { ...current, state: "uploading", progress: Math.min(100, Math.round(percentage)), bytesUploaded, speedBytesPerSecond: speed, step: "uploading" } : current);
         setUploadTransfer((current) => ({
           ...current,
           bytesUploaded,
@@ -1948,6 +2060,7 @@ function UploadPage() {
     resumableUploadRef.current = null;
     setUploadProgress(100);
     setUploadStage("processing");
+    setActiveUpload((current) => current?.caseId === created.caseId ? { ...current, state: "finalizing", progress: 100, bytesUploaded: file.size, step: "validating_and_encrypting" } : current);
     setUploadTransfer((current) => ({ ...current, bytesUploaded: file.size, etaSeconds: 0, message: "Upload complete. Server validation is running." }));
 
     const finalizeResponse = await fetch(`${API_BASE}/evidence/upload-sessions/${created.id}/finalize`, {
@@ -1962,6 +2075,7 @@ function UploadPage() {
     setActiveCaseId(finalized.caseId);
     setUploadStage("queued");
     setUploadResult({ jobId: finalized.jobId, filename: file.name });
+    setActiveUpload((current) => current?.caseId === finalized.caseId ? { ...current, routeRef: finalized.routeRef, uploadSessionId: finalized.id, jobId: finalized.jobId, state: "queued", progress: 5, step: "queued" } : current);
     window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: finalized.jobId, caseId: finalized.caseId }));
     toast.success("Resumable evidence upload verified and queued for analysis.");
     void followUploadJob(finalized.jobId, finalized.caseId);
@@ -2013,6 +2127,22 @@ function UploadPage() {
     form.append("flags", JSON.stringify(draft.flags ?? []));
     form.append("idempotencyKey", uploadIdempotencyKey);
     try {
+      const caseRecord = await ensureCaseForAnalysis(selectedFile);
+      setActiveCaseId(caseRecord.id);
+      setActiveUpload({
+        caseId: caseRecord.id,
+        routeRef: caseRecord.routeRef,
+        filename: selectedFile.name,
+        sizeBytes: selectedFile.size,
+        state: "accepted",
+        progress: 0,
+        bytesUploaded: 0,
+        speedBytesPerSecond: 0,
+        step: "case_created",
+        steps: [],
+      });
+      navigate(caseWorkspaceRoute(caseRecord.routeRef));
+      void reloadAnalysis(caseRecord.id).catch(() => undefined);
       if (DIRECT_UPLOAD_ENABLED) {
         await startResumableProcessing(selectedFile);
         return;
@@ -2020,8 +2150,14 @@ function UploadPage() {
       const response = await uploadFormWithProgress<EvidenceUploadPayload>(
         "/evidence/upload",
         form,
-        setUploadProgress,
-        () => setUploadStage("processing"),
+        (percent) => {
+          setUploadProgress(percent);
+          setActiveUpload((current) => current ? { ...current, state: "uploading", progress: percent, bytesUploaded: Math.round(selectedFile.size * percent / 100), step: "uploading" } : current);
+        },
+        () => {
+          setUploadStage("processing");
+          setActiveUpload((current) => current ? { ...current, state: "finalizing", progress: 100, bytesUploaded: selectedFile.size, step: "validating_and_encrypting" } : current);
+        },
       );
       const payload = response.payload;
       if (!response.ok) {
@@ -2037,6 +2173,7 @@ function UploadPage() {
         setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: payload.keyId, jobId: payload.jobId, steps: payload.job?.steps });
         toast.success("Evidence encrypted and queued for async worker analysis.");
         if (payload.jobId) {
+          setActiveUpload((current) => current ? { ...current, routeRef: payload.routeRef ?? current.routeRef, jobId: payload.jobId, state: "queued", progress: 5, step: "queued", steps: payload.job?.steps ?? [] } : current);
           window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: payload.jobId, caseId: payload.caseId }));
           void followUploadJob(payload.jobId, payload.caseId);
         }
@@ -2044,6 +2181,7 @@ function UploadPage() {
       }
       await reloadAnalysis(payload.caseId ?? null);
       setUploadStage("complete");
+      setActiveUpload((current) => current ? { ...current, routeRef: payload.routeRef ?? current.routeRef, jobId: payload.jobId, state: "completed", progress: 100, step: "completed", steps: payload.job?.steps ?? [] } : current);
       setUploadResult({
         topClass: payload.detectedAttackClasses?.[0],
         risk: payload.riskLevel,
@@ -2062,6 +2200,7 @@ function UploadPage() {
       toast.success(t("evidenceToast"));
     } catch (error) {
       setUploadStage("failed");
+      setActiveUpload((current) => current ? { ...current, state: "failed", step: "failed", error: error instanceof Error ? error.message : "Evidence analysis failed" } : current);
       toast.error(error instanceof Error ? error.message : "Evidence analysis failed");
     } finally {
       setProcessing(false);
@@ -2073,10 +2212,19 @@ function UploadPage() {
     activeJobPollRef.current = jobId;
     try {
       for (let attempt = 0; attempt < 120; attempt += 1) {
-        const job = await apiGet<{ status: string; progress?: number; error?: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
+        const job = await apiGet<{ status: string; progress?: number; step?: string; error?: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
         if (job) {
           setUploadProgress(Math.max(0, Math.min(100, job.progress ?? 0)));
           setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
+          setActiveUpload((current) => current && (!caseId || current.caseId === caseId) ? {
+            ...current,
+            jobId,
+            state: job.status === "running" ? "running" : job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "canceled" ? "canceled" : "queued",
+            progress: Math.max(0, Math.min(100, job.progress ?? 0)),
+            step: job.step ?? job.status,
+            steps: job.steps ?? [],
+            error: job.error,
+          } : current);
           if (job.status === "completed") {
             window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
             setUploadStage("complete");
@@ -2098,7 +2246,7 @@ function UploadPage() {
     } finally {
       if (activeJobPollRef.current === jobId) activeJobPollRef.current = null;
     }
-  }, [reloadAnalysis]);
+  }, [reloadAnalysis, setActiveUpload]);
 
   useEffect(() => {
     const raw = window.localStorage.getItem(ACTIVE_UPLOAD_JOB_KEY);
@@ -2306,11 +2454,45 @@ function UploadPage() {
               <Badge key={step.name} variant={step.status === "completed" ? "secondary" : "warning"}>{step.name}: {step.status}</Badge>
             ))}
           </div>
-          {uploadStage === "complete" && <Button className="mt-4" onClick={() => navigate("/app/overview")}>Open case overview</Button>}
+          {uploadStage === "complete" && <Button className="mt-4" onClick={() => navigate(appViewRoute("overview"))}>Open case overview</Button>}
         </div>
       )}
       <EvidenceCard />
     </PageFrame>
+  );
+}
+
+function analysisStateLabel(state?: AnalysisStatus["state"]) {
+  return ({
+    "no-evidence": "Waiting for evidence",
+    accepted: "Case created",
+    uploading: "Uploading",
+    finalizing: "Verifying evidence",
+    queued: "Queued",
+    running: "Analyzing",
+    completed: "Analysis complete",
+    failed: "Analysis failed",
+    canceled: "Analysis canceled",
+    expired: "Upload expired",
+  } as Record<string, string>)[state ?? "no-evidence"] ?? "Waiting for evidence";
+}
+
+function CaseContextSelector({ value, onChange, label = "Selected case" }: { value: string; onChange: (caseId: string) => void; label?: string }) {
+  const { caseRecords } = useNetra();
+  return (
+    <label className="grid min-w-[17rem] gap-1 text-xs font-bold uppercase tracking-[0.12em] text-muted">
+      {label}
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="w-full normal-case tracking-normal"><SelectValue placeholder="Select a case" /></SelectTrigger>
+        <SelectContent>
+          {caseRecords.map((record) => (
+            <SelectItem key={record.id} value={record.id}>
+              {record.id} · {record.title} · {analysisStateLabel(record.analysisStatus?.state)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </label>
   );
 }
 
@@ -2337,7 +2519,7 @@ function DashboardPage() {
             <h2 className="text-xl font-black text-strong">No PCAP evidence uploaded yet</h2>
             <p className="mt-2 text-sm leading-6 text-muted">Upload a real PCAP or PCAPNG file to create the first investigation case and populate this dashboard.</p>
           </div>
-          <Button asChild><Link to="/app/upload"><Upload size={16} />Upload PCAP</Link></Button>
+          <Button asChild><Link to={appViewRoute("upload")}><Upload size={16} />Upload PCAP</Link></Button>
         </div>
       </PageFrame>
     );
@@ -2351,10 +2533,7 @@ function DashboardPage() {
             <h2 className="mt-2 text-2xl font-black text-strong">{currentCase?.id ?? "No case selected"}</h2>
             <p className="mt-1 text-sm leading-6 text-muted">{currentCase?.title ?? "Choose a case to see investigation results."}</p>
           </div>
-          <Select value={activeCaseId ?? caseRecords[0]?.id ?? ""} onValueChange={(value) => setActiveCaseId(value)}>
-            <SelectTrigger className="max-w-xs"><SelectValue placeholder="Select case" /></SelectTrigger>
-            <SelectContent>{caseRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.id}</SelectItem>)}</SelectContent>
-          </Select>
+          <CaseContextSelector value={activeCaseId ?? caseRecords[0]?.id ?? ""} onChange={setActiveCaseId} />
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-5">
           <MetricTile label="Risk" value={summary.riskLevel.toUpperCase()} detail={summary.topAttackClass} />
@@ -2381,9 +2560,9 @@ function DashboardPage() {
             <h2 className="text-xl font-black text-strong">Recommended next step</h2>
             <p className="mt-2 text-sm leading-7 text-muted">{topAlert?.recommendedAction ?? nextStep}</p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Button asChild><Link to="/app/activity"><AlertTriangle className="size-4" />Review activity</Link></Button>
-              <Button asChild variant="secondary"><Link to="/app/evidence"><Database className="size-4" />Inspect evidence</Link></Button>
-              <Button asChild variant="secondary"><Link to="/app/report"><FileText className="size-4" />Prepare report</Link></Button>
+              <Button asChild><Link to={appViewRoute("activity")}><AlertTriangle className="size-4" />Review activity</Link></Button>
+              <Button asChild variant="secondary"><Link to={appViewRoute("evidence")}><Database className="size-4" />Inspect evidence</Link></Button>
+              <Button asChild variant="secondary"><Link to={appViewRoute("reports")}><FileText className="size-4" />Prepare report</Link></Button>
             </div>
           </div>
         </div>
@@ -2631,16 +2810,29 @@ function AiAnomalyPage() {
 }
 
 function SuspiciousActivityPage() {
-  const { t, activeCaseId, alertRecords: contextAlerts, anomalies: contextAnomalies, detectionMatches: contextDetectionMatches, networkFlows: contextFlows } = useNetra();
-  const [alertRecords, setAlertRecords] = useState<AlertRecord[]>(contextAlerts);
-  const [anomalies, setAnomalies] = useState<AnomalyRecord[]>(contextAnomalies);
-  const [detectionMatches, setDetectionMatches] = useState<DetectionRuleMatch[]>(contextDetectionMatches);
-  const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>(contextFlows);
+  const { t, activeCaseId, caseRecords, setActiveCaseId } = useNetra();
+  const [alertRecords, setAlertRecords] = useState<AlertRecord[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyRecord[]>([]);
+  const [detectionMatches, setDetectionMatches] = useState<DetectionRuleMatch[]>([]);
+  const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>([]);
   const [aiExplanation, setAiExplanation] = useState<{ mode: string; modelVersion: string; fallbackUsed: boolean; limitations: string[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const currentCase = caseRecords.find((record) => record.id === activeCaseId);
   useEffect(() => {
-    if (!activeCaseId) return;
+    if (!activeCaseId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    Promise.all([
+    setAlertRecords([]);
+    setAnomalies([]);
+    setDetectionMatches([]);
+    setNetworkFlows([]);
+    setAiExplanation(null);
+    setLoadError("");
+    setLoading(true);
+    Promise.allSettled([
       apiGet<{ results: AlertRecord[] }>(`/alerts?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
       apiGet<{ results: AnomalyRecord[] }>(`/anomalies?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
       apiGet<{ results: DetectionRuleMatch[] }>(`/detection/matches?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
@@ -2648,12 +2840,16 @@ function SuspiciousActivityPage() {
       apiGet<{ mode: string; modelVersion: string; fallbackUsed: boolean; limitations: string[] }>(`/cases/${activeCaseId}/anomaly-explanation`),
     ]).then(([alertsPayload, anomalyPayload, detectionPayload, graphPayload, explanationPayload]) => {
       if (cancelled) return;
-      setAlertRecords(alertsPayload.results);
-      setAnomalies(anomalyPayload.results);
-      setDetectionMatches(detectionPayload.results);
-      setNetworkFlows(graphEdgesToFlows(graphPayload));
-      setAiExplanation(explanationPayload);
-    }).catch(() => undefined);
+      if (alertsPayload.status === "fulfilled") setAlertRecords(alertsPayload.value.results);
+      if (anomalyPayload.status === "fulfilled") setAnomalies(anomalyPayload.value.results);
+      if (detectionPayload.status === "fulfilled") setDetectionMatches(detectionPayload.value.results);
+      if (graphPayload.status === "fulfilled") setNetworkFlows(graphEdgesToFlows(graphPayload.value));
+      if (explanationPayload.status === "fulfilled") setAiExplanation(explanationPayload.value);
+      if ([alertsPayload, anomalyPayload, detectionPayload, graphPayload, explanationPayload].some((result) => result.status === "rejected")) {
+        setLoadError("Some suspicious-activity sections could not be loaded. Available findings are shown below.");
+      }
+      setLoading(false);
+    });
     return () => {
       cancelled = true;
     };
@@ -2710,22 +2906,31 @@ function SuspiciousActivityPage() {
       ],
     })),
   ];
+  if (!activeCaseId) {
+    return <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}><div className="surface rounded-[1.5rem] p-6"><CaseContextSelector value="" onChange={setActiveCaseId} /><p className="mt-4 text-sm text-muted">Select a case to load its alerts, anomalies, and suspicious communication paths.</p></div></PageFrame>;
+  }
+  if (loading) {
+    return <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}><div className="surface rounded-[1.5rem] p-6"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /><div className="mt-5"><Progress value={currentCase?.analysisStatus?.progress ?? 15} /><p className="mt-3 text-sm text-muted">Loading suspicious activity for {activeCaseId}…</p></div></div></PageFrame>;
+  }
   if (!alertRecords.length && !anomalies.length && !detectionMatches.length) {
     return (
       <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}>
+        <div className="surface rounded-[1.5rem] p-5"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /></div>
         <div className="surface mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-[1.5rem] p-8 text-center">
           <AlertTriangle size={34} aria-hidden="true" />
           <div>
             <h2 className="text-xl font-black text-strong">No suspicious activity yet</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">Upload a PCAP, replay evidence, or start a bounded sensor capture. Netra will automatically explain suspicious traffic here.</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{currentCase?.analysisStatus?.state === "completed" ? "Analysis completed without suspicious findings for this case." : `${analysisStateLabel(currentCase?.analysisStatus?.state)}. Findings will appear here as analysis progresses.`}</p>
           </div>
-          <Button asChild><Link to="/app/upload"><Upload size={16} />Start investigation</Link></Button>
+          <Button asChild><Link to={appViewRoute("upload")}><Upload size={16} />Start investigation</Link></Button>
         </div>
       </PageFrame>
     );
   }
   return (
     <PageFrame title={t("suspiciousActivity")} description={t("suspiciousActivityDesc")}>
+      <div className="surface flex flex-wrap items-end justify-between gap-4 rounded-[1.5rem] p-5"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /><Badge>{analysisStateLabel(currentCase?.analysisStatus?.state)}</Badge></div>
+      {loadError && <Alert>{loadError}</Alert>}
       <div className="grid gap-4 md:grid-cols-4">
         <MetricTile label="Review queue" value={reviewItems.length} detail="Alerts, anomalies, and risky flows" />
         <MetricTile label="High risk" value={highRiskAlerts.length} detail="Critical or high severity findings" />
@@ -2780,8 +2985,8 @@ function SuspiciousActivityPage() {
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button asChild size="sm" variant="secondary"><Link to="/app/evidence"><Database className="size-4" />Open evidence</Link></Button>
-                  <Button asChild size="sm" variant="secondary"><Link to="/app/report"><FileText className="size-4" />Prepare report</Link></Button>
+                  <Button asChild size="sm" variant="secondary"><Link to={appViewRoute("evidence")}><Database className="size-4" />Open evidence</Link></Button>
+                  <Button asChild size="sm" variant="secondary"><Link to={appViewRoute("reports")}><FileText className="size-4" />Prepare report</Link></Button>
                 </div>
               </div>
             ))}
@@ -2799,7 +3004,7 @@ function SuspiciousActivityPage() {
               {!suspiciousFlows.length && <div className="py-8 text-center text-sm text-muted">No suspicious communication paths found yet.</div>}
             </div>
           </div>
-          <div className="mt-4"><Button asChild variant="secondary"><Link to="/app/graph">Open full communication map</Link></Button></div>
+          <div className="mt-4"><Button asChild variant="secondary"><Link to={appViewRoute("graph")}>Open full communication map</Link></Button></div>
         </TabsContent>
       </Tabs>
     </PageFrame>
@@ -2807,7 +3012,7 @@ function SuspiciousActivityPage() {
 }
 
 function TrafficEvidencePage() {
-  const { t, activeCaseId } = useNetra();
+  const { t, activeCaseId, caseRecords, setActiveCaseId } = useNetra();
   const [packets, setPackets] = useState<PacketRecord[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [decodedProtocols, setDecodedProtocols] = useState<DecodedProtocolRecord[]>([]);
@@ -2818,10 +3023,24 @@ function TrafficEvidencePage() {
   const [protocol, setProtocol] = useState("all");
   const [port, setPort] = useState("");
   const [severity, setSeverity] = useState("all");
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const currentCase = caseRecords.find((record) => record.id === activeCaseId);
   useEffect(() => {
-    if (!activeCaseId) return;
+    if (!activeCaseId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    Promise.all([
+    setPackets([]);
+    setSessions([]);
+    setDecodedProtocols([]);
+    setPayloadFindings([]);
+    setNetworkFlows([]);
+    setZeek(null);
+    setLoadError("");
+    setLoading(true);
+    Promise.allSettled([
       apiGet<{ results: PacketRecord[] }>(`/packets?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
       apiGet<{ results: SessionRecord[] }>(`/sessions?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
       apiGet<{ results: DecodedProtocolRecord[]; zeek?: ZeekEvidence }>(`/decoder/summary?caseId=${encodeURIComponent(activeCaseId)}`),
@@ -2829,13 +3048,19 @@ function TrafficEvidencePage() {
       apiGet<{ edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }>(`/graph?caseId=${encodeURIComponent(activeCaseId)}`),
     ]).then(([packetPayload, sessionPayload, protocolPayload, payloadPayload, graphPayload]) => {
       if (cancelled) return;
-      setPackets(packetPayload.results);
-      setSessions(sessionPayload.results);
-      setDecodedProtocols(protocolPayload.results);
-      setZeek(protocolPayload.zeek ?? null);
-      setPayloadFindings(payloadPayload.results);
-      setNetworkFlows(graphEdgesToFlows(graphPayload));
-    }).catch(() => undefined);
+      if (packetPayload.status === "fulfilled") setPackets(packetPayload.value.results);
+      if (sessionPayload.status === "fulfilled") setSessions(sessionPayload.value.results);
+      if (protocolPayload.status === "fulfilled") {
+        setDecodedProtocols(protocolPayload.value.results);
+        setZeek(protocolPayload.value.zeek ?? null);
+      }
+      if (payloadPayload.status === "fulfilled") setPayloadFindings(payloadPayload.value.results);
+      if (graphPayload.status === "fulfilled") setNetworkFlows(graphEdgesToFlows(graphPayload.value));
+      if ([packetPayload, sessionPayload, protocolPayload, payloadPayload, graphPayload].some((result) => result.status === "rejected")) {
+        setLoadError("Some traffic-evidence sections could not be loaded. Available records are shown below.");
+      }
+      setLoading(false);
+    });
     return () => {
       cancelled = true;
     };
@@ -2881,22 +3106,31 @@ function TrafficEvidencePage() {
       (severity === "all" || (flow.risk ?? 0) >= (severity === "critical" ? 90 : severity === "high" ? 70 : severity === "medium" ? 40 : 0))
     );
   });
+  if (!activeCaseId) {
+    return <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}><div className="surface rounded-[1.5rem] p-6"><CaseContextSelector value="" onChange={setActiveCaseId} /><p className="mt-4 text-sm text-muted">Select a case to load its packets, sessions, protocols, payload clues, and communication map.</p></div></PageFrame>;
+  }
+  if (loading) {
+    return <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}><div className="surface rounded-[1.5rem] p-6"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /><div className="mt-5"><Progress value={currentCase?.analysisStatus?.progress ?? 15} /><p className="mt-3 text-sm text-muted">Loading traffic evidence for {activeCaseId}…</p></div></div></PageFrame>;
+  }
   if (!packets.length && !sessions.length && !decodedProtocols.length && !payloadFindings.length) {
     return (
       <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}>
+        <div className="surface rounded-[1.5rem] p-5"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /></div>
         <div className="surface mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-[1.5rem] p-8 text-center">
           <Database size={34} aria-hidden="true" />
           <div>
             <h2 className="text-xl font-black text-strong">No traffic evidence yet</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">Upload or capture network traffic first. Packets, sessions, protocols, and payload clues will be grouped here automatically.</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{currentCase?.analysisStatus?.state === "completed" ? "Analysis completed without packet, session, protocol, or payload records for this case." : `${analysisStateLabel(currentCase?.analysisStatus?.state)}. Traffic records will appear after analysis produces them.`}</p>
           </div>
-          <Button asChild><Link to="/app/upload"><Upload size={16} />Add network evidence</Link></Button>
+          <Button asChild><Link to={appViewRoute("upload")}><Upload size={16} />Add network evidence</Link></Button>
         </div>
       </PageFrame>
     );
   }
   return (
     <PageFrame title={t("trafficEvidence")} description={t("trafficEvidenceDesc")}>
+      <div className="surface flex flex-wrap items-end justify-between gap-4 rounded-[1.5rem] p-5"><CaseContextSelector value={activeCaseId} onChange={setActiveCaseId} /><Badge>{analysisStateLabel(currentCase?.analysisStatus?.state)}</Badge></div>
+      {loadError && <Alert>{loadError}</Alert>}
       <div className="grid gap-4 md:grid-cols-4">
         <MetricTile label="Packets" value={formatNumber(packets.length)} detail="Representative packet metadata" />
         <MetricTile label="Sessions" value={sessions.length} detail="Reconstructed conversations" />
@@ -2945,6 +3179,13 @@ function EvidenceReportPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const currentCase = caseRecords.find((record) => record.id === selectedCaseId) ?? caseRecords[0];
 
+  useEffect(() => {
+    if (selectedCaseId && caseRecords.some((record) => record.id === selectedCaseId)) return;
+    const next = (activeCaseId && caseRecords.some((record) => record.id === activeCaseId) ? activeCaseId : caseRecords[0]?.id) ?? "";
+    setSelectedCaseId(next);
+    if (next) setActiveCaseId(next);
+  }, [activeCaseId, caseRecords, selectedCaseId, setActiveCaseId]);
+
   const refreshArtifacts = useCallback(() => {
     apiGet<{ results: ReportRecord[] }>(selectedCaseId ? `/reports?caseId=${encodeURIComponent(selectedCaseId)}&limit=50` : "/reports?limit=50").then((payload) => setReports(payload.results)).catch(() => setReports([]));
     apiGet<{ results: ExportRecord[] }>(selectedCaseId ? `/exports?caseId=${encodeURIComponent(selectedCaseId)}&limit=50` : "/exports?limit=50").then((payload) => setExports(payload.results)).catch(() => setExports([]));
@@ -2966,6 +3207,10 @@ function EvidenceReportPage() {
 
   async function exportPdfReport() {
     if (!currentCase) return;
+    if (!currentCase.reportEligible) {
+      toast.error(currentCase.reportBlockedReason ?? "Report generation becomes available after analysis completes.");
+      return;
+    }
     setBusyAction("report");
     try {
       const response = await fetch(`${API_BASE}/reports/${currentCase.id}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language, format: "pdf" }) });
@@ -3030,7 +3275,7 @@ function EvidenceReportPage() {
             <h2 className="text-xl font-black text-strong">No reports yet</h2>
             <p className="mt-2 text-sm leading-6 text-muted">Upload and analyze evidence first. Netra will create case-specific report artifacts here.</p>
           </div>
-          <Button asChild><Link to="/app/upload"><Upload size={16} />Start investigation</Link></Button>
+          <Button asChild><Link to={appViewRoute("upload")}><Upload size={16} />Start investigation</Link></Button>
         </div>
       </PageFrame>
     );
@@ -3044,13 +3289,7 @@ function EvidenceReportPage() {
             <h2 className="text-xl font-black text-strong">Report center</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Choose a case, generate a structured PDF, and download previous report/export artifacts without leaving the officer workflow.</p>
           </div>
-          <label className="min-w-[18rem] max-w-xl flex-1">
-            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-muted">Selected case</span>
-            <Select value={currentCase.id} onValueChange={selectCase}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{caseRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.id}</SelectItem>)}</SelectContent>
-            </Select>
-          </label>
+          <CaseContextSelector value={currentCase.id} onChange={selectCase} />
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-4">
           <MetricTile label="Case" value={currentCase.id} detail={currentCase.status} />
@@ -3059,11 +3298,12 @@ function EvidenceReportPage() {
           <MetricTile label="Exports" value={exports.length} detail="JSON, CSV, and CEF bundles" />
         </div>
         <div className="mt-5 flex flex-wrap gap-3">
-          <Button className="whitespace-nowrap" onClick={exportPdfReport} disabled={busyAction !== null}><FileText className="size-4" />{busyAction === "report" ? "Generating..." : "Generate and download PDF"}</Button>
+          <Button className="whitespace-nowrap" onClick={exportPdfReport} disabled={busyAction !== null || !currentCase.reportEligible} title={currentCase.reportBlockedReason}><FileText className="size-4" />{busyAction === "report" ? "Generating..." : "Generate and download PDF"}</Button>
           <Button className="whitespace-nowrap" variant="secondary" onClick={() => createExport("Evidence JSON")} disabled={busyAction !== null}><Download className="size-4" />Export JSON bundle</Button>
           <Button className="whitespace-nowrap" variant="secondary" onClick={() => createExport("Alert CSV")} disabled={busyAction !== null}><Download className="size-4" />Export alert CSV</Button>
           <Button className="whitespace-nowrap" variant="secondary" onClick={verifyEvidence} disabled={busyAction !== null || !currentCase.evidenceFileId}><Fingerprint className="size-4" />Verify evidence hash</Button>
         </div>
+        {!currentCase.reportEligible && <Alert>{currentCase.reportBlockedReason ?? "Report generation becomes available after analysis completes."}</Alert>}
       </div>
 
       <div className="surface-solid overflow-hidden rounded-[1.5rem]">
@@ -3170,7 +3410,7 @@ function PacketEvidenceTable({ packets }: { packets: PacketRecord[] }) {
         </table>
         {!packets.length && <div className="py-8 text-center text-sm text-muted">No packet rows found in this evidence file.</div>}
       </div>
-      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/packets">Open advanced packet explorer</Link></Button></div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to={appViewRoute("packets")}>Open advanced packet explorer</Link></Button></div>
     </div>
   );
 }
@@ -3185,7 +3425,7 @@ function SessionEvidenceTable({ sessions }: { sessions: SessionRecord[] }) {
         </table>
         {!sessions.length && <div className="py-8 text-center text-sm text-muted">No sessions were reconstructed from this evidence file.</div>}
       </div>
-      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/sessions">Open session drilldown</Link></Button></div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to={appViewRoute("sessions")}>Open session drilldown</Link></Button></div>
     </div>
   );
 }
@@ -3204,7 +3444,7 @@ function ProtocolEvidenceTable({ protocols, zeek }: { protocols: DecodedProtocol
           </table>
           {!protocols.length && <div className="py-8 text-center text-sm text-muted">No decoded protocol evidence found in this evidence file.</div>}
         </div>
-        <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/decoder">Open protocol decoder</Link></Button></div>
+        <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to={appViewRoute("decoder")}>Open protocol decoder</Link></Button></div>
       </div>
     </div>
   );
@@ -3220,7 +3460,7 @@ function PayloadEvidenceTable({ findings }: { findings: PayloadFinding[] }) {
         </table>
         {!findings.length && <div className="py-8 text-center text-sm text-muted">No payload clues found in this evidence file.</div>}
       </div>
-      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/payloads">Open payload drilldown</Link></Button></div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to={appViewRoute("payloads")}>Open payload drilldown</Link></Button></div>
     </div>
   );
 }
@@ -3235,7 +3475,7 @@ function FlowEvidenceTable({ flows }: { flows: NetworkFlow[] }) {
         </table>
         {!flows.length && <div className="py-8 text-center text-sm text-muted">No communication paths found in this evidence file.</div>}
       </div>
-      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to="/app/graph">Open full communication map</Link></Button></div>
+      <div className="border-t border-[var(--border)] p-4"><Button asChild variant="secondary" size="sm"><Link to={appViewRoute("graph")}>Open full communication map</Link></Button></div>
     </div>
   );
 }
@@ -3266,11 +3506,11 @@ function ExportCenterPage() {
 function SettingsPage() {
   const { deploymentAccess } = useNetra();
   const sections: { module: DeploymentModuleKey; title: string; description: string; href: string; icon: LucideIcon }[] = [
-    { module: "system", title: "Technical Status", description: "Deployment health, workers, storage, database, ML artifact, and operational diagnostics.", href: "/app/settings/technical-status", icon: Activity },
-    { module: "sensors", title: "Sensors", description: "Enrollment, heartbeats, interfaces, groups, and bounded native-capture controls.", href: "/app/settings/sensors", icon: Database },
-    { module: "schedules", title: "Schedules", description: "One-time and recurring capture windows for enrolled external sensors.", href: "/app/settings/schedules", icon: History },
-    { module: "integrations", title: "Integrations", description: "Administrator-managed SIEM and signed webhook destinations and delivery history.", href: "/app/settings/integrations", icon: FileText },
-    { module: "retention", title: "Retention", description: "Retention policy, cleanup previews, legal holds, and approved storage cleanup.", href: "/app/settings/retention", icon: Fingerprint },
+    { module: "system", title: "Technical Status", description: "Deployment health, workers, storage, database, ML artifact, and operational diagnostics.", href: appViewRoute("technicalStatus"), icon: Activity },
+    { module: "sensors", title: "Sensors", description: "Enrollment, heartbeats, interfaces, groups, and bounded native-capture controls.", href: appViewRoute("sensors"), icon: Database },
+    { module: "schedules", title: "Schedules", description: "One-time and recurring capture windows for enrolled external sensors.", href: appViewRoute("schedules"), icon: History },
+    { module: "integrations", title: "Integrations", description: "Administrator-managed SIEM and signed webhook destinations and delivery history.", href: appViewRoute("integrations"), icon: FileText },
+    { module: "retention", title: "Retention", description: "Retention policy, cleanup previews, legal holds, and approved storage cleanup.", href: appViewRoute("retention"), icon: Fingerprint },
   ];
   return (
     <PageFrame title="Settings" description="Administrator configuration and technical operations are grouped here so the investigation workflow stays focused.">
@@ -3467,7 +3707,7 @@ function LabToolsPage() {
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={startSensorCapture} disabled={!deploymentAccess.sensorCaptureEnabled || !selectedSensor || selectedSensor.status !== "online" || !interfaceName}>Queue bounded capture</Button>
             <Button variant="secondary" onClick={loadSensors} disabled={!deploymentAccess.sensorCaptureEnabled}>Refresh sensors</Button>
-            {!deploymentAccess.sensorCaptureEnabled && <Button asChild variant="secondary"><Link to="/app/settings/sensors">View sensor requirements</Link></Button>}
+            {!deploymentAccess.sensorCaptureEnabled && <Button asChild variant="secondary"><Link to={appViewRoute("sensors")}>View sensor requirements</Link></Button>}
           </div>
         </div>
         <div className="surface order-1 rounded-[1.5rem] p-5 lg:order-2">
@@ -3945,6 +4185,11 @@ function CasesPage() {
     return (!text || [record.id, record.title, record.investigator, record.sourceLocation ?? "", record.topAttackClass ?? ""].join(" ").toLowerCase().includes(text)) && (status === "all" || record.status === status);
   });
   async function generateCaseReport(caseId: string) {
+    const record = caseRecords.find((item) => item.id === caseId);
+    if (!record?.reportEligible) {
+      toast.error(record?.reportBlockedReason ?? "Report generation becomes available after analysis completes.");
+      return;
+    }
     const response = await fetch(`${API_BASE}/reports/${caseId}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language: "English", format: "pdf" }) });
     const payload = await response.json();
     if (!response.ok) {
@@ -3956,8 +4201,10 @@ function CasesPage() {
     await reloadAnalysis().catch(() => undefined);
   }
   function openCase(caseId: string) {
+    const record = caseRecords.find((item) => item.id === caseId);
+    if (!record?.routeRef) return;
     setActiveCaseId(caseId);
-    navigate(`/app/cases/${caseId}`);
+    navigate(caseWorkspaceRoute(record.routeRef));
   }
   return (
     <PageFrame title={t("cases")} description={t("caseQueueDesc")}>
@@ -3967,13 +4214,13 @@ function CasesPage() {
             <h2 className="text-xl font-black text-strong">Case registry</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Only real officer-facing investigations are shown here. Validator and system-test cases are hidden from this list.</p>
           </div>
-          <Button asChild><Link to="/app/upload"><Upload className="size-4" />New investigation</Link></Button>
+          <Button asChild><Link to={appViewRoute("upload")}><Upload className="size-4" />New investigation</Link></Button>
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search case, investigator, IP, finding" />
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{["all", "open", "reviewing", "report-ready"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+            <SelectContent>{["all", "open", "closed"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="secondary" onClick={() => reloadAnalysis()}><Search className="size-4" />Refresh cases</Button>
         </div>
@@ -4020,7 +4267,7 @@ function CaseRegistryCard({ record, onOpen, onGenerate, onDownloadLatest }: { re
         </div>
         <div className="flex min-w-[12rem] flex-col gap-2 xl:items-stretch">
           <Button size="sm" onClick={onOpen}>View full case</Button>
-          <Button size="sm" variant="secondary" onClick={onGenerate}>Generate report</Button>
+          <Button size="sm" variant="secondary" onClick={onGenerate} disabled={!record.reportEligible} title={record.reportBlockedReason}>Generate report</Button>
           {record.latestReportDownloadUrl && <Button size="sm" variant="secondary" onClick={onDownloadLatest}>Latest PDF</Button>}
         </div>
       </div>
@@ -4039,10 +4286,11 @@ function CaseStat({ label, value }: { label: string; value: string | number }) {
 }
 
 function CaseDetailPage() {
-  const { t, caseRecords, addCaseNote, setActiveCaseId } = useNetra();
-  const { caseId = caseRecords[0]?.id ?? "" } = useParams();
+  const { t, caseRecords, activeUpload, addCaseNote, setActiveCaseId } = useNetra();
+  const navigate = useNavigate();
+  const { routeRef = "" } = useParams();
   const [workspace, setWorkspace] = useState<CaseWorkspaceRecord | null>(null);
-  const [record, setRecord] = useState<CaseRecord | null>(caseRecords.find((caseRecord) => caseRecord.id === caseId) ?? null);
+  const [record, setRecord] = useState<CaseRecord | null>(caseRecords.find((caseRecord) => caseRecord.routeRef === routeRef) ?? null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [charts, setCharts] = useState<CaseChartsRecord | null>(null);
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
@@ -4059,6 +4307,8 @@ function CaseDetailPage() {
   const [flagInput, setFlagInput] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
   const [linkRelation, setLinkRelation] = useState("manual_link");
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState("");
 
   const applyWorkspace = useCallback((payload: CaseWorkspaceRecord) => {
     const data = payload.workspace;
@@ -4078,38 +4328,73 @@ function CaseDetailPage() {
   }, []);
 
   const refreshWorkspace = useCallback(async () => {
-    if (!caseId) return;
-    const payload = await apiGet<CaseWorkspaceRecord>(`/cases/${caseId}/workspace`);
+    if (!routeRef) return;
+    const payload = await apiGet<CaseWorkspaceRecord>(`/workspaces/${routeRef}`);
     applyWorkspace(payload);
-  }, [applyWorkspace, caseId]);
+    setActiveCaseId(payload.caseId);
+    setWorkspaceLoading(false);
+    setWorkspaceError("");
+  }, [applyWorkspace, routeRef, setActiveCaseId]);
 
   useEffect(() => {
-    if (!caseId) return;
-    setActiveCaseId(caseId);
+    if (!routeRef) return;
     let cancelled = false;
-    apiGet<CaseWorkspaceRecord>(`/cases/${caseId}/workspace`)
+    setWorkspaceLoading(true);
+    apiGet<CaseWorkspaceRecord>(`/workspaces/${routeRef}`)
       .then((payload) => {
-        if (!cancelled) applyWorkspace(payload);
+        if (!cancelled) {
+          applyWorkspace(payload);
+          setActiveCaseId(payload.caseId);
+          setWorkspaceLoading(false);
+          setWorkspaceError("");
+        }
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (!cancelled) {
+          setWorkspaceLoading(false);
+          setWorkspaceError(error instanceof Error ? error.message : "The case workspace could not be loaded.");
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [applyWorkspace, caseId, setActiveCaseId]);
+  }, [applyWorkspace, routeRef, setActiveCaseId]);
+
+  const clientUpload = activeUpload?.routeRef === routeRef ? activeUpload : null;
+  const serverAnalysis = workspace?.analysisStatus ?? record?.analysisStatus;
+  const analysisState = clientUpload?.state ?? serverAnalysis?.state ?? "no-evidence";
+  const analysisProgress = clientUpload?.progress ?? serverAnalysis?.progress ?? 0;
+  const analysisStep = clientUpload?.step ?? serverAnalysis?.step ?? "waiting_for_evidence";
+  const analysisError = clientUpload?.error ?? serverAnalysis?.error ?? workspaceError;
+  const analysisBusy = ["accepted", "uploading", "finalizing", "queued", "running"].includes(analysisState);
+  const reportEligible = !clientUpload && Boolean(workspace?.reportEligible ?? record?.reportEligible);
+  const reportBlockedReason = workspace?.reportBlockedReason ?? record?.reportBlockedReason ?? "Report generation becomes available after analysis completes.";
+
+  useEffect(() => {
+    if (!routeRef || !analysisBusy || clientUpload?.state === "uploading") return undefined;
+    const timer = window.setInterval(() => void refreshWorkspace().catch(() => undefined), 2000);
+    return () => window.clearInterval(timer);
+  }, [analysisBusy, clientUpload?.state, refreshWorkspace, routeRef]);
 
   const availableTabs = useMemo(
     () => workspace?.workspace.availableTabs ?? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true },
     [workspace?.workspace.availableTabs],
   );
+  const displayedTabs = useMemo(
+    () => analysisBusy
+      ? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true }
+      : availableTabs,
+    [analysisBusy, availableTabs],
+  );
   const dataMessages = workspace?.workspace.dataMessages ?? {};
   const tabVisible = useCallback((value: string) => {
-    if (value === "activity") return availableTabs.suspiciousActivity;
-    if (value === "evidence") return availableTabs.trafficEvidence;
-    if (value === "timeline") return availableTabs.timeline;
-    if (value === "reports") return availableTabs.reports;
-    if (value === "custody") return availableTabs.custody;
+    if (value === "activity") return displayedTabs.suspiciousActivity;
+    if (value === "evidence") return displayedTabs.trafficEvidence;
+    if (value === "timeline") return displayedTabs.timeline;
+    if (value === "reports") return displayedTabs.reports;
+    if (value === "custody") return displayedTabs.custody;
     return true;
-  }, [availableTabs]);
+  }, [displayedTabs]);
 
   useEffect(() => {
     if (!tabVisible(activeTab)) setActiveTab("overview");
@@ -4117,6 +4402,10 @@ function CaseDetailPage() {
 
   async function generateCaseReport() {
     if (!record) return;
+    if (!reportEligible) {
+      toast.error(reportBlockedReason);
+      return;
+    }
     const response = await fetch(`${API_BASE}/reports/${record.id}/generate-pdf`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language: "English", format: "pdf" }) });
     const payload = await response.json();
     if (!response.ok) {
@@ -4156,7 +4445,7 @@ function CaseDetailPage() {
   }
 
   if (!record) {
-    return <PageFrame title={t("caseDetail")} description={t("caseQueueDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Upload a PCAP to create a real case record.</div></PageFrame>;
+    return <PageFrame title={t("caseDetail")} description={t("caseQueueDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">{workspaceLoading ? "Loading the secure case workspace…" : workspaceError || "The case workspace is not available."}</div></PageFrame>;
   }
   const highRiskAlerts = alerts.filter((alert) => ["critical", "high"].includes(alert.severity));
   const chartEmptyText = dataMessages.chart || "No data found in this evidence file.";
@@ -4174,8 +4463,8 @@ function CaseDetailPage() {
             <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{record.title}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={generateCaseReport}><FileText className="size-4" />Generate report</Button>
-            <Button asChild variant="secondary"><Link to="/app/cases">Back to cases</Link></Button>
+            <Button onClick={generateCaseReport} disabled={!reportEligible} title={reportBlockedReason}><FileText className="size-4" />Generate report</Button>
+            <Button asChild variant="secondary"><Link to={appViewRoute("cases")}>Back to cases</Link></Button>
           </div>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
@@ -4187,15 +4476,29 @@ function CaseDetailPage() {
           <MetricTile label="Reports" value={reports.length} detail={record.reportStatus} />
         </div>
       </div>
+      <div className="surface rounded-[1.5rem] p-5" aria-live="polite">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><div className="text-xs font-bold uppercase tracking-[0.12em] text-muted">Analysis status</div><h2 className="mt-2 text-xl font-black text-strong">{analysisStateLabel(analysisState)}</h2><p className="mt-1 text-sm text-muted">{analysisStep.replaceAll("_", " ")}{clientUpload?.filename ? ` · ${clientUpload.filename}` : ""}</p></div>
+          <Badge>{analysisProgress}%</Badge>
+        </div>
+        <Progress className="mt-4" value={analysisProgress} />
+        {clientUpload?.state === "uploading" && <p className="mt-3 text-xs text-muted">{formatBytes(clientUpload.bytesUploaded)} of {formatBytes(clientUpload.sizeBytes)} · {clientUpload.speedBytesPerSecond > 0 ? `${formatBytes(clientUpload.speedBytesPerSecond)}/s` : "measuring speed"}</p>}
+        {!clientUpload && analysisState === "uploading" && <Alert>Upload interrupted in this browser. Return to Start Investigation and reselect the same file to resume the verified upload session.</Alert>}
+        {analysisError && ["failed", "canceled", "expired"].includes(analysisState) && <Alert>{analysisError}</Alert>}
+        {["failed", "canceled", "expired"].includes(analysisState) && <Button className="mt-3" variant="secondary" onClick={() => navigate(appViewRoute("upload"))}>Retry evidence intake</Button>}
+        {!reportEligible && <p className="mt-3 text-xs text-muted">{reportBlockedReason}</p>}
+      </div>
+      {analysisBusy && <Alert>Analysis is still running. Case metadata is available now; evidence, findings, and report actions will unlock as processing completes.</Alert>}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col gap-4">
         <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          {availableTabs.suspiciousActivity && <TabsTrigger value="activity">Suspicious activity</TabsTrigger>}
-          {availableTabs.trafficEvidence && <TabsTrigger value="evidence">Traffic evidence</TabsTrigger>}
-          {availableTabs.timeline && <TabsTrigger value="timeline">Timeline</TabsTrigger>}
-          {availableTabs.reports && <TabsTrigger value="reports">Reports</TabsTrigger>}
-          {availableTabs.custody && <TabsTrigger value="custody">Custody</TabsTrigger>}
+          {displayedTabs.suspiciousActivity && <TabsTrigger value="activity">Suspicious activity</TabsTrigger>}
+          {displayedTabs.trafficEvidence && <TabsTrigger value="evidence">Traffic evidence</TabsTrigger>}
+          {displayedTabs.timeline && <TabsTrigger value="timeline">Timeline</TabsTrigger>}
+          {displayedTabs.reports && <TabsTrigger value="reports">Reports</TabsTrigger>}
+          {displayedTabs.custody && <TabsTrigger value="custody">Custody</TabsTrigger>}
         </TabsList>
+        {analysisBusy && activeTab !== "overview" && <Alert>Analysis in progress. This section will refresh automatically when its case data becomes available.</Alert>}
         <TabsContent value="overview">
           <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
             <div className="surface rounded-[1.5rem] p-5">
@@ -4205,7 +4508,11 @@ function CaseDetailPage() {
                 <MetadataRow label={t("investigator")} value={record.investigator || "-"} />
                 <MetadataRow label={t("department")} value={record.department || "-"} />
                 <MetadataRow label={t("sourceLocation")} value={record.sourceLocation || "-"} />
+                <MetadataRow label="Priority" value={record.priority || "Standard"} />
+                <MetadataRow label="Evidence" value={record.evidenceFilename || clientUpload?.filename || "Waiting for evidence"} />
+                <MetadataRow label="Remarks" value={record.remarks || "-"} />
                 <MetadataRow label="Opened" value={record.openedAt ? new Date(record.openedAt).toLocaleString() : record.createdAt} />
+                <MetadataRow label="Latest update" value={record.updatedAt ? new Date(record.updatedAt).toLocaleString() : record.createdAt} />
                 <MetadataRow label="Closed" value={record.closedAt ? new Date(record.closedAt).toLocaleString() : "Open"} />
               </div>
               <div className="mt-5 grid gap-3">
@@ -4239,11 +4546,11 @@ function CaseDetailPage() {
             <div className="mt-4 grid gap-2">{(record.linkedCases ?? []).map((link) => <div key={link.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-sm"><b>{link.caseId}</b> · {link.relationType}<div className="text-muted">{link.caseTitle}</div></div>)}</div>
           </div>
         </TabsContent>
-        {availableTabs.suspiciousActivity && <TabsContent value="activity">
+        {displayedTabs.suspiciousActivity && <TabsContent value="activity">
           <AlertTable alerts={alerts} />
           <div className="mt-4"><AnomalyReviewPanel anomalies={anomalies} timeline={charts?.timeline ?? []} /></div>
         </TabsContent>}
-        {availableTabs.trafficEvidence && <TabsContent value="evidence">
+        {displayedTabs.trafficEvidence && <TabsContent value="evidence">
           <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-sm text-muted">
             Showing the stored case snapshot preview. Use the advanced packet explorer only when you need deeper pagination.
           </div>
@@ -4256,7 +4563,7 @@ function CaseDetailPage() {
             <TabsContent value="map"><FlowEvidenceTable flows={networkFlows} /></TabsContent>
           </Tabs>
         </TabsContent>}
-        {availableTabs.timeline && <TabsContent value="timeline">
+        {displayedTabs.timeline && <TabsContent value="timeline">
           <div className="surface rounded-[1.5rem] p-5">
             <h2 className="text-xl font-black text-strong">{t("caseHistory")}</h2>
             <TimelineList record={record} />
@@ -4274,9 +4581,9 @@ function CaseDetailPage() {
             </div>
           </div>
         </TabsContent>}
-        {availableTabs.reports && <TabsContent value="reports">
+        {displayedTabs.reports && <TabsContent value="reports">
           <div className="surface rounded-[1.5rem] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-black text-strong">Case reports</h2><Button onClick={generateCaseReport}>Generate PDF report</Button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-black text-strong">Case reports</h2><Button onClick={generateCaseReport} disabled={!reportEligible} title={reportBlockedReason}>Generate PDF report</Button></div>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Report</th><th>Generated</th><th>Language</th><th>Status</th><th>Action</th></tr></thead>
@@ -4286,7 +4593,7 @@ function CaseDetailPage() {
             </div>
           </div>
         </TabsContent>}
-        {availableTabs.custody && <TabsContent value="custody">
+        {displayedTabs.custody && <TabsContent value="custody">
           <div className="grid gap-5 lg:grid-cols-3">
             <CustodyMetric label="Ledger" value={ledger.verification?.verified ? "Verified" : "Pending"} />
             <CustodyMetric label="Events" value={ledger.verification?.eventCount ?? 0} />
@@ -4303,13 +4610,18 @@ function CaseDetailPage() {
 
 function ReportPage() {
   const { t, language, setLanguage, caseRecords, alertRecords, anomalies, complianceRecords, decodedProtocols, detectionMatches, evidence, intakeForm, packets, payloadFindings, sessions, summary, zeek } = useNetra();
-  const { caseId = "new" } = useParams();
-  const record = caseRecords.find((caseRecord) => caseRecord.id === caseId) ?? caseRecords[0];
+  const { routeRef = "" } = useParams();
+  const record = caseRecords.find((caseRecord) => caseRecord.routeRef === routeRef);
   const recommendedActions = Array.from(new Set(alertRecords.map((alert) => alert.recommendedAction).filter(Boolean))).slice(0, 3);
   if (!record) {
     return <PageFrame title={t("reportTitle")} description={t("reportDesc")}><div className="surface rounded-[1.5rem] p-6 text-sm text-muted">Upload a PCAP to generate a real report.</div></PageFrame>;
   }
   async function exportPdfReport() {
+    if (!record) return;
+    if (!record.reportEligible) {
+      toast.error(record.reportBlockedReason ?? "Report generation becomes available after analysis completes.");
+      return;
+    }
     const response = await fetch(`${API_BASE}/reports/${record.id}/generate`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ language, format: "pdf" }) });
     const payload = await response.json();
     if (!response.ok) {
@@ -4326,8 +4638,8 @@ function ReportPage() {
           <SelectTrigger><Languages className="size-4" /><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="English">English</SelectItem><SelectItem value="Hindi">Hindi</SelectItem><SelectItem value="Gujarati">Gujarati</SelectItem></SelectContent>
         </Select>
-        <Button variant="secondary" onClick={exportPdfReport}><Download className="size-4" />Download PDF report</Button>
-        <Button asChild variant="secondary"><Link to={`/app/cases/${record.id}`}>{t("backToCase")}</Link></Button>
+        <Button variant="secondary" onClick={exportPdfReport} disabled={!record.reportEligible} title={record.reportBlockedReason}><Download className="size-4" />Download PDF report</Button>
+        <Button asChild variant="secondary"><Link to={caseWorkspaceRoute(record.routeRef)}>{t("backToCase")}</Link></Button>
       </div>
       <div className="print-surface report-print surface-solid mx-auto flex max-w-5xl flex-col gap-6 rounded-[1.5rem] p-6">
         <div className="border-b border-[var(--border)] pb-5">

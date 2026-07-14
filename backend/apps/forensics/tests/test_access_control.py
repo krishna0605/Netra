@@ -80,6 +80,8 @@ class ApiAccessControlTests(TestCase):
 
         self.assertEqual(self.client.get("/api/cases/CASE-BOB", **alice_headers).status_code, 404)
         self.assertEqual(self.client.get("/api/cases/CASE-ALICE", **alice_headers).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/workspaces/{alice_case.route_ref}", **alice_headers).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/workspaces/{bob_case.route_ref}", **alice_headers).status_code, 404)
 
         Report.objects.create(id="alice.html", case=alice_case, generated_by="alice")
         Report.objects.create(id="bob.html", case=bob_case, generated_by="bob")
@@ -101,7 +103,18 @@ class ApiAccessControlTests(TestCase):
             **headers,
         )
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["status"], "open")
+        self.assertTrue(response.json()["routeRef"])
+        self.assertFalse(response.json()["reportEligible"])
         self.assertTrue(CaseMembership.objects.filter(case_id="CASE-NEW", user=user).exists())
+        blocked_report = self.client.post(
+            "/api/reports/CASE-NEW/generate-pdf",
+            data={"language": "en", "format": "pdf"},
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(blocked_report.status_code, 409)
+        self.assertEqual(blocked_report.json()["code"], "analysis_not_complete")
         duplicate = self.client.post(
             "/api/cases",
             data={"caseNumber": "CASE-NEW", "title": "Overwrite attempt"},

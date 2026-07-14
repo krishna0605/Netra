@@ -3,6 +3,7 @@ import { defaultOptions, Upload } from "tus-js-client";
 export type DirectUploadSession = {
   id: string;
   caseId: string;
+  routeRef: string;
   status: string;
   filename: string;
   expectedSizeBytes: number;

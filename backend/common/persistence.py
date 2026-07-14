@@ -82,8 +82,8 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
             "source_location": intake.get("sourceLocation", ""),
             "remarks": intake.get("remarks", ""),
             "flags_json": intake.get("flags", []),
-            "status": case_data.get("status", Case.Status.REVIEWING),
-            "report_status": case_data.get("reportStatus", "ready"),
+            "status": Case.Status.OPEN,
+            "report_status": case_data.get("reportStatus", "draft"),
         },
     )
     evidence, _ = EvidenceFile.objects.update_or_create(
@@ -287,6 +287,9 @@ def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: 
     if not case:
         return
     Report.objects.update_or_create(id=artifact["filename"], defaults={"case": case, "language": language, "generated_by": actor.user, "stored_path": artifact["stored_path"], "sha256": artifact["sha256"], "status": "ready"})
+    if case.report_status != "ready":
+        case.report_status = "ready"
+        case.save(update_fields=["report_status", "updated_at"])
     add_history(case, actor, "Report generated", f"{artifact['filename']} generated.", artifact["sha256"])
     record_custody_event(case, actor, "Report generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Report", resource_id=artifact["filename"])
     log_access(actor, "report.generate", case=case, resource_type="Report", resource_id=artifact["filename"])

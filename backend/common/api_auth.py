@@ -171,7 +171,11 @@ class NetraApiAuthMiddleware:
     @staticmethod
     def _resource_case_id(view_kwargs) -> str | None:
         # Direct-ID downloads/status routes must inherit the parent case boundary.
-        from apps.forensics.models import CaptureJob, EvidenceFile, EvidenceUploadSession, Export, ProcessingJob, Report
+        from apps.forensics.models import Case, CaptureJob, EvidenceFile, EvidenceUploadSession, Export, ProcessingJob, Report
+
+        route_ref = view_kwargs.get("route_ref")
+        if route_ref:
+            return Case.objects.filter(route_ref=route_ref).values_list("id", flat=True).first()
 
         lookups = (
             ("evidence_id", EvidenceFile, "case_id"),

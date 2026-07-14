@@ -29,7 +29,7 @@ from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_ca
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
-from common.case_workspace import bump_case_list_cache_version, case_list_cache_version, workspace_for_case
+from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
 from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize_evidence_upload
@@ -175,8 +175,10 @@ def _case_dict(case: Case) -> dict:
         }
         for link in case.outgoing_links.select_related("target_case").order_by("-created_at")[:20]
     ]
+    analysis_status = analysis_status_for_case(case)
     return {
         "id": case.id,
+        "routeRef": str(case.route_ref),
         "title": case.title,
         "investigator": case.investigator,
         "department": case.department,
@@ -200,6 +202,9 @@ def _case_dict(case: Case) -> dict:
         ],
         "createdAt": case.created_at.isoformat(),
         "reportStatus": case.report_status,
+        "analysisStatus": analysis_status,
+        "reportEligible": analysis_status["reportEligible"],
+        "reportBlockedReason": analysis_status["reportBlockedReason"],
         "riskLevel": snapshot_summary.get("riskLevel") or snapshot_case.get("riskLevel") or analysis.get("riskLevel", "low"),
         "topAttackClass": snapshot_summary.get("topAttackClass") or snapshot_case.get("topAttackClass") or analysis.get("topAttackClass", "Normal Baseline"),
         "alertCount": snapshot_summary.get("alerts", len(analysis.get("alerts", []))),
@@ -217,8 +222,10 @@ def _case_list_dict(case: Case) -> dict:
     snapshot_case = snapshot_json.get("case", {}) if isinstance(snapshot_json.get("case"), dict) else {}
     snapshot_summary = snapshot_json.get("summary", {}) if isinstance(snapshot_json.get("summary"), dict) else {}
     latest_report = snapshot_case.get("latestReportId") or ""
+    analysis_status = analysis_status_for_case(case)
     return {
         "id": case.id,
+        "routeRef": str(case.route_ref),
         "title": case.title,
         "investigator": case.investigator,
         "department": case.department,
@@ -239,6 +246,9 @@ def _case_list_dict(case: Case) -> dict:
         "history": [],
         "createdAt": case.created_at.isoformat(),
         "reportStatus": case.report_status,
+        "analysisStatus": analysis_status,
+        "reportEligible": analysis_status["reportEligible"],
+        "reportBlockedReason": analysis_status["reportBlockedReason"],
         "riskLevel": snapshot_summary.get("riskLevel") or snapshot_case.get("riskLevel") or "low",
         "topAttackClass": snapshot_summary.get("topAttackClass") or snapshot_case.get("topAttackClass") or "Normal Baseline",
         "alertCount": snapshot_summary.get("alerts", 0),
@@ -521,7 +531,7 @@ def cases(request):
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
         return JsonResponse(cached)
-    rows = _visible_cases_queryset(request).select_related("analysis_snapshot")[:250]
+    rows = _visible_cases_queryset(request).select_related("analysis_snapshot").prefetch_related("processing_jobs", "upload_sessions", "evidence_files")[:250]
     payload = _paged([_case_list_dict(case) for case in rows], request)
     payload["testHidden"] = request.GET.get("includeTest") not in {"1", "true", "yes"}
     cache.set(cache_key, payload, timeout=45)
@@ -539,6 +549,8 @@ def case_detail(request, case_id: str):
         if denied:
             return denied
         payload = _json_body(request)
+        if "status" in payload and payload["status"] not in {Case.Status.OPEN, Case.Status.CLOSED}:
+            return JsonResponse({"error": "Case status must be open or closed.", "code": "invalid_case_status"}, status=400)
         for field, attr in {
             "title": "title",
             "status": "status",
@@ -555,6 +567,7 @@ def case_detail(request, case_id: str):
                 return JsonResponse({"error": str(exc), "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
         if "closedAt" in payload:
             case.closed_at = parse_datetime(payload["closedAt"]) if payload["closedAt"] else None
+            case.status = Case.Status.CLOSED if case.closed_at else Case.Status.OPEN
         case.save()
         add_history(case, actor_from_request(request), "Case metadata updated", "Case details, flags, or status were updated.")
         return JsonResponse(_case_dict(case))
@@ -597,16 +610,17 @@ def case_light_summary(request, case_id: str):
 
 
 def case_workspace(_request, case_id: str):
-    cache_key = f"netra:case-workspace-response:{case_id}"
-    cached = cache.get(cache_key)
-    if isinstance(cached, dict):
-        return JsonResponse(cached)
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
-    payload = workspace_for_case(case)
-    cache.set(cache_key, payload, timeout=60)
-    return JsonResponse(payload)
+    return JsonResponse(workspace_for_case(case))
+
+
+def case_workspace_by_route(request, route_ref):
+    case = visible_cases_for_actor(actor_from_request(request)).filter(route_ref=route_ref).first()
+    if not case:
+        raise Http404("Case not found")
+    return JsonResponse(workspace_for_case(case))
 
 
 def dashboard_summary_payload(case_id: str) -> dict:
@@ -1078,6 +1092,7 @@ def evidence_upload(request):
                 {
                     "id": evidence.id if evidence else "",
                     "caseId": existing_job.case_id,
+                    "routeRef": str(existing_job.case.route_ref),
                     "jobId": existing_job.id,
                     "status": "verified" if completed else "queued",
                     "processingPath": existing_job.processing_path,
@@ -1163,11 +1178,11 @@ def evidence_upload(request):
         job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
         if settings.NETRA_PROCESSING_MODE == "postgres-worker":
             Path(saved["analysis_path"]).unlink(missing_ok=True)
-            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
+            return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
         event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "processingMode": settings.NETRA_PROCESSING_MODE, "saved": public_saved, "intake": saved["intake"]}
         if publish_event("netra.pcap.uploaded", event, key=job_id):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
-            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **client_saved}, status=202)
+            return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **client_saved}, status=202)
     try:
         analysis = (
             analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
@@ -1190,6 +1205,7 @@ def evidence_upload(request):
         {
             "id": evidence_id,
             "caseId": case_id,
+            "routeRef": str(job.case.route_ref),
             "jobId": job_id,
             "status": "verified",
             "analysis": analysis["summary"],
@@ -2568,6 +2584,16 @@ def report_generate(request, case_id: str):
     denied = require_permission(request, "report", case=case, resource_type="Report", resource_id=case_id)
     if denied:
         return denied
+    analysis_status = analysis_status_for_case(case)
+    if not analysis_status["reportEligible"]:
+        return JsonResponse(
+            {
+                "error": analysis_status["reportBlockedReason"],
+                "code": "analysis_not_complete",
+                "analysisStatus": analysis_status,
+            },
+            status=409,
+        )
     actor = actor_from_request(request)
     payload = _json_body(request)
     language = payload.get("language", "en")
