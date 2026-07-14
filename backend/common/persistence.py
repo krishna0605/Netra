@@ -282,18 +282,18 @@ def update_analysis_alert_status(match_or_alert_id: str, status: str, actor: Act
     return None
 
 
-def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: Actor) -> None:
-    case = Case.objects.filter(id=case_id).first()
+def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: Actor, case: Case | None = None) -> None:
+    case = case or Case.objects.select_related("analysis_snapshot").filter(id=case_id).first()
     if not case:
         return
-    Report.objects.update_or_create(id=artifact["filename"], defaults={"case": case, "language": language, "generated_by": actor.user, "stored_path": artifact["stored_path"], "sha256": artifact["sha256"], "status": "ready"})
+    report, _ = Report.objects.update_or_create(id=artifact["filename"], defaults={"case": case, "language": language, "generated_by": actor.user, "stored_path": artifact["stored_path"], "sha256": artifact["sha256"], "status": "ready"})
     if case.report_status != "ready":
         case.report_status = "ready"
         case.save(update_fields=["report_status", "updated_at"])
     add_history(case, actor, "Report generated", f"{artifact['filename']} generated.", artifact["sha256"])
-    record_custody_event(case, actor, "Report generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Report", resource_id=artifact["filename"])
+    custody_event = record_custody_event(case, actor, "Report generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Report", resource_id=artifact["filename"])
     log_access(actor, "report.generate", case=case, resource_type="Report", resource_id=artifact["filename"])
-    refresh_case_workspace_artifacts(case)
+    refresh_case_workspace_artifacts(case, report=report, custody_event=custody_event)
 
 
 def record_export(case_id: str, export_id: str, export_type: str, artifact: dict[str, Any], actor: Actor) -> None:

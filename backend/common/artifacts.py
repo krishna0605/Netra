@@ -100,7 +100,7 @@ def generate_report_artifact(case_id: str, language: str, analysis: dict, actor:
         f"<section><h2>Legal Review Checklist</h2><p>Status: {legal.get('status')}</p><ul>{legal_items}</ul></section></body>",
     )
     artifact = write_text_artifact(html, "report", filename or f"{case_id}-{language}.html")
-    record_report(case_id, artifact, language, actor)
+    record_report(case_id, artifact, language, actor, case=case)
     return {"id": artifact["filename"], **artifact}
 
 
@@ -111,7 +111,7 @@ def generate_pdf_report_artifact(case_id: str, language: str, analysis: dict, ac
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     pdf_bytes = build_report_pdf(enriched, language, legal, custody)
     artifact = write_binary_artifact(pdf_bytes, "report", filename or f"{case_id}-{language}.pdf")
-    record_report(case_id, artifact, f"{language}-pdf", actor)
+    record_report(case_id, artifact, f"{language}-pdf", actor, case=case)
     return {"id": artifact["filename"], "format": "pdf", **artifact}
 
 
