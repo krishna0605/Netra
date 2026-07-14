@@ -90,6 +90,7 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
     source_path = Path(pcap_path)
     filtered_path: Path | None = None
     try:
+        source_packet_count = _count_observed_packets(source_path)
         bpf_filter = str(saved.get("intake", {}).get("bpfFilter") or "").strip()
         analysis_path = source_path
         if bpf_filter:
@@ -100,7 +101,11 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         observed_packet_count = observed_packet_count if observed_packet_count is not None else len(rows)
         packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
         packets = _apply_intake_filters(packets, saved.get("intake", {}))
-        search_completeness = "truncated-search-index" if observed_packet_count > len(packets) else "complete"
+        active_filters = [
+            name for name in ("sourceIp", "destinationIp", "protocol", "port", "durationSeconds", "packetLimit")
+            if str(saved.get("intake", {}).get(name) or "").strip()
+        ]
+        search_completeness = "filtered-view" if bpf_filter or active_filters else ("truncated-search-index" if observed_packet_count > len(packets) else "complete")
         zeek = run_zeek_analysis(analysis_path, job_id)
         return assemble_analysis(
             packets,
@@ -112,6 +117,15 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             zeek=zeek,
             source_label="PCAP",
             search_completeness=search_completeness,
+            filter_summary={
+                "fullInputScanned": True,
+                "bpfApplied": bool(bpf_filter),
+                "sourcePacketCount": source_packet_count,
+                "bpfPacketCount": observed_packet_count,
+                "parsedPacketCount": len(rows),
+                "returnedPacketCount": len(packets),
+                "activeFilters": (["bpfFilter"] if bpf_filter else []) + active_filters,
+            },
         )
     finally:
         if filtered_path:
@@ -170,6 +184,7 @@ def assemble_analysis(
     source_label: str = "PCAP",
     search_completeness: str = "complete",
     structured_summary: dict[str, Any] | None = None,
+    filter_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     indexed_packet_count = len(packets)
     sessions = _build_sessions(packets)
@@ -286,6 +301,7 @@ def assemble_analysis(
         "protocolChartData": protocol_chart,
         "graph": graph,
         "structuredEvidence": structured_summary or {},
+        "filterExecution": filter_summary or {},
         "searchCompleteness": search_completeness,
         "observedPackets": observed_record_count,
         "indexedPackets": indexed_packet_count,
@@ -306,6 +322,7 @@ def assemble_analysis(
             "riskLevel": risk_level,
             "toolStatus": tool_status,
             "zeek": {"status": zeek["status"], "summary": zeek["summary"], "logs": zeek["logs"]},
+            "filterExecution": filter_summary or {},
         },
     }
     save_analysis(analysis)

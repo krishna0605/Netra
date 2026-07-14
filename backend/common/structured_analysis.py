@@ -40,6 +40,10 @@ def analyze_structured_evidence(path: str | Path, case_id: str, evidence_id: str
         raise ValueError("Structured evidence contains no analyzable network records.")
     packets = [_packet_from_structured(record, index + 1) for index, record in enumerate(canonical)]
     packets = _apply_intake_filters(packets, saved.get("intake", {}))
+    active_filters = [
+        name for name in ("sourceIp", "destinationIp", "protocol", "port", "durationSeconds", "packetLimit")
+        if str(saved.get("intake", {}).get(name) or "").strip()
+    ]
     record_types = Counter(record["recordType"] for record in canonical)
     actions = Counter(record["action"] for record in canonical if record.get("action"))
     domains = Counter(record["domain"] for record in canonical if record.get("domain"))
@@ -64,8 +68,15 @@ def analyze_structured_evidence(path: str | Path, case_id: str, evidence_id: str
         job_id,
         saved,
         source_label=saved.get("normalization", {}).get("normalizedType", "Structured"),
-        search_completeness="truncated-search-index" if len(canonical) > len(packets) else "complete",
+        search_completeness="filtered-view" if active_filters else ("truncated-search-index" if len(canonical) > len(packets) else "complete"),
         structured_summary=summary,
+        filter_summary={
+            "fullInputScanned": True,
+            "bpfApplied": False,
+            "sourceRecordCount": len(canonical),
+            "returnedRecordCount": len(packets),
+            "activeFilters": active_filters,
+        },
     )
 
 
