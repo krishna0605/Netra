@@ -17,6 +17,18 @@ credentials/
 # Local-only project material
 /Miscellaneous/
 /database/
+/output/
+/security-audit/
+/tmp/
+/tools/
+/HACKATHON_LAUNCH_READINESS.md
+/DEPLOYMENT_VERCEL_RAILWAY.md
+/PRODUCTION_READINESS_AUDIT_REPORT.md
+/security_best_practices_report.md
+*.ppt
+*.pptx
+**/malicious*/
+**/malware*/
 
 # Keep only the current public production workflow scripts
 /infra/scripts/*.ps1
@@ -30,6 +42,7 @@ credentials/
 *.cap
 storage/*
 !storage/README.md
+.netra-tmp/
 capture_chunks/
 filtered_pcaps/
 reports/
@@ -82,3 +95,4 @@ Desktop.ini
 *.njsproj
 *.sln
 *.sw?
+.vercel/

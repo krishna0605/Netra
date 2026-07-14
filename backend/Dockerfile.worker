@@ -5,13 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app/ml-services/anomaly-engine \
-    NETRA_STORAGE_ROOT=/var/lib/netra/storage \
-    NETRA_TEMP_ROOT=/var/lib/netra/tmp
+    NETRA_STORAGE_ROOT=/var/lib/netra/storage
 
 WORKDIR /app/backend
 
-# Netra executes no Perl. Debian's essential perl-base currently ships a
-# vulnerable optional Socket XS module, so the module is removed and asserted.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -32,14 +29,9 @@ RUN python -m pip install --upgrade "pip==26.1.1" \
 COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
 
-RUN mkdir -p /var/lib/netra/storage /var/lib/netra/tmp \
+RUN mkdir -p /var/lib/netra/storage \
     && chown -R netra:netra /var/lib/netra /app
 
 USER 10001:10001
 
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8000')+'/api/health', timeout=3)" || exit 1
-
-CMD ["sh", "-c", "if [ \"${NETRA_SERVICE_KIND:-api}\" = \"worker\" ]; then exec python manage.py run_postgres_worker; else exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${GUNICORN_WORKERS:-2} --threads ${GUNICORN_THREADS:-2} --timeout ${GUNICORN_TIMEOUT:-180} --access-logfile - --error-logfile -; fi"]
+CMD ["python", "manage.py", "run_postgres_worker"]

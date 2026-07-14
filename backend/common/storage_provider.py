@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import shutil
 import tempfile
 import urllib.error
@@ -72,6 +74,18 @@ class LocalFilesystemStorageProvider:
     def health_check(self) -> dict:
         return {"status": "ok", "provider": "local-filesystem"}
 
+    def upload_bucket_object(self, bucket: str, object_name: str, path: str | Path, *, upsert: bool = False) -> str:
+        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+
+    def download_bucket_object(self, bucket: str, object_name: str, target_path: str | Path, *, max_bytes: int) -> StorageStat:
+        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+
+    def read_bucket_object(self, bucket: str, object_name: str) -> bytes:
+        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+
+    def delete_bucket_object(self, bucket: str, object_name: str) -> None:
+        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+
 
 class SupabaseStorageProvider(LocalFilesystemStorageProvider):
     scheme = "supabase://"
@@ -138,7 +152,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         relative = target.relative_to(root)
         bucket = self._bucket_for_relative(relative)
         object_name = relative.as_posix()
-        self._upload_file(bucket, object_name, target)
+        self._upload_file(bucket, object_name, target, upsert=True)
         return f"{self.scheme}{bucket}/{object_name}"
 
     def resolve(self, storage_uri: str | Path) -> Path:
@@ -193,10 +207,45 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
             return target
         return super().copy_encrypted(source_uri, destination)
 
-    def _upload_file(self, bucket: str, object_name: str, path: Path) -> None:
+    def upload_bucket_object(self, bucket: str, object_name: str, path: str | Path, *, upsert: bool = False) -> str:
+        self._upload_file(bucket, object_name, Path(path), upsert=upsert)
+        return f"{self.scheme}{bucket}/{object_name}"
+
+    def download_bucket_object(self, bucket: str, object_name: str, target_path: str | Path, *, max_bytes: int) -> StorageStat:
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        url = self._object_url(bucket, object_name)
+        request = urllib.request.Request(url, method="GET", headers=self._auth_headers())
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as handle:
+                os.chmod(target, 0o600)
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise OverflowError("Quarantine object exceeds the authorized upload size.")
+                    digest.update(chunk)
+                    handle.write(chunk)
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+        return StorageStat(size_bytes=written, sha256=digest.hexdigest())
+
+    def read_bucket_object(self, bucket: str, object_name: str) -> bytes:
+        return self._download_bytes(bucket, object_name)
+
+    def delete_bucket_object(self, bucket: str, object_name: str) -> None:
+        self.delete(f"{self.scheme}{bucket}/{object_name}")
+
+    def _upload_file(self, bucket: str, object_name: str, path: Path, *, upsert: bool = True) -> None:
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, data=path.read_bytes(), method="POST", headers=self._headers())
-        request.add_header("x-upsert", "true")
+        if upsert:
+            request.add_header("x-upsert", "true")
         self._request(request, expected={200, 201})
 
     def _download_bytes(self, bucket: str, object_name: str) -> bytes:
@@ -213,7 +262,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         try:
             probe.write(b"netra-storage-health")
             probe.close()
-            self._upload_file(bucket, probe_name, Path(probe.name))
+            self._upload_file(bucket, probe_name, Path(probe.name), upsert=True)
             content = self._download_bytes(bucket, probe_name)
             if content != b"netra-storage-health":
                 raise RuntimeError("Supabase Storage health probe returned unexpected content.")
