@@ -88,7 +88,7 @@ def queue_uploaded_evidence(
             "manifest_hash": manifest_payload["manifestHash"],
         },
     )
-    public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
+    public_saved = {key: value for key, value in saved.items() if key not in {"analysis_path", "v2_manifest"}}
     job, _ = ProcessingJob.objects.update_or_create(
         id=job_id,
         defaults={

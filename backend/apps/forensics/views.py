@@ -1074,8 +1074,15 @@ def evidence_upload(request):
     filter_error = _analysis_filter_error(request, normalization_result.normalized_type, requested_bpf)
     if filter_error:
         return filter_error
+    evidence_id = f"ev-{uuid4().hex[:8]}"
+    job_id = f"job-{uuid4().hex[:8]}"
     try:
-        saved = save_uploaded_file(upload, "pcap" if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP else "structured")
+        saved = save_uploaded_file(
+            upload,
+            "pcap" if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP else "structured",
+            evidence_id=evidence_id,
+            case_id=case_id,
+        )
     except OverflowError as exc:
         return JsonResponse({"error": str(exc)}, status=413)
     except ValueError as exc:
@@ -1111,9 +1118,7 @@ def evidence_upload(request):
         "bpfFilter": requested_bpf,
     }
     saved["normalization"] = normalization
-    evidence_id = f"ev-{uuid4().hex[:8]}"
-    job_id = f"job-{uuid4().hex[:8]}"
-    public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
+    public_saved = {key: value for key, value in saved.items() if key not in {"analysis_path", "v2_manifest"}}
     client_saved = {
         key: public_saved[key]
         for key in ("filename", "size_bytes", "sha256", "plaintext_sha256", "encrypted_sha256", "normalization")
