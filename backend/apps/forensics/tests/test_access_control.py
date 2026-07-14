@@ -150,7 +150,8 @@ class ApiAccessControlTests(TestCase):
 
     @override_settings(
         NETRA_DEPLOYMENT_PROFILE="hackathon-core",
-        NETRA_ENABLE_LAB_TOOLS=False,
+        NETRA_ENABLE_PCAP_REPLAY=True,
+        NETRA_ENABLE_SENSOR_CAPTURE=False,
         NETRA_ENABLE_INTEGRATIONS=False,
         NETRA_ENABLE_CAPTURE_SCHEDULES=False,
         NETRA_ENABLE_RETENTION_OPERATIONS=False,
@@ -159,7 +160,15 @@ class ApiAccessControlTests(TestCase):
         _admin, headers = self._user("profile-admin@example.test", "Admin")
         identity = self.client.get("/api/auth/me", **headers)
         self.assertEqual(identity.status_code, 200)
-        self.assertFalse(identity.json()["deployment"]["modules"]["lab"]["enabled"])
+        self.assertTrue(identity.json()["deployment"]["modules"]["lab"]["enabled"])
+        self.assertFalse(identity.json()["deployment"]["modules"]["sensors"]["enabled"])
+        replay = self.client.post(
+            "/api/capture/replay/start",
+            {"file": SimpleUploadedFile("invalid.pcap", b"not-a-pcap", content_type="application/vnd.tcpdump.pcap")},
+            **headers,
+        )
+        self.assertEqual(replay.status_code, 400)
+        self.assertNotEqual(replay.json().get("code"), "feature_disabled")
         for path in ("/api/sensors", "/api/capture-schedules", "/api/integrations", "/api/retention/policy"):
             response = self.client.get(path, **headers)
             self.assertEqual(response.status_code, 404, path)

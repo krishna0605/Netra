@@ -252,9 +252,9 @@ def finalize_capture(job: CaptureJob, actor: Actor | str = "Netra capture engine
         merged, _ = _merge_chunks(job)
         working_dir = merged.parent
         uploaded = SimpleUploadedFile(f"{job.id}.pcap", merged.read_bytes(), content_type="application/vnd.tcpdump.pcap")
-        saved = save_uploaded_file(uploaded, "pcap")
-        analysis_path = saved["analysis_path"]
         evidence_id = f"ev-{uuid4().hex[:8]}"
+        saved = save_uploaded_file(uploaded, "pcap", evidence_id=evidence_id, case_id=job.case_id)
+        analysis_path = saved["analysis_path"]
         analysis_job_id = f"job-{uuid4().hex[:8]}"
         analysis = analyze_pcap(analysis_path, job.case_id, evidence_id, analysis_job_id, saved | {"intake": {"investigator": job.case.investigator}})
         persistence_actor = actor if isinstance(actor, Actor) else Actor(str(actor), "System", authenticated=True)

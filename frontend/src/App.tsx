@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  Settings as SettingsIcon,
   Upload,
   UploadCloud,
   type LucideIcon,
@@ -838,6 +839,8 @@ type DeploymentAccess = {
   role: string;
   profile: string;
   hostCaptureEnabled: boolean;
+  replayEnabled: boolean;
+  sensorCaptureEnabled: boolean;
   modules: Record<DeploymentModuleKey, DeploymentModuleAccess>;
 };
 
@@ -848,6 +851,8 @@ const DEFAULT_DEPLOYMENT_ACCESS: DeploymentAccess = {
   role: "Viewer",
   profile: import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local",
   hostCaptureEnabled: false,
+  replayEnabled: false,
+  sensorCaptureEnabled: false,
   modules: {
     lab: { enabled: false, visible: false, reason: "Lab access has not been verified." },
     sensors: { enabled: false, visible: false, reason: "Sensor access has not been verified." },
@@ -1213,7 +1218,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
       user: string;
       department: string;
       role: string;
-      deployment: { profile: string; hostCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
+      deployment: { profile: string; hostCaptureEnabled: boolean; replayEnabled: boolean; sensorCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
     }>("/auth/me");
     setDeploymentAccess({
       verified: true,
@@ -1222,6 +1227,8 @@ function NetraProvider({ children }: { children: ReactNode }) {
       role: payload.role,
       profile: payload.deployment.profile,
       hostCaptureEnabled: payload.deployment.hostCaptureEnabled,
+      replayEnabled: payload.deployment.replayEnabled,
+      sensorCaptureEnabled: payload.deployment.sensorCaptureEnabled,
       modules: payload.deployment.modules,
     });
   }, []);
@@ -1624,12 +1631,18 @@ function AppShell() {
               <Route path="reports/:caseId" element={<ReportPage />} />
               <Route path="exports" element={<ExportCenterPage />} />
               <Route path="lab" element={<ModuleRoute module="lab"><LabToolsPage /></ModuleRoute>} />
-              <Route path="integrations" element={<ModuleRoute module="integrations"><IntegrationsPage /></ModuleRoute>} />
               <Route path="compliance" element={<CompliancePage />} />
-              <Route path="system" element={<ModuleRoute module="system"><SystemPage /></ModuleRoute>} />
-              <Route path="sensors" element={<ModuleRoute module="sensors"><SensorsPage /></ModuleRoute>} />
-              <Route path="schedules" element={<ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>} />
-              <Route path="retention" element={<ModuleRoute module="retention"><RetentionPage /></ModuleRoute>} />
+              <Route path="settings" element={<ModuleRoute module="system"><SettingsPage /></ModuleRoute>} />
+              <Route path="settings/technical-status" element={<ModuleRoute module="system"><SystemPage /></ModuleRoute>} />
+              <Route path="settings/sensors" element={<ModuleRoute module="sensors"><SensorsPage /></ModuleRoute>} />
+              <Route path="settings/schedules" element={<ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>} />
+              <Route path="settings/integrations" element={<ModuleRoute module="integrations"><IntegrationsPage /></ModuleRoute>} />
+              <Route path="settings/retention" element={<ModuleRoute module="retention"><RetentionPage /></ModuleRoute>} />
+              <Route path="system" element={<Navigate to="/app/settings/technical-status" replace />} />
+              <Route path="sensors" element={<Navigate to="/app/settings/sensors" replace />} />
+              <Route path="schedules" element={<Navigate to="/app/settings/schedules" replace />} />
+              <Route path="integrations" element={<Navigate to="/app/settings/integrations" replace />} />
+              <Route path="retention" element={<Navigate to="/app/settings/retention" replace />} />
             </Routes>
           </div>
         </div>
@@ -1657,14 +1670,8 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
       items: [navItem(Activity, "Capture and Replay", "/app/lab")],
     }] : []),
     ...(deploymentAccess.modules.system.visible ? [{
-      label: "Administration",
-      items: [
-        navItem(Activity, t("systemTools"), "/app/system"),
-        navItem(Database, "Sensors", "/app/sensors"),
-        navItem(History, "Schedules", "/app/schedules"),
-        navItem(FileText, "Integrations", "/app/integrations"),
-        navItem(Fingerprint, "Retention", "/app/retention"),
-      ],
+      label: "Settings",
+      items: [navItem(SettingsIcon, "Settings", "/app/settings")],
     }] : []),
   ];
   return (
@@ -3256,6 +3263,55 @@ function ExportCenterPage() {
   );
 }
 
+function SettingsPage() {
+  const { deploymentAccess } = useNetra();
+  const sections: { module: DeploymentModuleKey; title: string; description: string; href: string; icon: LucideIcon }[] = [
+    { module: "system", title: "Technical Status", description: "Deployment health, workers, storage, database, ML artifact, and operational diagnostics.", href: "/app/settings/technical-status", icon: Activity },
+    { module: "sensors", title: "Sensors", description: "Enrollment, heartbeats, interfaces, groups, and bounded native-capture controls.", href: "/app/settings/sensors", icon: Database },
+    { module: "schedules", title: "Schedules", description: "One-time and recurring capture windows for enrolled external sensors.", href: "/app/settings/schedules", icon: History },
+    { module: "integrations", title: "Integrations", description: "Administrator-managed SIEM and signed webhook destinations and delivery history.", href: "/app/settings/integrations", icon: FileText },
+    { module: "retention", title: "Retention", description: "Retention policy, cleanup previews, legal holds, and approved storage cleanup.", href: "/app/settings/retention", icon: Fingerprint },
+  ];
+  return (
+    <PageFrame title="Settings" description="Administrator configuration and technical operations are grouped here so the investigation workflow stays focused.">
+      <div className="surface rounded-[1.5rem] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black text-strong">Deployment and access</h2>
+            <p className="mt-1 text-sm text-muted">Capabilities are authorized by the backend for the signed-in administrator.</p>
+          </div>
+          <Badge>{deploymentAccess.profile}</Badge>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <MetadataRow label="Administrator" value={deploymentAccess.user || "Signed-in administrator"} />
+          <MetadataRow label="Department" value={deploymentAccess.department || "-"} />
+          <MetadataRow label="Role" value={deploymentAccess.role} />
+        </div>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {sections.map((section) => {
+          const access = deploymentAccess.modules[section.module];
+          const Icon = section.icon;
+          return (
+            <section key={section.module} className="surface flex min-h-56 flex-col rounded-[1.5rem] p-5">
+              <div className="flex items-start justify-between gap-3">
+                <span className="flex size-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"><Icon className="size-5" /></span>
+                <Badge variant={access.enabled ? "secondary" : "warning"}>{access.enabled ? "enabled" : "not configured"}</Badge>
+              </div>
+              <h2 className="mt-5 text-xl font-black text-strong">{section.title}</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">{section.description}</p>
+              <p className="mt-3 text-xs leading-5 text-muted">{access.reason}</p>
+              <Button asChild className="mt-auto w-fit" variant={access.enabled ? "default" : "secondary"}>
+                <Link to={section.href}>{access.enabled ? `Open ${section.title}` : "View requirements"}</Link>
+              </Button>
+            </section>
+          );
+        })}
+      </div>
+    </PageFrame>
+  );
+}
+
 function LabToolsPage() {
   const { activeCaseId, deploymentAccess, intakeForm, reloadAnalysis, setActiveCaseId } = useNetra();
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
@@ -3287,8 +3343,12 @@ function LabToolsPage() {
   }, []);
 
   useEffect(() => {
-    void loadSensors();
-  }, [loadSensors]);
+    if (deploymentAccess.sensorCaptureEnabled) void loadSensors();
+    else {
+      setSensors([]);
+      setLabError("");
+    }
+  }, [deploymentAccess.sensorCaptureEnabled, loadSensors]);
 
   useEffect(() => {
     if (!captureJob || terminal) return undefined;
@@ -3381,18 +3441,19 @@ function LabToolsPage() {
   }
 
   return (
-    <PageFrame title="Lab Tools" description="Isolated PCAP replay and bounded native-sensor capture for authorized operators. Browser upload remains the normal investigation path.">
+    <PageFrame title="Capture and Replay" description="Replay a bounded PCAP through the evidence pipeline or connect an authorized external sensor for native capture.">
       <Alert>
-        Railway host capture is {deploymentAccess.hostCaptureEnabled ? "enabled by configuration" : "disabled"}. Native packets must be captured by an enrolled sensor running on an authorized Windows or Linux host; NETRA does not pretend the Railway container can see your LAN.
+        Uploaded-PCAP replay is {deploymentAccess.replayEnabled ? "enabled" : "disabled"}. Railway host capture remains {deploymentAccess.hostCaptureEnabled ? "enabled by configuration" : "disabled"}; native packets require an enrolled sensor on an authorized Windows or Linux host.
       </Alert>
       {labError && <Alert>{labError}</Alert>}
       <div className="grid gap-5 lg:grid-cols-2">
-        <div className="surface rounded-[1.5rem] p-5">
+        <div className="surface order-2 rounded-[1.5rem] p-5 lg:order-1">
           <div className="flex items-start justify-between gap-3">
             <div><h2 className="text-xl font-black text-strong">Native sensor capture</h2><p className="mt-1 text-sm leading-6 text-muted">Requires the sensor agent, dumpcap or tcpdump, capture permission, the Railway API URL, and the configured sensor key.</p></div>
-            <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{selectedSensor?.status ?? "not connected"}</Badge>
+            <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{deploymentAccess.sensorCaptureEnabled ? selectedSensor?.status ?? "not connected" : "not configured"}</Badge>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {!deploymentAccess.sensorCaptureEnabled && <p className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-sm leading-6 text-muted">Native capture is intentionally off in Railway. Enroll an external sensor and enable the sensor-capture setting before using this section.</p>}
+          <fieldset className="mt-4 grid gap-3 md:grid-cols-2" disabled={!deploymentAccess.sensorCaptureEnabled}>
             <SelectField label="Sensor" value={sensorId || "none"} values={sensors.length ? sensors.map((sensor) => sensor.id) : ["none"]} onChange={(value) => {
               const nextId = value === "none" ? "" : value;
               setSensorId(nextId);
@@ -3402,18 +3463,19 @@ function LabToolsPage() {
             <Field label="Duration (seconds)" value={durationSeconds} onChange={setDurationSeconds} />
             <Field label="Packet limit" value={packetLimit} onChange={setPacketLimit} />
             <div className="md:col-span-2"><Field label="BPF filter" value={bpfFilter} onChange={setBpfFilter} disabled={!BPF_FILTER_ENABLED} /></div>
-          </div>
+          </fieldset>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={startSensorCapture} disabled={!selectedSensor || selectedSensor.status !== "online" || !interfaceName}>Queue bounded capture</Button>
-            <Button variant="secondary" onClick={loadSensors}>Refresh sensors</Button>
+            <Button onClick={startSensorCapture} disabled={!deploymentAccess.sensorCaptureEnabled || !selectedSensor || selectedSensor.status !== "online" || !interfaceName}>Queue bounded capture</Button>
+            <Button variant="secondary" onClick={loadSensors} disabled={!deploymentAccess.sensorCaptureEnabled}>Refresh sensors</Button>
+            {!deploymentAccess.sensorCaptureEnabled && <Button asChild variant="secondary"><Link to="/app/settings/sensors">View sensor requirements</Link></Button>}
           </div>
         </div>
-        <div className="surface rounded-[1.5rem] p-5">
-          <h2 className="text-xl font-black text-strong">PCAP replay</h2>
+        <div className="surface order-1 rounded-[1.5rem] p-5 lg:order-2">
+          <div className="flex items-start justify-between gap-3"><h2 className="text-xl font-black text-strong">PCAP replay</h2><Badge variant="secondary">enabled</Badge></div>
           <p className="mt-1 text-sm leading-6 text-muted">Replay is a validation tool, not live network capture. It processes a supplied PCAP through the isolated replay path and reports real server status.</p>
           <div className="mt-4 grid gap-3">
             <Input type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" onChange={(event) => setReplayFile(event.target.files?.[0] ?? null)} />
-            <Button className="w-fit" onClick={startReplay} disabled={!replayFile}>Start PCAP replay</Button>
+            <Button className="w-fit" onClick={startReplay} disabled={!deploymentAccess.replayEnabled || !replayFile}>Start PCAP replay</Button>
           </div>
         </div>
       </div>

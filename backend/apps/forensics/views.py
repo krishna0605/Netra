@@ -372,12 +372,14 @@ def auth_me(request):
     operator = can(actor, "operations")
     modules = {
         "lab": {
-            "enabled": settings.NETRA_ENABLE_LAB_TOOLS,
+            "enabled": settings.NETRA_ENABLE_PCAP_REPLAY,
             "visible": operator,
-            "reason": "Requires a trusted native sensor or isolated PCAP replay environment.",
+            "reason": "Isolated uploaded-PCAP replay is enabled; it does not transmit packets onto a live network."
+            if settings.NETRA_ENABLE_PCAP_REPLAY
+            else "Requires an isolated PCAP replay environment.",
         },
         "sensors": {
-            "enabled": settings.NETRA_ENABLE_LAB_TOOLS,
+            "enabled": settings.NETRA_ENABLE_SENSOR_CAPTURE,
             "visible": is_admin,
             "reason": "Native capture runs on an enrolled sensor, never inside the Railway web container.",
         },
@@ -411,6 +413,8 @@ def auth_me(request):
             "deployment": {
                 "profile": settings.NETRA_DEPLOYMENT_PROFILE,
                 "hostCaptureEnabled": settings.NETRA_ENABLE_HOST_CAPTURE,
+                "replayEnabled": settings.NETRA_ENABLE_PCAP_REPLAY,
+                "sensorCaptureEnabled": settings.NETRA_ENABLE_SENSOR_CAPTURE,
                 "modules": modules,
             },
         }
