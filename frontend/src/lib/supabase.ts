@@ -5,7 +5,29 @@ export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 export const SUPABASE_AUTH_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export const SUPABASE_REALTIME_ENABLED = import.meta.env.VITE_SUPABASE_REALTIME_ENABLED === "1";
 
-let currentAccessToken = "";
+type SessionStorageReader = Pick<Storage, "getItem">;
+
+export function readStoredAccessToken(
+  storage: SessionStorageReader,
+  supabaseUrl = SUPABASE_URL,
+  nowSeconds = Math.floor(Date.now() / 1000),
+) {
+  if (!supabaseUrl) return "";
+  try {
+    const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
+    if (!projectRef) return "";
+    const raw = storage.getItem(`sb-${projectRef}-auth-token`);
+    if (!raw) return "";
+    const session = JSON.parse(raw) as { access_token?: unknown; expires_at?: unknown };
+    if (typeof session.access_token !== "string" || !session.access_token) return "";
+    if (typeof session.expires_at === "number" && session.expires_at <= nowSeconds) return "";
+    return session.access_token;
+  } catch {
+    return "";
+  }
+}
+
+let currentAccessToken = typeof window === "undefined" ? "" : readStoredAccessToken(window.sessionStorage);
 
 export const supabase = SUPABASE_AUTH_ENABLED
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
