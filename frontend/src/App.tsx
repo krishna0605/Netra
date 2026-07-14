@@ -832,6 +832,7 @@ const NetraContext = createContext<AppState | null>(null);
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const DEPLOYMENT_PROFILE = import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local";
 const HACKATHON_CORE = DEPLOYMENT_PROFILE === "hackathon-core";
+const BPF_FILTER_ENABLED = import.meta.env.VITE_BPF_FILTER_ENABLED === "1";
 const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
 const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
@@ -2129,8 +2130,12 @@ function UploadPage() {
               <Field label="Duration limit (seconds)" value={draft.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
               <Field label="Packet limit" value={draft.packetLimit} onChange={(value) => update("packetLimit", value)} />
               <div className="md:col-span-2">
-                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} />
-                <p className="mt-2 text-xs text-muted">Use only if you know packet filter syntax. Most investigations should leave this blank.</p>
+                <Field label="Expert BPF capture filter" value={draft.bpfFilter} onChange={(value) => update("bpfFilter", value)} disabled={!BPF_FILTER_ENABLED} />
+                <p className="mt-2 text-xs text-muted">
+                  {BPF_FILTER_ENABLED
+                    ? "Use only if you know packet filter syntax. Most investigations should leave this blank."
+                    : "Offline BPF filtering is unavailable in this deployment. Use the source, destination, protocol, port, duration, and packet-limit filters above."}
+                </p>
               </div>
             </div>
           </div>

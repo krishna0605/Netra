@@ -154,3 +154,24 @@ class HackathonGoldenPathTests(TestCase):
                 self.assertEqual(payload["normalization"]["detectedType"], "PCAP")
                 self.assertIn("magic:pcapng", payload["normalization"]["signals"])
                 self.assertEqual(payload["analysis"]["packets"], 3)
+
+    def test_bpf_is_rejected_when_offline_filtering_is_disabled(self):
+        with self.settings(NETRA_BPF_FILTER_ENABLED=False):
+            response = self.client.post(
+                "/api/evidence/upload",
+                data={
+                    "caseId": "CASE-BPF-DISABLED",
+                    "evidenceType": "Auto-detect",
+                    "bpfFilter": "tcp port 22",
+                    "file": SimpleUploadedFile(
+                        "golden.pcap",
+                        self._capture_bytes("pcap"),
+                        content_type="application/vnd.tcpdump.pcap",
+                    ),
+                },
+                **self.headers,
+            )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "bpf_filter_unavailable")
+        self.assertFalse(Case.objects.filter(pk="CASE-BPF-DISABLED").exists())

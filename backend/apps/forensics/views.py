@@ -898,6 +898,16 @@ def evidence_upload(request):
     case_id = request.POST.get("caseId") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:4].upper()}"
     if not upload:
         return JsonResponse({"error": "file is required"}, status=400)
+    requested_bpf = (request.POST.get("bpfFilter") or "").strip()
+    if requested_bpf and not settings.NETRA_BPF_FILTER_ENABLED:
+        return JsonResponse(
+            {
+                "error": "Expert BPF filtering is not enabled in this deployment.",
+                "code": "bpf_filter_unavailable",
+                "detail": "Use the source, destination, protocol, port, duration, and packet-limit filters, or leave BPF blank.",
+            },
+            status=400,
+        )
     normalization_result = normalize_evidence_upload(upload, request.POST.get("evidenceType"))
     normalization = normalization_result.to_dict()
     if not normalization_result.valid:
@@ -945,7 +955,7 @@ def evidence_upload(request):
         "port": (request.POST.get("port") or "").strip(),
         "durationSeconds": (request.POST.get("durationSeconds") or "").strip(),
         "packetLimit": (request.POST.get("packetLimit") or "").strip(),
-        "bpfFilter": (request.POST.get("bpfFilter") or "").strip(),
+        "bpfFilter": requested_bpf,
     }
     saved["normalization"] = normalization
     evidence_id = f"ev-{uuid4().hex[:8]}"

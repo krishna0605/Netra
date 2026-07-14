@@ -132,6 +132,7 @@ NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-e
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
 NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
 NETRA_MAX_UPLOAD_MB = int(os.getenv("NETRA_MAX_UPLOAD_MB", "25" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "500"))
+NETRA_BPF_FILTER_ENABLED = os.getenv("NETRA_BPF_FILTER_ENABLED", "0") == "1"
 NETRA_ENABLE_HOST_CAPTURE = os.getenv("NETRA_ENABLE_HOST_CAPTURE", "0") == "1"
 NETRA_WORKER_MAX_RETRIES = int(os.getenv("NETRA_WORKER_MAX_RETRIES", "3"))
 NETRA_SENSOR_SHARED_KEY = os.getenv("NETRA_SENSOR_SHARED_KEY", "netra-phase5-local-sensor-key")
