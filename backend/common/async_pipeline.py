@@ -9,18 +9,27 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from apps.forensics.models import AnalysisChunk, Case, EvidenceFile, EvidenceManifest, ProcessingJob
+from apps.forensics.models import AnalysisChunk, Case, CaseMembership, EvidenceFile, EvidenceManifest, ProcessingJob, WorkerStageReceipt
 from common.analysis import analyze_pcap
 from common.audit import Actor, add_history, log_access
 from common.custody import record_custody_event
 from common.jobs import append_job_event, initial_steps
 from common.kafka import publish_event
 from common.persistence import case_origin, is_validator_case, persist_analysis
+from common.postgres_jobs import JobCancellationRequested
 from common.storage import save_uploaded_file
 from common.vault import build_manifest_payload, temporary_decrypted_copy
 
 
-def queue_uploaded_evidence(saved: dict, case_id: str, evidence_id: str, job_id: str, actor: Actor) -> ProcessingJob:
+def queue_uploaded_evidence(
+    saved: dict,
+    case_id: str,
+    evidence_id: str,
+    job_id: str,
+    actor: Actor,
+    *,
+    idempotency_key: str | None = None,
+) -> ProcessingJob:
     intake = saved.get("intake", {})
     case, _ = Case.objects.update_or_create(
         id=case_id,
@@ -50,6 +59,12 @@ def queue_uploaded_evidence(saved: dict, case_id: str, evidence_id: str, job_id:
             "retention_expires_at": datetime.now(timezone.utc) + timedelta(days=90),
         },
     )
+    if actor.django_user_id:
+        CaseMembership.objects.update_or_create(
+            case=case,
+            user_id=actor.django_user_id,
+            defaults={"role": actor.role, "added_by": "upload"},
+        )
     manifest_payload = build_manifest_payload(saved, evidence.id, case.id)
     EvidenceManifest.objects.update_or_create(
         id=manifest_payload["id"],
@@ -77,13 +92,25 @@ def queue_uploaded_evidence(saved: dict, case_id: str, evidence_id: str, job_id:
             "step": "queued",
             "progress": 0,
             "steps": initial_steps(),
-            "processing_path": "async-workers",
+            "processing_path": "postgres-worker",
             "last_progress_at": datetime.now(timezone.utc),
-            "stats": {"saved": public_saved, "intake": intake},
+            "idempotency_key": idempotency_key,
+            "max_attempts": settings.NETRA_WORKER_MAX_RETRIES,
+            "stats": {
+                "saved": public_saved,
+                "intake": intake,
+                "actor": {
+                    "user": actor.user,
+                    "role": actor.role,
+                    "djangoUserId": actor.django_user_id,
+                    "email": actor.email,
+                    "externalId": actor.external_id,
+                },
+            },
         },
     )
     add_history(case, actor, "Evidence queued", f"{saved['filename']} encrypted and queued for async analysis.", saved["sha256"])
-    record_custody_event(case, actor, "Evidence uploaded", {"filename": saved["filename"], "sha256": saved["sha256"], "processingPath": "async-workers"}, evidence, "EvidenceFile", evidence.id)
+    record_custody_event(case, actor, "Evidence uploaded", {"filename": saved["filename"], "sha256": saved["sha256"], "processingPath": "postgres-worker"}, evidence, "EvidenceFile", evidence.id)
     record_custody_event(case, "Netra vault", "Evidence encrypted", {"encryptedSha256": saved["encrypted_sha256"], "keyId": manifest_payload["keyId"]}, evidence, "EvidenceManifest", manifest_payload["id"])
     log_access(actor, "evidence.queue", case=case, resource_type="EvidenceFile", resource_id=evidence.id)
     return job
@@ -93,6 +120,8 @@ def process_queued_evidence(payload: dict) -> ProcessingJob:
     job = ProcessingJob.objects.select_related("evidence_file", "case").get(id=payload["jobId"])
     if job.status == ProcessingJob.Status.COMPLETED:
         return job
+    if job.cancel_requested_at or job.status == ProcessingJob.Status.CANCELED:
+        raise JobCancellationRequested("Job cancellation was requested before analysis started.")
     saved = dict(payload["saved"])
     saved["intake"] = payload.get("intake", {})
     temporary = temporary_decrypted_copy(saved["stored_path"])
@@ -106,14 +135,49 @@ def process_queued_evidence(payload: dict) -> ProcessingJob:
         append_job_event(job, "async.analysis.started", "pcap-ingestion-worker started immutable evidence analysis.")
         chunks = _prepare_large_analysis_chunks(job, Path(temporary))
         analysis = analyze_pcap(temporary, job.case_id, job.evidence_file_id, job.id, saved)
-        analysis["processingPath"] = "async-workers"
+        job.refresh_from_db(fields=["cancel_requested_at"])
+        if job.cancel_requested_at:
+            raise JobCancellationRequested("Job cancellation was requested during analysis.")
+        analysis["processingPath"] = "postgres-worker"
         analysis["searchCompleteness"] = "truncated-search-index" if chunks else "complete"
-        actor = Actor("Netra async worker", "System", authenticated=True)
+        actor_data = payload.get("actor") or {}
+        actor = Actor(
+            actor_data.get("user") or "Netra durable worker",
+            actor_data.get("role") or "Investigator",
+            authenticated=True,
+            django_user_id=actor_data.get("djangoUserId"),
+            email=actor_data.get("email") or "",
+            external_id=actor_data.get("externalId") or "",
+        )
         completed = persist_analysis(analysis, saved, actor)
+        WorkerStageReceipt.objects.update_or_create(
+            idempotency_key=f"{job.id}:analysis-finalized",
+            defaults={
+                "worker_name": "postgres-analysis",
+                "job_id": job.id,
+                "stage": "analysis-finalized",
+                "result_json": {"status": "completed", "summary": analysis.get("summary", {})},
+            },
+        )
         append_job_event(completed, "async.analysis.completed", "Async worker pipeline persisted final analysis.")
         return completed
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def process_claimed_job(job: ProcessingJob) -> ProcessingJob:
+    payload = dict(job.stats or {})
+    saved = dict(payload.get("saved") or {})
+    if not saved:
+        raise ValueError("Queued job is missing its immutable evidence descriptor.")
+    return process_queued_evidence(
+        {
+            "jobId": job.id,
+            "saved": saved,
+            "intake": payload.get("intake") or saved.get("intake") or {},
+            "actor": payload.get("actor") or {},
+        }
+    )
 
 
 def _prepare_large_analysis_chunks(job: ProcessingJob, plaintext_path: Path) -> list[AnalysisChunk]:

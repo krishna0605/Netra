@@ -358,6 +358,7 @@ class ProcessingJob(TimeStampedModel):
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
+        CANCELED = "canceled", "Canceled"
 
     id = models.CharField(max_length=64, primary_key=True)
     case = models.ForeignKey(Case, related_name="processing_jobs", on_delete=models.CASCADE)
@@ -379,12 +380,24 @@ class ProcessingJob(TimeStampedModel):
     expected_chunk_count = models.PositiveIntegerField(default=0)
     completed_chunk_count = models.PositiveIntegerField(default=0)
     completeness_status = models.CharField(max_length=40, default="complete")
+    idempotency_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=3)
+    lease_owner = models.CharField(max_length=160, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    cancel_requested_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
 
     class Meta:
         indexes = [
             models.Index(fields=["case", "status"], name="netra_job_case_status_idx"),
             models.Index(fields=["status", "updated_at"], name="netra_job_status_upd_idx"),
             models.Index(fields=["case", "created_at"], name="netra_job_case_created_idx"),
+            models.Index(fields=["status", "next_attempt_at"], name="netra_job_queue_ready_idx"),
+            models.Index(fields=["status", "lease_expires_at"], name="netra_job_lease_idx"),
         ]
 
 

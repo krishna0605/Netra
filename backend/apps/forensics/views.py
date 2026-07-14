@@ -23,7 +23,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
-from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
+from common.audit import access_log_dict, actor_from_request, add_history, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.analysis import analyze_pcap, empty_analysis
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
@@ -36,6 +36,7 @@ from common.jobs import job_status_payload
 from common.kafka import probe_supabase_queue, publish_event
 from common.pcap import available_packet_tools
 from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export, update_analysis_alert_status
+from common.postgres_jobs import request_job_cancellation, retry_job
 from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload
 from common.hashing import sha256_file, sha256_text
 from common.fleet import backpressure_allows_new_capture, capacity_payload, ensure_default_retention_policy, execute_safe_retention, kafka_lag_payload, queue_schedule_run, retention_policy_payload, retention_preview, retention_run_payload, schedule_payload, sensor_group_payload
@@ -898,6 +899,37 @@ def evidence_upload(request):
     case_id = request.POST.get("caseId") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:4].upper()}"
     if not upload:
         return JsonResponse({"error": "file is required"}, status=400)
+    raw_idempotency_key = (request.headers.get("Idempotency-Key") or request.POST.get("idempotencyKey") or "").strip()
+    if len(raw_idempotency_key) > 128:
+        return JsonResponse({"error": "Idempotency key is too long.", "code": "invalid_idempotency_key"}, status=400)
+    actor_scope = actor.external_id or str(actor.django_user_id or actor.user)
+    idempotency_key = sha256_text(f"{actor_scope}:{raw_idempotency_key}") if raw_idempotency_key else None
+    if idempotency_key:
+        existing_job = ProcessingJob.objects.select_related("case", "evidence_file").filter(idempotency_key=idempotency_key).first()
+        if existing_job:
+            if existing_job.case_id != case_id:
+                return JsonResponse({"error": "Idempotency key was already used for another case.", "code": "idempotency_conflict"}, status=409)
+            if not can_actor_access_case(actor, existing_job.case):
+                raise Http404("Job not found")
+            evidence = existing_job.evidence_file
+            manifest = getattr(evidence, "manifest", None) if evidence else None
+            completed = existing_job.status == ProcessingJob.Status.COMPLETED
+            return JsonResponse(
+                {
+                    "id": evidence.id if evidence else "",
+                    "caseId": existing_job.case_id,
+                    "jobId": existing_job.id,
+                    "status": "verified" if completed else "queued",
+                    "processingPath": existing_job.processing_path,
+                    "job": job_status_payload(existing_job),
+                    "analysis": (existing_job.stats or {}).get("summary", {}),
+                    "sha256": evidence.sha256 if evidence else "",
+                    "encrypted_sha256": manifest.encrypted_sha256 if manifest else "",
+                    "keyId": manifest.key_id if manifest else settings.NETRA_EVIDENCE_KEY_ID,
+                    "idempotentReplay": True,
+                },
+                status=200 if completed else 202,
+            )
     requested_bpf = (request.POST.get("bpfFilter") or "").strip()
     if requested_bpf and not settings.NETRA_BPF_FILTER_ENABLED:
         return JsonResponse(
@@ -966,8 +998,11 @@ def evidence_upload(request):
         for key in ("filename", "size_bytes", "sha256", "plaintext_sha256", "encrypted_sha256", "normalization")
         if key in public_saved
     } | {"keyId": settings.NETRA_EVIDENCE_KEY_ID}
-    if settings.NETRA_PROCESSING_MODE == "async-primary":
-        job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor)
+    if settings.NETRA_PROCESSING_MODE in {"postgres-worker", "async-primary"}:
+        job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
+        if settings.NETRA_PROCESSING_MODE == "postgres-worker":
+            Path(saved["analysis_path"]).unlink(missing_ok=True)
+            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
         event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "processingMode": settings.NETRA_PROCESSING_MODE, "saved": public_saved, "intake": saved["intake"]}
         if publish_event("netra.pcap.uploaded", event, key=job_id):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
@@ -1621,18 +1656,29 @@ def job_status(_request, job_id: str):
     job = ProcessingJob.objects.filter(id=job_id).first()
     if job:
         return JsonResponse(job_status_payload(job))
-    analysis = _analysis()
-    return JsonResponse({"jobId": job_id, "status": "completed", "progress": 100, "step": "completed", "steps": [], "stats": {"packetsParsed": analysis["summary"]["packets"], "alertsGenerated": analysis["summary"]["alerts"]}})
+    raise Http404("Job not found")
 
 
 def job_events(_request, job_id: str):
     job = ProcessingJob.objects.filter(id=job_id).first()
-    return JsonResponse({"jobId": job_id, "results": (job.events if job else [])})
+    if not job:
+        raise Http404("Job not found")
+    return JsonResponse({"jobId": job_id, "results": job.events or []})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def job_cancel(_request, job_id: str):
+    job = ProcessingJob.objects.filter(id=job_id).first()
+    if not job:
+        raise Http404("Job not found")
+    return JsonResponse(job_status_payload(request_job_cancellation(job.id)))
 
 
 def system_workers(_request):
-    expected = ["capture", "pcap-ingestion", "parser", "decoder", "session", "detection", "anomaly", "analysis-finalizer", "report-export", "scheduler", "retention"]
-    worker_mode = "enabled" if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) else "disabled"
+    postgres_worker_mode = settings.NETRA_PROCESSING_MODE == "postgres-worker"
+    expected = ["postgres-analysis"] if postgres_worker_mode else ["capture", "pcap-ingestion", "parser", "decoder", "session", "detection", "anomaly", "analysis-finalizer", "report-export", "scheduler", "retention"]
+    worker_mode = "enabled" if postgres_worker_mode or getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) else "disabled"
     latest = {}
     by_worker = {}
     for row in WorkerHeartbeat.objects.order_by("worker_name", "-last_seen_at"):
@@ -1849,6 +1895,8 @@ def _probe_elasticsearch() -> dict:
 
 
 def _probe_kafka() -> dict:
+    if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "postgres-row-lock":
+        return {"status": "ok", "provider": "postgres-row-lock", "detail": "ProcessingJob rows are the durable queue."}
     if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq":
         return probe_supabase_queue()
     started = time.perf_counter()
@@ -1955,7 +2003,7 @@ def _probe_packet_tools() -> dict:
 
 
 def _probe_workers() -> dict:
-    if getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase" and not getattr(settings, "NETRA_SUPABASE_START_WORKERS", False):
+    if settings.NETRA_PROCESSING_MODE != "postgres-worker" and getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase" and not getattr(settings, "NETRA_SUPABASE_START_WORKERS", False):
         return {"status": "ok", "mode": "disabled", "detail": "Supabase worker containers are disabled for lightweight synchronous demo mode."}
     rows = system_workers(None).content
     payload = json.loads(rows)
@@ -2038,7 +2086,9 @@ def job_reprocess(_request, job_id: str):
     job = ProcessingJob.objects.filter(id=job_id).first()
     if not job:
         raise Http404("Job not found")
-    job.events = (job.events or []) + [{"timestamp": datetime.now(timezone.utc).isoformat(), "event": "reprocess.requested", "detail": "Manual Phase 3 reprocess requested."}]
+    if settings.NETRA_PROCESSING_MODE == "postgres-worker":
+        return JsonResponse(job_status_payload(retry_job(job.id)))
+    job.events = (job.events or []) + [{"timestamp": datetime.now(timezone.utc).isoformat(), "event": "reprocess.requested", "detail": "Manual reprocess requested."}]
     job.save(update_fields=["events", "updated_at"])
     publish_event("netra.pcap.uploaded", {"type": "job.reprocess", "jobId": job.id, "caseId": job.case_id})
     return JsonResponse(job_status_payload(job))

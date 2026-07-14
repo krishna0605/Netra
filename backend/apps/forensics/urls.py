@@ -77,6 +77,7 @@ urlpatterns = [
     path("logs/import/zeek", views.zeek_log_import),
     path("jobs/<str:job_id>/status", views.job_status),
     path("jobs/<str:job_id>/events", views.job_events),
+    path("jobs/<str:job_id>/cancel", views.job_cancel),
     path("system/workers", views.system_workers),
     path("system/health/deep", views.system_health_deep),
     path("system/metrics", views.system_metrics),
