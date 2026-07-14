@@ -16,6 +16,7 @@ urlpatterns = [
     path("cases", views.cases),
     path("cases/<str:case_id>", views.case_detail),
     path("cases/<str:case_id>/workspace", views.case_workspace),
+    path("workspaces/<uuid:route_ref>/status", views.case_workspace_status),
     path("workspaces/<uuid:route_ref>", views.case_workspace_by_route),
     path("cases/<str:case_id>/summary", views.case_light_summary),
     path("cases/<str:case_id>/light-summary", views.case_light_summary),

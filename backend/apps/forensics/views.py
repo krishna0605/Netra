@@ -16,20 +16,20 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import Exists, F, OuterRef, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
+from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
-from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case
+from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case, workspace_status_payload
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
 from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize_evidence_upload
@@ -217,10 +217,20 @@ def _case_dict(case: Case) -> dict:
 
 
 def _case_list_dict(case: Case) -> dict:
-    snapshot = getattr(case, "analysis_snapshot", None)
-    snapshot_json = snapshot.snapshot_json if snapshot and isinstance(snapshot.snapshot_json, dict) else {}
-    snapshot_case = snapshot_json.get("case", {}) if isinstance(snapshot_json.get("case"), dict) else {}
-    snapshot_summary = snapshot_json.get("summary", {}) if isinstance(snapshot_json.get("summary"), dict) else {}
+    snapshot_case = {
+        "evidenceFileId": getattr(case, "_snapshot_evidence_file_id", "") or "",
+        "evidenceFilename": getattr(case, "_snapshot_evidence_filename", "") or "",
+        "alertIds": getattr(case, "_snapshot_alert_ids", []) or [],
+        "latestReportId": getattr(case, "_snapshot_latest_report_id", "") or "",
+        "latestReportDownloadUrl": getattr(case, "_snapshot_latest_report_url", "") or "",
+    }
+    snapshot_summary = {
+        "riskLevel": getattr(case, "_snapshot_risk_level", "") or "",
+        "topAttackClass": getattr(case, "_snapshot_top_attack_class", "") or "",
+        "alerts": getattr(case, "_snapshot_alert_count", 0) or 0,
+        "packets": getattr(case, "_snapshot_packet_count", 0) or 0,
+        "sessions": getattr(case, "_snapshot_session_count", 0) or 0,
+    }
     latest_report = snapshot_case.get("latestReportId") or ""
     analysis_status = analysis_status_for_case(case)
     return {
@@ -531,7 +541,23 @@ def cases(request):
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
         return JsonResponse(cached)
-    rows = _visible_cases_queryset(request).select_related("analysis_snapshot").prefetch_related("processing_jobs", "upload_sessions", "evidence_files")[:250]
+    rows = _visible_cases_queryset(request).annotate(
+        _has_analysis_snapshot=Exists(CaseAnalysisSnapshot.objects.filter(case_id=OuterRef("pk"))),
+        _snapshot_evidence_file_id=F("analysis_snapshot__snapshot_json__case__evidenceFileId"),
+        _snapshot_evidence_filename=F("analysis_snapshot__snapshot_json__case__evidenceFilename"),
+        _snapshot_alert_ids=F("analysis_snapshot__snapshot_json__case__alertIds"),
+        _snapshot_latest_report_id=F("analysis_snapshot__snapshot_json__case__latestReportId"),
+        _snapshot_latest_report_url=F("analysis_snapshot__snapshot_json__case__latestReportDownloadUrl"),
+        _snapshot_risk_level=F("analysis_snapshot__snapshot_json__summary__riskLevel"),
+        _snapshot_top_attack_class=F("analysis_snapshot__snapshot_json__summary__topAttackClass"),
+        _snapshot_alert_count=F("analysis_snapshot__snapshot_json__summary__alerts"),
+        _snapshot_packet_count=F("analysis_snapshot__snapshot_json__summary__packets"),
+        _snapshot_session_count=F("analysis_snapshot__snapshot_json__summary__sessions"),
+    ).prefetch_related(
+        Prefetch("processing_jobs", queryset=ProcessingJob.objects.select_related("evidence_file").defer("stats", "events")),
+        Prefetch("upload_sessions", queryset=EvidenceUploadSession.objects.select_related("processing_job", "processing_job__evidence_file").defer("processing_job__stats", "processing_job__events")),
+        Prefetch("evidence_files", queryset=EvidenceFile.objects.only("id", "case_id", "filename", "status", "created_at", "updated_at")),
+    )[:250]
     payload = _paged([_case_list_dict(case) for case in rows], request)
     payload["testHidden"] = request.GET.get("includeTest") not in {"1", "true", "yes"}
     cache.set(cache_key, payload, timeout=45)
@@ -610,17 +636,26 @@ def case_light_summary(request, case_id: str):
 
 
 def case_workspace(_request, case_id: str):
-    case = Case.objects.filter(id=case_id).first()
+    case = Case.objects.select_related("analysis_snapshot").filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
     return JsonResponse(workspace_for_case(case))
 
 
 def case_workspace_by_route(request, route_ref):
-    case = visible_cases_for_actor(actor_from_request(request)).filter(route_ref=route_ref).first()
+    case = visible_cases_for_actor(actor_from_request(request)).select_related("analysis_snapshot").filter(route_ref=route_ref).first()
     if not case:
         raise Http404("Case not found")
     return JsonResponse(workspace_for_case(case))
+
+
+def case_workspace_status(request, route_ref):
+    case = visible_cases_for_actor(actor_from_request(request)).annotate(
+        _has_analysis_snapshot=Exists(CaseAnalysisSnapshot.objects.filter(case_id=OuterRef("pk")))
+    ).filter(route_ref=route_ref).first()
+    if not case:
+        raise Http404("Case not found")
+    return JsonResponse(workspace_status_payload(case))
 
 
 def dashboard_summary_payload(case_id: str) -> dict:
@@ -2578,7 +2613,9 @@ def case_reports(request, case_id: str):
 @csrf_exempt
 @require_http_methods(["POST"])
 def report_generate(request, case_id: str):
-    case = Case.objects.filter(id=case_id).first()
+    case = Case.objects.annotate(
+        _has_analysis_snapshot=Exists(CaseAnalysisSnapshot.objects.filter(case_id=OuterRef("pk")))
+    ).filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
     denied = require_permission(request, "report", case=case, resource_type="Report", resource_id=case_id)

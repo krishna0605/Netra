@@ -8,7 +8,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.forensics.models import Alert, AnomalyRecord, Case, CaseMembership, DetectionMatch, EvidenceFile, EvidenceManifest, Export, ProcessingJob, Report, SessionSummary, ZeekLogSummary
 from common.audit import Actor, add_history, log_access
-from common.case_workspace import refresh_case_workspace_snapshot
+from common.case_workspace import refresh_case_workspace_artifacts, refresh_case_workspace_snapshot
 from common.custody import record_custody_event
 from common.indexing import index_analysis
 from common.jobs import completed_steps
@@ -293,7 +293,7 @@ def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: 
     add_history(case, actor, "Report generated", f"{artifact['filename']} generated.", artifact["sha256"])
     record_custody_event(case, actor, "Report generated", {"filename": artifact["filename"], "sha256": artifact["sha256"], "encryptedSha256": artifact.get("encrypted_sha256", "")}, resource_type="Report", resource_id=artifact["filename"])
     log_access(actor, "report.generate", case=case, resource_type="Report", resource_id=artifact["filename"])
-    refresh_case_workspace_snapshot(case)
+    refresh_case_workspace_artifacts(case)
 
 
 def record_export(case_id: str, export_id: str, export_type: str, artifact: dict[str, Any], actor: Actor) -> None:

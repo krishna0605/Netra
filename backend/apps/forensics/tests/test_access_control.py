@@ -82,6 +82,10 @@ class ApiAccessControlTests(TestCase):
         self.assertEqual(self.client.get("/api/cases/CASE-ALICE", **alice_headers).status_code, 200)
         self.assertEqual(self.client.get(f"/api/workspaces/{alice_case.route_ref}", **alice_headers).status_code, 200)
         self.assertEqual(self.client.get(f"/api/workspaces/{bob_case.route_ref}", **alice_headers).status_code, 404)
+        status_payload = self.client.get(f"/api/workspaces/{alice_case.route_ref}/status", **alice_headers)
+        self.assertEqual(status_payload.status_code, 200)
+        self.assertEqual(status_payload.json()["caseId"], "CASE-ALICE")
+        self.assertEqual(self.client.get(f"/api/workspaces/{bob_case.route_ref}/status", **alice_headers).status_code, 404)
 
         Report.objects.create(id="alice.html", case=alice_case, generated_by="alice")
         Report.objects.create(id="bob.html", case=bob_case, generated_by="bob")

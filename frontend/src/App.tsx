@@ -67,6 +67,7 @@ import type {
   CaseChartsRecord,
   CaseRecord,
   CaseWorkspaceRecord,
+  CaseWorkspaceStatusRecord,
   DashboardSummary,
   DecodedProtocolRecord,
   DetectionRuleMatch,
@@ -1129,6 +1130,27 @@ async function apiGet<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const WORKSPACE_CACHE_TTL_MS = 15_000;
+const workspaceResponseCache = new Map<string, { expiresAt: number; request: Promise<CaseWorkspaceRecord> }>();
+let workspaceCacheAuthToken = "";
+
+function apiWorkspace(routeRef: string, force = false): Promise<CaseWorkspaceRecord> {
+  const authToken = getCurrentAccessToken() ?? "";
+  if (workspaceCacheAuthToken !== authToken) {
+    workspaceResponseCache.clear();
+    workspaceCacheAuthToken = authToken;
+  }
+  if (force) workspaceResponseCache.delete(routeRef);
+  const cached = workspaceResponseCache.get(routeRef);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+  const request = apiGet<CaseWorkspaceRecord>(`/workspaces/${routeRef}`).catch((error) => {
+    workspaceResponseCache.delete(routeRef);
+    throw error;
+  });
+  workspaceResponseCache.set(routeRef, { expiresAt: Date.now() + WORKSPACE_CACHE_TTL_MS, request });
+  return request;
+}
+
 function netraHeaders(extra?: HeadersInit): HeadersInit {
   const token = getCurrentAccessToken();
   return {
@@ -1180,7 +1202,8 @@ function graphEdgesToFlows(graphResponse: { edges?: { source: string; target: st
 async function loadAnalysisData(activeCaseId: string | null) {
   const casesResponse = await apiGet<{ results: CaseRecord[] }>("/cases?limit=100");
   const selectedCaseId = (activeCaseId && casesResponse.results.some((record) => record.id === activeCaseId) ? activeCaseId : casesResponse.results[0]?.id) ?? null;
-  const workspaceResponse = selectedCaseId ? await apiGet<CaseWorkspaceRecord>(`/cases/${selectedCaseId}/workspace`) : null;
+  const selectedCase = casesResponse.results.find((record) => record.id === selectedCaseId);
+  const workspaceResponse = selectedCase?.routeRef ? await apiWorkspace(selectedCase.routeRef) : null;
   const workspace = workspaceResponse?.workspace;
   const summaryResponse = workspace?.summary ?? {
     packets: 0,
@@ -1345,7 +1368,9 @@ function NetraProvider({ children }: { children: ReactNode }) {
       }
     });
     if (!SUPABASE_REALTIME_ENABLED) {
-      const pollTimer = window.setInterval(scheduleRefresh, 5000);
+      const pollTimer = window.setInterval(() => {
+        if (document.visibilityState === "visible") scheduleRefresh();
+      }, 30_000);
       return () => {
         window.clearInterval(pollTimer);
         subscription.unsubscribe();
@@ -2819,8 +2844,9 @@ function SuspiciousActivityPage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const currentCase = caseRecords.find((record) => record.id === activeCaseId);
+  const currentRouteRef = currentCase?.routeRef;
   useEffect(() => {
-    if (!activeCaseId) {
+    if (!currentRouteRef) {
       setLoading(false);
       return;
     }
@@ -2832,28 +2858,26 @@ function SuspiciousActivityPage() {
     setAiExplanation(null);
     setLoadError("");
     setLoading(true);
-    Promise.allSettled([
-      apiGet<{ results: AlertRecord[] }>(`/alerts?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
-      apiGet<{ results: AnomalyRecord[] }>(`/anomalies?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
-      apiGet<{ results: DetectionRuleMatch[] }>(`/detection/matches?caseId=${encodeURIComponent(activeCaseId)}&limit=100`),
-      apiGet<{ edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }>(`/graph?caseId=${encodeURIComponent(activeCaseId)}`),
-      apiGet<{ mode: string; modelVersion: string; fallbackUsed: boolean; limitations: string[] }>(`/cases/${activeCaseId}/anomaly-explanation`),
-    ]).then(([alertsPayload, anomalyPayload, detectionPayload, graphPayload, explanationPayload]) => {
-      if (cancelled) return;
-      if (alertsPayload.status === "fulfilled") setAlertRecords(alertsPayload.value.results);
-      if (anomalyPayload.status === "fulfilled") setAnomalies(anomalyPayload.value.results);
-      if (detectionPayload.status === "fulfilled") setDetectionMatches(detectionPayload.value.results);
-      if (graphPayload.status === "fulfilled") setNetworkFlows(graphEdgesToFlows(graphPayload.value));
-      if (explanationPayload.status === "fulfilled") setAiExplanation(explanationPayload.value);
-      if ([alertsPayload, anomalyPayload, detectionPayload, graphPayload, explanationPayload].some((result) => result.status === "rejected")) {
-        setLoadError("Some suspicious-activity sections could not be loaded. Available findings are shown below.");
-      }
-      setLoading(false);
-    });
+    apiWorkspace(currentRouteRef)
+      .then((payload) => {
+        if (cancelled) return;
+        const suspicious = payload.workspace.suspiciousActivity;
+        setAlertRecords(suspicious.alerts ?? []);
+        setAnomalies(suspicious.anomalies ?? []);
+        setDetectionMatches(suspicious.detectionMatches ?? []);
+        setNetworkFlows(graphEdgesToFlows(payload.workspace.trafficEvidence.communicationMap ?? {}));
+        setAiExplanation(suspicious.mlExplanation ?? null);
+        setLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : "Suspicious activity could not be loaded.");
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [activeCaseId]);
+  }, [currentRouteRef]);
   const highRiskAlerts = alertRecords.filter((alert) => ["critical", "high"].includes(alert.severity));
   const suspiciousFlows = networkFlows.filter((flow) => flow.suspicious || (flow.risk ?? 0) >= 60).slice(0, 8);
   const reviewItems = [
@@ -3026,8 +3050,9 @@ function TrafficEvidencePage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const currentCase = caseRecords.find((record) => record.id === activeCaseId);
+  const currentRouteRef = currentCase?.routeRef;
   useEffect(() => {
-    if (!activeCaseId) {
+    if (!currentRouteRef) {
       setLoading(false);
       return;
     }
@@ -3040,31 +3065,27 @@ function TrafficEvidencePage() {
     setZeek(null);
     setLoadError("");
     setLoading(true);
-    Promise.allSettled([
-      apiGet<{ results: PacketRecord[] }>(`/packets?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
-      apiGet<{ results: SessionRecord[] }>(`/sessions?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
-      apiGet<{ results: DecodedProtocolRecord[]; zeek?: ZeekEvidence }>(`/decoder/summary?caseId=${encodeURIComponent(activeCaseId)}`),
-      apiGet<{ results: PayloadFinding[] }>(`/payloads?caseId=${encodeURIComponent(activeCaseId)}&limit=120`),
-      apiGet<{ edges?: { source: string; target: string; protocol: string; packets: number; bytes?: number; risk?: number; attackClass?: AttackClass; alertIds?: string[] }[] }>(`/graph?caseId=${encodeURIComponent(activeCaseId)}`),
-    ]).then(([packetPayload, sessionPayload, protocolPayload, payloadPayload, graphPayload]) => {
-      if (cancelled) return;
-      if (packetPayload.status === "fulfilled") setPackets(packetPayload.value.results);
-      if (sessionPayload.status === "fulfilled") setSessions(sessionPayload.value.results);
-      if (protocolPayload.status === "fulfilled") {
-        setDecodedProtocols(protocolPayload.value.results);
-        setZeek(protocolPayload.value.zeek ?? null);
-      }
-      if (payloadPayload.status === "fulfilled") setPayloadFindings(payloadPayload.value.results);
-      if (graphPayload.status === "fulfilled") setNetworkFlows(graphEdgesToFlows(graphPayload.value));
-      if ([packetPayload, sessionPayload, protocolPayload, payloadPayload, graphPayload].some((result) => result.status === "rejected")) {
-        setLoadError("Some traffic-evidence sections could not be loaded. Available records are shown below.");
-      }
-      setLoading(false);
-    });
+    apiWorkspace(currentRouteRef)
+      .then((payload) => {
+        if (cancelled) return;
+        const traffic = payload.workspace.trafficEvidence;
+        setPackets(traffic.packetsPreview ?? []);
+        setSessions(traffic.sessionsPreview ?? []);
+        setDecodedProtocols(traffic.protocols ?? []);
+        setPayloadFindings(traffic.payloadClues ?? []);
+        setNetworkFlows(graphEdgesToFlows(traffic.communicationMap ?? {}));
+        setZeek(payload.workspace.summary.zeek ?? null);
+        setLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : "Traffic evidence could not be loaded.");
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [activeCaseId]);
+  }, [currentRouteRef]);
   const filteredPackets = useMemo(() => {
     const text = query.trim().toLowerCase();
     const portText = port.trim();
@@ -4286,7 +4307,7 @@ function CaseStat({ label, value }: { label: string; value: string | number }) {
 }
 
 function CaseDetailPage() {
-  const { t, caseRecords, activeUpload, addCaseNote, setActiveCaseId } = useNetra();
+  const { t, caseRecords, activeUpload, addCaseNote, setActiveCaseId, setActiveUpload } = useNetra();
   const navigate = useNavigate();
   const { routeRef = "" } = useParams();
   const [workspace, setWorkspace] = useState<CaseWorkspaceRecord | null>(null);
@@ -4309,6 +4330,8 @@ function CaseDetailPage() {
   const [linkRelation, setLinkRelation] = useState("manual_link");
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceError, setWorkspaceError] = useState("");
+  const statusInFlightRef = useRef(false);
+  const finalRefreshRef = useRef("");
 
   const applyWorkspace = useCallback((payload: CaseWorkspaceRecord) => {
     const data = payload.workspace;
@@ -4327,9 +4350,9 @@ function CaseDetailPage() {
     setLedger({ verification: data.custody.verification, results: data.custody.eventsPreview ?? [] });
   }, []);
 
-  const refreshWorkspace = useCallback(async () => {
+  const refreshWorkspace = useCallback(async (force = true) => {
     if (!routeRef) return;
-    const payload = await apiGet<CaseWorkspaceRecord>(`/workspaces/${routeRef}`);
+    const payload = await apiWorkspace(routeRef, force);
     applyWorkspace(payload);
     setActiveCaseId(payload.caseId);
     setWorkspaceLoading(false);
@@ -4340,7 +4363,7 @@ function CaseDetailPage() {
     if (!routeRef) return;
     let cancelled = false;
     setWorkspaceLoading(true);
-    apiGet<CaseWorkspaceRecord>(`/workspaces/${routeRef}`)
+    apiWorkspace(routeRef, true)
       .then((payload) => {
         if (!cancelled) {
           applyWorkspace(payload);
@@ -4362,19 +4385,83 @@ function CaseDetailPage() {
 
   const clientUpload = activeUpload?.routeRef === routeRef ? activeUpload : null;
   const serverAnalysis = workspace?.analysisStatus ?? record?.analysisStatus;
-  const analysisState = clientUpload?.state ?? serverAnalysis?.state ?? "no-evidence";
-  const analysisProgress = clientUpload?.progress ?? serverAnalysis?.progress ?? 0;
-  const analysisStep = clientUpload?.step ?? serverAnalysis?.step ?? "waiting_for_evidence";
-  const analysisError = clientUpload?.error ?? serverAnalysis?.error ?? workspaceError;
+  const clientTransferActive = Boolean(clientUpload && ["accepted", "uploading", "finalizing"].includes(clientUpload.state));
+  const analysisState: AnalysisStatus["state"] = clientTransferActive && clientUpload ? clientUpload.state : serverAnalysis?.state ?? clientUpload?.state ?? "no-evidence";
+  const analysisProgress = clientTransferActive && clientUpload ? clientUpload.progress : serverAnalysis?.progress ?? clientUpload?.progress ?? 0;
+  const analysisStep = clientTransferActive && clientUpload ? clientUpload.step : serverAnalysis?.step ?? clientUpload?.step ?? "waiting_for_evidence";
+  const analysisError = serverAnalysis?.error ?? clientUpload?.error ?? workspaceError;
   const analysisBusy = ["accepted", "uploading", "finalizing", "queued", "running"].includes(analysisState);
-  const reportEligible = !clientUpload && Boolean(workspace?.reportEligible ?? record?.reportEligible);
+  const reportEligible = analysisState === "completed" && Boolean(workspace?.reportEligible ?? record?.reportEligible);
   const reportBlockedReason = workspace?.reportBlockedReason ?? record?.reportBlockedReason ?? "Report generation becomes available after analysis completes.";
 
+  const refreshWorkspaceStatus = useCallback(async () => {
+    if (!routeRef || statusInFlightRef.current) return;
+    statusInFlightRef.current = true;
+    try {
+      const payload = await apiGet<CaseWorkspaceStatusRecord>(`/workspaces/${routeRef}/status`);
+      setWorkspace((current) => current ? {
+        ...current,
+        analysisStatus: payload.analysisStatus,
+        reportEligible: payload.reportEligible,
+        reportBlockedReason: payload.reportBlockedReason,
+        workspace: {
+          ...current.workspace,
+          case: {
+            ...current.workspace.case,
+            status: payload.caseStatus,
+            reportStatus: payload.reportStatus,
+            analysisStatus: payload.analysisStatus,
+            reportEligible: payload.reportEligible,
+            reportBlockedReason: payload.reportBlockedReason,
+            updatedAt: payload.updatedAt,
+          },
+        },
+      } : current);
+      setRecord((current) => current ? {
+        ...current,
+        status: payload.caseStatus,
+        reportStatus: payload.reportStatus,
+        analysisStatus: payload.analysisStatus,
+        reportEligible: payload.reportEligible,
+        reportBlockedReason: payload.reportBlockedReason,
+        updatedAt: payload.updatedAt,
+      } : current);
+      setActiveUpload((current) => {
+        if (!current || current.routeRef !== routeRef || ["uploading", "finalizing"].includes(current.state)) return current;
+        return {
+          ...current,
+          state: payload.analysisStatus.state,
+          progress: payload.analysisStatus.progress,
+          step: payload.analysisStatus.step,
+          steps: payload.analysisStatus.steps,
+          error: payload.analysisStatus.error,
+        };
+      });
+    } finally {
+      statusInFlightRef.current = false;
+    }
+  }, [routeRef, setActiveUpload]);
+
   useEffect(() => {
-    if (!routeRef || !analysisBusy || clientUpload?.state === "uploading") return undefined;
-    const timer = window.setInterval(() => void refreshWorkspace().catch(() => undefined), 2000);
+    if (!routeRef || !analysisBusy || clientTransferActive) return undefined;
+    void refreshWorkspaceStatus().catch(() => undefined);
+    const timer = window.setInterval(() => void refreshWorkspaceStatus().catch(() => undefined), 2000);
     return () => window.clearInterval(timer);
-  }, [analysisBusy, clientUpload?.state, refreshWorkspace, routeRef]);
+  }, [analysisBusy, clientTransferActive, refreshWorkspaceStatus, routeRef]);
+
+  useEffect(() => {
+    if (!routeRef || clientUpload?.state !== "completed") return;
+    const refreshKey = `${clientUpload.jobId || clientUpload.uploadSessionId || routeRef}:completed`;
+    if (finalRefreshRef.current === refreshKey) return;
+    finalRefreshRef.current = refreshKey;
+    refreshWorkspace(true)
+      .then(() => {
+        setActiveUpload((current) => current?.routeRef === routeRef ? null : current);
+      })
+      .catch(() => {
+        finalRefreshRef.current = "";
+      });
+  }, [clientUpload?.jobId, clientUpload?.state, clientUpload?.uploadSessionId, refreshWorkspace, routeRef, setActiveUpload]);
 
   const availableTabs = useMemo(
     () => workspace?.workspace.availableTabs ?? { overview: true, suspiciousActivity: true, trafficEvidence: true, timeline: true, reports: true, custody: true },
