@@ -38,7 +38,7 @@ def analyze_structured_evidence(path: str | Path, case_id: str, evidence_id: str
     canonical = [record for record in canonical if record]
     if not canonical:
         raise ValueError("Structured evidence contains no analyzable network records.")
-    packets = [_packet_from_structured(record, index + 1) for index, record in enumerate(canonical[:MAX_PACKETS])]
+    packets = [_packet_from_structured(record, index + 1) for index, record in enumerate(canonical)]
     packets = _apply_intake_filters(packets, saved.get("intake", {}))
     record_types = Counter(record["recordType"] for record in canonical)
     actions = Counter(record["action"] for record in canonical if record.get("action"))
@@ -222,11 +222,11 @@ def _protocol(record: dict[str, Any], record_type: str) -> str:
         return "DNS"
     if record_type == "TLS Metadata":
         return "TLS"
-    return value if value in {"TCP", "UDP", "ICMP", "HTTP", "HTTPS", "SSH", "FTP", "SMTP"} else "TCP"
+    return value if value in {"TCP", "UDP", "ICMP", "HTTP", "HTTPS", "SSH", "FTP", "SMTP", "SMB"} else "TCP"
 
 
 def _default_port(protocol: str) -> int:
-    return {"DNS": 53, "TLS": 443, "HTTPS": 443, "HTTP": 80, "SSH": 22, "FTP": 21, "SMTP": 25}.get(protocol, 0)
+    return {"DNS": 53, "TLS": 443, "HTTPS": 443, "HTTP": 80, "SSH": 22, "FTP": 21, "SMTP": 25, "SMB": 445}.get(protocol, 0)
 
 
 def _integer(value: Any) -> int:
