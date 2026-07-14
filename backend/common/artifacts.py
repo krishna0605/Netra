@@ -13,15 +13,15 @@ from common.readiness import legal_review_checklist
 from common.storage import write_binary_artifact, write_text_artifact
 
 
-def _artifact_analysis(case_id: str, analysis: dict) -> dict:
+def _artifact_analysis(case_id: str, analysis: dict, case: Case | None = None) -> dict:
     if not analysis:
         analysis = empty_analysis()
         analysis["caseId"] = case_id
     enriched = json.loads(json.dumps(analysis))
-    case = Case.objects.filter(id=case_id).first()
+    case = case or Case.objects.filter(id=case_id).first()
     if not case:
         return enriched
-    evidence = case.evidence_files.order_by("-created_at").first()
+    evidence = case.evidence_files.select_related("manifest").order_by("-created_at").first()
     if evidence:
         manifest = getattr(evidence, "manifest", None)
         enriched["evidence"] = {
@@ -58,8 +58,8 @@ def _artifact_analysis(case_id: str, analysis: dict) -> dict:
 
 def generate_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor, filename: str | None = None) -> dict:
     case = Case.objects.filter(id=case_id).first()
-    analysis = _artifact_analysis(case_id, analysis)
-    custody = verify_case_ledger(case) if case else {}
+    analysis = _artifact_analysis(case_id, analysis, case)
+    custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     legal_items = "".join(
         f"<li><strong>{item['name']}</strong>: {item['status']} - {item['detail']}</li>"
@@ -77,8 +77,8 @@ def generate_report_artifact(case_id: str, language: str, analysis: dict, actor:
 
 def generate_pdf_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor, filename: str | None = None) -> dict:
     case = Case.objects.filter(id=case_id).first()
-    enriched = _artifact_analysis(case_id, analysis)
-    custody = verify_case_ledger(case) if case else {}
+    enriched = _artifact_analysis(case_id, analysis, case)
+    custody = (enriched.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     pdf_bytes = build_report_pdf(enriched, language, legal, custody)
     artifact = write_binary_artifact(pdf_bytes, "report", filename or f"{case_id}-{language}.pdf")

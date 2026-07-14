@@ -239,8 +239,15 @@ export type CaseWorkspaceRecord = {
     suspiciousActivity: {
       alerts: AlertRecord[];
       anomalies: AnomalyRecord[];
+      detectionMatches: DetectionRuleMatch[];
       trafficPattern: { time: string; mb?: number; alerts?: number; packets?: number; anomalies?: number; value?: number }[];
       explanation: string;
+      mlExplanation: {
+        mode: string;
+        modelVersion: string;
+        fallbackUsed: boolean;
+        limitations: string[];
+      };
     };
     trafficEvidence: {
       packetsPreview: PacketRecord[];
@@ -275,6 +282,17 @@ export type CaseWorkspaceRecord = {
       schemaVersion: string;
     };
   };
+};
+
+export type CaseWorkspaceStatusRecord = {
+  caseId: string;
+  routeRef: string;
+  caseStatus: "open" | "closed";
+  reportStatus: "draft" | "ready";
+  analysisStatus: AnalysisStatus;
+  reportEligible: boolean;
+  reportBlockedReason?: string;
+  updatedAt: string;
 };
 
 export type TimelineEvent = {

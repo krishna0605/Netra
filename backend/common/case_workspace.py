@@ -35,11 +35,34 @@ def bump_case_list_cache_version() -> None:
 
 
 def analysis_status_for_case(case: Case) -> dict[str, Any]:
-    jobs = sorted(case.processing_jobs.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
-    sessions = sorted(case.upload_sessions.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
-    evidence_files = sorted(case.evidence_files.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
-    job = jobs[0] if jobs else None
-    session = sessions[0] if sessions else None
+    prefetched = getattr(case, "_prefetched_objects_cache", {})
+    prefetched_jobs = prefetched.get("processing_jobs")
+    prefetched_sessions = prefetched.get("upload_sessions")
+    prefetched_evidence = prefetched.get("evidence_files")
+
+    if prefetched_sessions is not None:
+        sessions = sorted(prefetched_sessions, key=lambda row: (row.created_at, row.updated_at), reverse=True)
+        session = sessions[0] if sessions else None
+    else:
+        session = case.upload_sessions.select_related("processing_job", "processing_job__evidence_file").defer(
+            "processing_job__stats", "processing_job__events"
+        ).order_by("-created_at", "-updated_at").first()
+
+    if prefetched_jobs is not None:
+        jobs = sorted(prefetched_jobs, key=lambda row: (row.created_at, row.updated_at), reverse=True)
+        job = jobs[0] if jobs else None
+    else:
+        job = session.processing_job if session and session.processing_job_id else None
+        if job is None:
+            job = case.processing_jobs.select_related("evidence_file").defer("stats", "events").order_by("-created_at", "-updated_at").first()
+
+    if prefetched_evidence is not None:
+        evidence_files = sorted(prefetched_evidence, key=lambda row: (row.created_at, row.updated_at), reverse=True)
+        evidence = evidence_files[0] if evidence_files else None
+    else:
+        evidence = job.evidence_file if job and job.evidence_file_id else None
+        if evidence is None:
+            evidence = case.evidence_files.only("id", "case_id", "status", "created_at", "updated_at").order_by("-created_at", "-updated_at").first()
 
     if job is not None:
         state = job.status
@@ -62,10 +85,10 @@ def analysis_status_for_case(case: Case) -> dict[str, Any]:
         progress = 100 if state == "completed" else 0
         step = session.status
         error = session.failure_code or ""
-    elif evidence_files:
-        state = "completed" if evidence_files[0].status == "verified" else "no-evidence"
+    elif evidence:
+        state = "completed" if evidence.status == "verified" else "no-evidence"
         progress = 100 if state == "completed" else 0
-        step = evidence_files[0].status
+        step = evidence.status
         error = ""
     else:
         state = "no-evidence"
@@ -73,8 +96,16 @@ def analysis_status_for_case(case: Case) -> dict[str, Any]:
         step = "waiting_for_evidence"
         error = ""
 
-    latest_evidence_verified = bool(evidence_files and evidence_files[0].status == "verified")
-    report_eligible = bool(job and job.status == ProcessingJob.Status.COMPLETED and latest_evidence_verified and hasattr(case, "analysis_snapshot"))
+    latest_evidence_verified = bool(evidence and evidence.status == "verified")
+    has_snapshot = False
+    if job and job.status == ProcessingJob.Status.COMPLETED and latest_evidence_verified:
+        if hasattr(case, "_has_analysis_snapshot"):
+            has_snapshot = bool(case._has_analysis_snapshot)
+        elif "analysis_snapshot" in case._state.fields_cache:
+            has_snapshot = case._state.fields_cache["analysis_snapshot"] is not None
+        else:
+            has_snapshot = CaseAnalysisSnapshot.objects.filter(case=case).exists()
+    report_eligible = bool(job and job.status == ProcessingJob.Status.COMPLETED and latest_evidence_verified and has_snapshot)
     if report_eligible:
         blocked_reason = ""
     elif state in {"failed", "canceled", "expired"}:
@@ -97,6 +128,20 @@ def analysis_status_for_case(case: Case) -> dict[str, Any]:
         "completedAt": job.completed_at.isoformat() if job and job.completed_at else None,
         "reportEligible": report_eligible,
         "reportBlockedReason": blocked_reason,
+    }
+
+
+def workspace_status_payload(case: Case) -> dict[str, Any]:
+    status = analysis_status_for_case(case)
+    return {
+        "caseId": case.id,
+        "routeRef": str(case.route_ref),
+        "caseStatus": case.status,
+        "reportStatus": case.report_status,
+        "analysisStatus": status,
+        "reportEligible": status["reportEligible"],
+        "reportBlockedReason": status["reportBlockedReason"],
+        "updatedAt": case.updated_at.isoformat(),
     }
 
 
@@ -173,11 +218,53 @@ def refresh_case_workspace_snapshot(case: Case, job: ProcessingJob | None = None
     return snapshot
 
 
+def refresh_case_workspace_artifacts(case: Case) -> CaseAnalysisSnapshot:
+    """Refresh report and custody sections without rebuilding analysis-derived data."""
+    snapshot = CaseAnalysisSnapshot.objects.filter(case=case).first()
+    if not snapshot or not isinstance(snapshot.snapshot_json, dict) or not snapshot.snapshot_json:
+        return refresh_case_workspace_snapshot(case)
+
+    snapshot_json = deepcopy(snapshot.snapshot_json)
+    reports = [
+        _report_payload(report)
+        for report in Report.objects.select_related("case").filter(case=case).order_by("-created_at")[:50]
+    ]
+    custody_rows = [
+        custody_event_dict(row)
+        for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")[:20]
+    ]
+    custody_verification = verify_case_ledger(case) if custody_rows else {"verified": False, "eventCount": 0, "latestHash": ""}
+    snapshot_json["reports"] = {"latestReport": reports[0] if reports else None, "items": reports}
+    snapshot_json["custody"] = {
+        "status": "verified" if custody_verification.get("verified") else "pending",
+        "verification": custody_verification,
+        "eventCount": custody_verification.get("eventCount", len(custody_rows)),
+        "latestHash": custody_verification.get("latestHash", ""),
+        "eventsPreview": custody_rows,
+    }
+    case_payload = snapshot_json.get("case")
+    if isinstance(case_payload, dict):
+        case_payload.update({
+            "reportStatus": case.report_status,
+            "latestReportId": reports[0]["id"] if reports else "",
+            "latestReportDownloadUrl": reports[0]["downloadUrl"] if reports else "",
+            "updatedAt": case.updated_at.isoformat(),
+        })
+    snapshot.snapshot_json = snapshot_json
+    snapshot.generated_at = timezone.now()
+    snapshot.save(update_fields=["snapshot_json", "generated_at", "updated_at"])
+    cache.delete(f"netra:case-workspace:{case.id}")
+    cache.delete(f"netra:case-workspace-response:{case.id}")
+    bump_case_list_cache_version()
+    return snapshot
+
+
 def build_case_workspace_snapshot(case: Case, job: ProcessingJob | None, analysis: dict[str, Any]) -> dict[str, Any]:
     packets = _as_list(analysis.get("packets"))
     sessions = _as_list(analysis.get("sessions")) or _session_rows(case)
     alerts = _as_list(analysis.get("alerts")) or _alert_rows(case)
     anomalies = _as_list(analysis.get("anomalies")) or _anomaly_rows(case)
+    detection_matches = _as_list(analysis.get("detectionMatches"))
     decoded_protocols = _as_list(analysis.get("decodedProtocols"))
     payload_clues = _as_list(analysis.get("payloadFindings"))
     graph_data = analysis.get("graph") if isinstance(analysis.get("graph"), dict) else {"nodes": [], "edges": []}
@@ -233,8 +320,10 @@ def build_case_workspace_snapshot(case: Case, job: ProcessingJob | None, analysi
         "suspiciousActivity": {
             "alerts": alerts[:100],
             "anomalies": anomalies[:100],
+            "detectionMatches": detection_matches[:100],
             "trafficPattern": timeline,
             "explanation": _activity_explanation(alerts, anomalies),
+            "mlExplanation": _ml_explanation(anomalies),
         },
         "trafficEvidence": {
             "packetsPreview": [_packet_preview(row) for row in packets[:50]],
@@ -569,6 +658,22 @@ def _activity_explanation(alerts: list[dict[str, Any]], anomalies: list[dict[str
     if anomalies:
         return f"Netra found {len(anomalies)} unusual behavior pattern(s). Review the top contributing features before drawing conclusions."
     return "No suspicious activity found in this evidence file."
+
+
+def _ml_explanation(anomalies: list[dict[str, Any]]) -> dict[str, Any]:
+    model_version = next((str(row.get("modelVersion")) for row in anomalies if row.get("modelVersion")), "experimental-fallback")
+    model_types = {str(row.get("modelType") or "").lower() for row in anomalies}
+    fallback_used = not anomalies or "fallback" in model_version.lower() or any("heuristic" in item for item in model_types)
+    return {
+        "mode": "experimental-anomaly-scoring",
+        "modelVersion": model_version,
+        "fallbackUsed": fallback_used,
+        "limitations": [
+            "Experimental anomaly scoring indicates unusual network behavior, not proof of compromise.",
+            "Encrypted payload contents are not decrypted.",
+            "Findings require investigator review before an operational conclusion.",
+        ],
+    }
 
 
 def _top_attack(alerts: list[dict[str, Any]]) -> str:
