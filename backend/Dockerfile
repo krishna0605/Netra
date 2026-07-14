@@ -5,7 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app/ml-services/anomaly-engine \
-    NETRA_STORAGE_ROOT=/var/lib/netra/storage
+    NETRA_STORAGE_ROOT=/var/lib/netra/storage \
+    NETRA_TEMP_ROOT=/var/lib/netra/tmp
 
 WORKDIR /app/backend
 
@@ -31,7 +32,7 @@ RUN python -m pip install --upgrade "pip==26.1.1" \
 COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
 
-RUN mkdir -p /var/lib/netra/storage \
+RUN mkdir -p /var/lib/netra/storage /var/lib/netra/tmp \
     && chown -R netra:netra /var/lib/netra /app
 
 USER 10001:10001

@@ -154,17 +154,18 @@ class NetraApiAuthMiddleware:
         if Case.objects.filter(pk=case_id).exists():
             return False
         path = request.path.rstrip("/")
-        return path == "/api/evidence/upload" or path.startswith("/api/capture/")
+        return path in {"/api/evidence/upload", "/api/evidence/upload-sessions"} or path.startswith("/api/capture/")
 
     @staticmethod
     def _resource_case_id(view_kwargs) -> str | None:
         # Direct-ID downloads/status routes must inherit the parent case boundary.
-        from apps.forensics.models import CaptureJob, EvidenceFile, Export, ProcessingJob, Report
+        from apps.forensics.models import CaptureJob, EvidenceFile, EvidenceUploadSession, Export, ProcessingJob, Report
 
         lookups = (
             ("evidence_id", EvidenceFile, "case_id"),
             ("report_id", Report, "case_id"),
             ("export_id", Export, "case_id"),
+            ("upload_session_id", EvidenceUploadSession, "case_id"),
         )
         for kwarg, model, field in lookups:
             value = view_kwargs.get(kwarg)

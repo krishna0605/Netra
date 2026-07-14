@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.forensics.models import EvidenceFile, ProcessingJob
+from apps.forensics.models import EvidenceFile, EvidenceUploadSession, ProcessingJob
 from common.jobs import initial_steps
 
 
@@ -87,6 +87,20 @@ def claim_next_job(worker_id: str) -> ProcessingJob | None:
     return job
 
 
+def renew_job_lease(job_id: str, worker_id: str) -> bool:
+    now = timezone.now()
+    updated = ProcessingJob.objects.filter(
+        pk=job_id,
+        status=ProcessingJob.Status.RUNNING,
+        lease_owner=worker_id,
+    ).update(
+        heartbeat_at=now,
+        lease_expires_at=now + timedelta(seconds=settings.NETRA_JOB_LEASE_SECONDS),
+        last_progress_at=now,
+    )
+    return updated == 1
+
+
 @transaction.atomic
 def mark_job_failure(job_id: str, worker_id: str, exc: Exception) -> ProcessingJob:
     job = ProcessingJob.objects.select_for_update().get(pk=job_id)
@@ -118,6 +132,10 @@ def mark_job_failure(job_id: str, worker_id: str, exc: Exception) -> ProcessingJ
         if job.evidence_file_id:
             EvidenceFile.objects.filter(pk=job.evidence_file_id).update(status=EvidenceFile.Status.FAILED)
     job.save()
+    if job.status == ProcessingJob.Status.CANCELED:
+        EvidenceUploadSession.objects.filter(processing_job=job).update(status=EvidenceUploadSession.Status.CANCELED, failure_code="job_canceled")
+    elif job.status == ProcessingJob.Status.FAILED:
+        EvidenceUploadSession.objects.filter(processing_job=job).update(status=EvidenceUploadSession.Status.FAILED, failure_code=job.error_code)
     return job
 
 
@@ -138,6 +156,8 @@ def request_job_cancellation(job_id: str) -> ProcessingJob:
         if job.evidence_file_id:
             EvidenceFile.objects.filter(pk=job.evidence_file_id).update(status=EvidenceFile.Status.FAILED)
     job.save()
+    if job.status == ProcessingJob.Status.CANCELED:
+        EvidenceUploadSession.objects.filter(processing_job=job).update(status=EvidenceUploadSession.Status.CANCELED, failure_code="job_canceled")
     return job
 
 
@@ -163,6 +183,7 @@ def retry_job(job_id: str) -> ProcessingJob:
     job.error_message = ""
     if job.evidence_file_id:
         EvidenceFile.objects.filter(pk=job.evidence_file_id).update(status=EvidenceFile.Status.PROCESSING)
+    EvidenceUploadSession.objects.filter(processing_job=job).update(status=EvidenceUploadSession.Status.QUEUED, failure_code="")
     _event(job, "job.retry_requested", "An authorized user reset the durable job for retry.")
     job.save()
     return job
