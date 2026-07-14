@@ -118,10 +118,18 @@ NETRA_DEV_ROLE_HEADERS = os.getenv(
 ) == "1"
 NETRA_ACCESS_MODE = os.getenv("NETRA_ACCESS_MODE", "bearer").lower()
 NETRA_PUBLIC_API_AUTH_REQUIRED = os.getenv("NETRA_PUBLIC_API_AUTH_REQUIRED", "1") == "1"
-NETRA_ENABLE_LAB_TOOLS = os.getenv(
-    "NETRA_ENABLE_LAB_TOOLS",
-    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
+_LEGACY_LAB_TOOLS_DEFAULT = os.getenv("NETRA_ENABLE_LAB_TOOLS", "1")
+NETRA_ENABLE_PCAP_REPLAY = os.getenv(
+    "NETRA_ENABLE_PCAP_REPLAY",
+    "1" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else _LEGACY_LAB_TOOLS_DEFAULT,
 ) == "1"
+NETRA_ENABLE_SENSOR_CAPTURE = os.getenv(
+    "NETRA_ENABLE_SENSOR_CAPTURE",
+    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else _LEGACY_LAB_TOOLS_DEFAULT,
+) == "1"
+# Compatibility aggregate for older operational checks. API authorization uses
+# the narrower replay and sensor flags below instead of exposing both together.
+NETRA_ENABLE_LAB_TOOLS = NETRA_ENABLE_PCAP_REPLAY or NETRA_ENABLE_SENSOR_CAPTURE
 NETRA_ENABLE_INTEGRATIONS = os.getenv(
     "NETRA_ENABLE_INTEGRATIONS",
     "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",

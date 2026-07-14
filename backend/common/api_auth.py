@@ -52,7 +52,12 @@ def _feature_disabled(feature: str) -> JsonResponse:
 
 def _disabled_feature(path: str) -> str | None:
     feature_gates = (
-        (("/api/capture", "/api/sensors", "/api/sensor-groups", "/api/events", "/api/logs/import/zeek"), settings.NETRA_ENABLE_LAB_TOOLS, "Lab Tools"),
+        (("/api/capture/replay",), settings.NETRA_ENABLE_PCAP_REPLAY, "PCAP replay"),
+        (
+            ("/api/capture/live", "/api/capture/interfaces", "/api/capture/log-import", "/api/sensors", "/api/sensor-groups", "/api/events", "/api/logs/import/zeek"),
+            settings.NETRA_ENABLE_SENSOR_CAPTURE,
+            "Native sensor capture",
+        ),
         (("/api/capture-schedules",), settings.NETRA_ENABLE_CAPTURE_SCHEDULES, "Capture schedules"),
         (("/api/integrations",), settings.NETRA_ENABLE_INTEGRATIONS, "Integrations and webhooks"),
         (("/api/retention",), settings.NETRA_ENABLE_RETENTION_OPERATIONS, "Retention operations"),
