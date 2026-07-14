@@ -80,7 +80,7 @@ class Command(BaseCommand):
             title="Phase 9/10 readiness validation case",
             investigator="Netra readiness validator",
             department="Gujarat Cyber Crime Cell",
-            status=Case.Status.REPORT_READY,
+            status=Case.Status.OPEN,
             report_status="ready",
         )
         evidence = EvidenceFile.objects.create(

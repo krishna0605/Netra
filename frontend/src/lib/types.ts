@@ -142,12 +142,28 @@ export type NetworkFlow = {
   risk?: number;
 };
 
+export type AnalysisStatus = {
+  uploadSessionId?: string;
+  jobId?: string;
+  state: "no-evidence" | "accepted" | "uploading" | "finalizing" | "queued" | "running" | "completed" | "failed" | "canceled" | "expired";
+  progress: number;
+  step: string;
+  steps: { name: string; status: string }[];
+  error?: string;
+  lastProgressAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  reportEligible: boolean;
+  reportBlockedReason?: string;
+};
+
 export type CaseRecord = {
   id: string;
+  routeRef: string;
   title: string;
   investigator: string;
   department?: string;
-  status: "open" | "reviewing" | "report-ready";
+  status: "open" | "closed";
   priority?: "Standard" | "Urgent" | "Critical" | "";
   origin?: string;
   isTest?: boolean;
@@ -164,6 +180,9 @@ export type CaseRecord = {
   history: CaseHistoryEvent[];
   createdAt: string;
   reportStatus: "draft" | "ready";
+  analysisStatus: AnalysisStatus;
+  reportEligible: boolean;
+  reportBlockedReason?: string;
   riskLevel?: Severity;
   topAttackClass?: AttackClass;
   alertCount?: number;
@@ -204,10 +223,14 @@ export type CaseChartsRecord = {
 
 export type CaseWorkspaceRecord = {
   caseId: string;
+  routeRef: string;
   snapshotVersion: string;
   generatedAt: string;
   source: string;
   dataCompleteness: string;
+  analysisStatus: AnalysisStatus;
+  reportEligible: boolean;
+  reportBlockedReason?: string;
   workspace: {
     case: CaseRecord;
     evidence: EvidenceFile | null;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
@@ -33,11 +34,97 @@ def bump_case_list_cache_version() -> None:
     cache.set(CASE_LIST_CACHE_VERSION_KEY, str(timezone.now().timestamp()), timeout=None)
 
 
+def analysis_status_for_case(case: Case) -> dict[str, Any]:
+    jobs = sorted(case.processing_jobs.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
+    sessions = sorted(case.upload_sessions.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
+    evidence_files = sorted(case.evidence_files.all(), key=lambda row: (row.created_at, row.updated_at), reverse=True)
+    job = jobs[0] if jobs else None
+    session = sessions[0] if sessions else None
+
+    if job is not None:
+        state = job.status
+        progress = max(0, min(100, job.progress or 0))
+        step = job.step or job.status
+        error = job.error_message or ""
+    elif session is not None:
+        state = {
+            "created": "accepted",
+            "uploading": "uploading",
+            "uploaded": "finalizing",
+            "finalized": "finalizing",
+            "queued": "queued",
+            "processing": "running",
+            "completed": "completed",
+            "failed": "failed",
+            "canceled": "canceled",
+            "expired": "expired",
+        }.get(session.status, "accepted")
+        progress = 100 if state == "completed" else 0
+        step = session.status
+        error = session.failure_code or ""
+    elif evidence_files:
+        state = "completed" if evidence_files[0].status == "verified" else "no-evidence"
+        progress = 100 if state == "completed" else 0
+        step = evidence_files[0].status
+        error = ""
+    else:
+        state = "no-evidence"
+        progress = 0
+        step = "waiting_for_evidence"
+        error = ""
+
+    latest_evidence_verified = bool(evidence_files and evidence_files[0].status == "verified")
+    report_eligible = bool(job and job.status == ProcessingJob.Status.COMPLETED and latest_evidence_verified and hasattr(case, "analysis_snapshot"))
+    if report_eligible:
+        blocked_reason = ""
+    elif state in {"failed", "canceled", "expired"}:
+        blocked_reason = "Resolve the evidence processing failure before generating a report."
+    elif state == "no-evidence":
+        blocked_reason = "Add and analyze evidence before generating a report."
+    else:
+        blocked_reason = "Report generation becomes available after analysis completes."
+
+    return {
+        "uploadSessionId": str(session.id) if session else "",
+        "jobId": job.id if job else "",
+        "state": state,
+        "progress": progress,
+        "step": step,
+        "steps": job.steps if job else [],
+        "error": error,
+        "lastProgressAt": job.last_progress_at.isoformat() if job and job.last_progress_at else None,
+        "startedAt": job.started_at.isoformat() if job and job.started_at else None,
+        "completedAt": job.completed_at.isoformat() if job and job.completed_at else None,
+        "reportEligible": report_eligible,
+        "reportBlockedReason": blocked_reason,
+    }
+
+
+def _with_runtime_status(case: Case, payload: dict[str, Any]) -> dict[str, Any]:
+    output = deepcopy(payload)
+    status = analysis_status_for_case(case)
+    output["routeRef"] = str(case.route_ref)
+    output["analysisStatus"] = status
+    output["reportEligible"] = status["reportEligible"]
+    output["reportBlockedReason"] = status["reportBlockedReason"]
+    workspace_case = output.get("workspace", {}).get("case")
+    if isinstance(workspace_case, dict):
+        workspace_case.update({
+            "routeRef": str(case.route_ref),
+            "status": case.status,
+            "reportStatus": case.report_status,
+            "analysisStatus": status,
+            "reportEligible": status["reportEligible"],
+            "reportBlockedReason": status["reportBlockedReason"],
+        })
+    return output
+
+
 def workspace_for_case(case: Case) -> dict[str, Any]:
     cache_key = f"netra:case-workspace:{case.id}"
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
-        return cached
+        return _with_runtime_status(case, cached)
     snapshot = getattr(case, "analysis_snapshot", None)
     if snapshot and snapshot.snapshot_json:
         payload = {
@@ -49,7 +136,7 @@ def workspace_for_case(case: Case) -> dict[str, Any]:
             "workspace": snapshot.snapshot_json,
         }
         cache.set(cache_key, payload, timeout=60)
-        return payload
+        return _with_runtime_status(case, payload)
     job = ProcessingJob.objects.filter(case=case, status=ProcessingJob.Status.COMPLETED).order_by("-updated_at").first()
     snapshot = refresh_case_workspace_snapshot(case, job=job)
     payload = {
@@ -61,7 +148,7 @@ def workspace_for_case(case: Case) -> dict[str, Any]:
         "workspace": snapshot.snapshot_json,
     }
     cache.set(cache_key, payload, timeout=60)
-    return payload
+    return _with_runtime_status(case, payload)
 
 
 def refresh_case_workspace_snapshot(case: Case, job: ProcessingJob | None = None, analysis: dict[str, Any] | None = None) -> CaseAnalysisSnapshot:
@@ -189,6 +276,7 @@ def _case_payload(case: Case, analysis: dict[str, Any], reports: list[dict[str, 
     ]
     return {
         "id": case.id,
+        "routeRef": str(case.route_ref),
         "title": case.title,
         "investigator": case.investigator,
         "department": case.department,

@@ -15,8 +15,7 @@ class TimeStampedModel(models.Model):
 class Case(TimeStampedModel):
     class Status(models.TextChoices):
         OPEN = "open", "Open"
-        REVIEWING = "reviewing", "Reviewing"
-        REPORT_READY = "report-ready", "Report ready"
+        CLOSED = "closed", "Closed"
 
     class Priority(models.TextChoices):
         UNSET = "", "Unset"
@@ -32,6 +31,7 @@ class Case(TimeStampedModel):
         SYSTEM_TEST = "system_test", "System test"
 
     id = models.CharField(max_length=64, primary_key=True)
+    route_ref = models.UUIDField(default=uuid4, unique=True, editable=False, db_index=True)
     title = models.CharField(max_length=255)
     investigator = models.CharField(max_length=160)
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")

@@ -121,7 +121,7 @@ function PublicHeader({ languageControl }: PublicPageProps) {
       </nav>
       <div className="header-actions">
         {languageControl}
-        <Button asChild className="clip-button header-cta"><Link to="/login" state={{ from: "/app/upload" }}>Open console</Link></Button>
+        <Button asChild className="clip-button header-cta"><Link to="/login" state={{ from: "/app/" }}>Open console</Link></Button>
         <button className="mobile-menu-button" type="button" aria-label="Toggle navigation" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? <X /> : <Menu />}
         </button>
@@ -301,7 +301,7 @@ function PublicFooter() {
           <SectionLabel>Ready for evidence</SectionLabel>
           <h2>Trace the signal.<br />Build the case.</h2>
           <p>Connect evidence, preserve context, and move from packet-level facts to an investigator-readable report.</p>
-          <Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/upload" }}><TextRoll>Start investigation</TextRoll></Link></Button>
+          <Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/" }}><TextRoll>Start investigation</TextRoll></Link></Button>
         </div>
         <div className="footer-links">
           <div className="footer-arcs" aria-hidden="true"><svg viewBox="0 0 550 150" preserveAspectRatio="none">{[40, 95, 150, 205, 260, 315, 370].map((start, index) => <path key={start} d={`M${start} 150 Q${start + 100 + index * 6} ${-32 - index * 4} ${520 - index * 7} 150`} />)}</svg></div>
@@ -342,7 +342,7 @@ export function PublicHomePage({ languageControl }: PublicPageProps) {
             <motion.div {...reveal(0)}><SectionLabel>Network evidence, structured for investigation</SectionLabel></motion.div>
             <motion.h1 {...reveal(.1)}>See the traffic.<br /><em>Build</em><br /><em>the case.</em></motion.h1>
             <motion.p {...reveal(.2)}>NETRA turns packet captures into timelines, protocol evidence, explainable threat signals, custody history, and multilingual forensic reports.</motion.p>
-            <motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button hero-button"><Link to="/login" state={{ from: "/app/upload" }}><TextRoll>Open investigation console</TextRoll></Link></Button></motion.div>
+            <motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button hero-button"><Link to="/login" state={{ from: "/app/" }}><TextRoll>Open investigation console</TextRoll></Link></Button></motion.div>
             <div className="layer-accordion">
               {[["Capture layer", "Register evidence, calculate identity, and preserve source context."], ["Analysis layer", "Decode protocols, reconstruct sessions, and compare behaviour."], ["Investigation layer", "Review alerts, anomalies, attack paths, notes, and custody."], ["Reporting layer", "Generate authenticated exports and multilingual case summaries."]].map(([title, body], index) => (
                 <button type="button" key={title} className={activeLayer === index ? "active" : ""} onClick={() => setActiveLayer(index)} aria-expanded={activeLayer === index}>
@@ -445,7 +445,7 @@ export function PublicAboutPage(props: PublicPageProps) {
     ["Product systems", "Accessible investigation screens, multilingual UI, and print-safe outputs."],
   ];
   return <PublicShell {...props} className="about-public-site"><main className="about-page">
-    <section className="about-hero" id="about-top"><aside /><div className="about-hero-content"><motion.div {...reveal(0)}><SectionLabel>About NETRA</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>A focused system,<br />built with intent.</motion.h1><motion.p {...reveal(.2)}>Network evidence is complex. NETRA is designed to help cybercrime teams preserve what was observed, understand how signals connect, and communicate conclusions without hiding uncertainty.</motion.p><motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/upload" }}>Open investigation console</Link></Button></motion.div></div></section>
+    <section className="about-hero" id="about-top"><aside /><div className="about-hero-content"><motion.div {...reveal(0)}><SectionLabel>About NETRA</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>A focused system,<br />built with intent.</motion.h1><motion.p {...reveal(.2)}>Network evidence is complex. NETRA is designed to help cybercrime teams preserve what was observed, understand how signals connect, and communicate conclusions without hiding uncertainty.</motion.p><motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/" }}>Open investigation console</Link></Button></motion.div></div></section>
     <section className="about-story"><aside /><div className="about-story-content"><div className="about-operations-image"><MosaicPoster /><span>NETRA / EVIDENCE OPERATIONS</span></div><div className="about-story-grid"><div><SectionLabel>Hello</SectionLabel><h2>Build conclusions from evidence, not opacity.</h2><p>NETRA brings packet capture, protocol evidence, explainable detections, anomaly review, case context, custody history, and reporting into one investigation workflow.</p><p>The system is built around a simple constraint: an investigator should be able to move from a conclusion back to the traffic and reasoning that support it.</p></div><div className="about-metrics"><article><strong>12</strong><span>Detection families</span></article><article><strong>08</strong><span>Decoded protocols</span></article><article><strong>24/7</strong><span>Sensor-ready operations</span></article><article><strong>03</strong><span>Report languages</span></article></div></div></div></section>
     <div className="about-section-system"><aside className="about-rail" aria-label="About sections">{aboutSections.map((label, index) => <a key={label} href={`#about-${index + 1}`} className={activeSection === index ? "active" : ""} aria-current={activeSection === index ? "location" : undefined}><span>0{index + 1}</span>{label}<i style={{ transform: `scaleX(${activeSection === index ? sectionProgress : 0})` }} /></a>)}</aside><div className="about-section-stack">
       <section className="about-values ticket-panel" id="about-1"><SectionLabel index="01">Our values</SectionLabel><div className="about-panel-intro"><h2>Principles that guide how we build.</h2><p>Investigation tooling earns trust through clarity, provenance, and honest boundaries.</p></div><div className="about-value-list">{values.map(([title, body], index) => <article key={title}><span>0{index + 1}</span><div><h3>{title}</h3><p>{body}</p></div><i>+</i></article>)}</div></section>

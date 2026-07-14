@@ -263,7 +263,7 @@ def assemble_analysis(
             "id": case_id,
             "title": f"{top_attack_class}: {saved['filename']}",
             "investigator": saved.get("intake", {}).get("investigator") or f"Uploaded {source_label}",
-            "status": "reviewing" if alerts else "open",
+            "status": "open",
             "evidenceFileId": evidence_id,
             "alertIds": [alert["id"] for alert in alerts],
             "notes": [
@@ -288,7 +288,7 @@ def assemble_analysis(
                 },
             ],
             "createdAt": now,
-            "reportStatus": "ready",
+            "reportStatus": "draft",
         },
         "packets": packets,
         "sessions": sessions,

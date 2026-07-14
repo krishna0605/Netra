@@ -13,6 +13,7 @@ from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.utils import timezone
 
 from apps.forensics.models import Case, CaseMembership, EvidenceFile, EvidenceUploadSession, ProcessingJob, UserProfile
+from common.case_workspace import bump_case_list_cache_version
 from common.audit import Actor, can_actor_access_case
 from common.case_metadata import InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.hashing import sha256_text
@@ -233,6 +234,7 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
                 intake_json=intake,
                 idempotency_key=idempotency_key,
             )
+            bump_case_list_cache_version()
             return session, False
     except IntegrityError as exc:
         raise UploadSessionProblem("active_upload_exists", "Another active upload session already exists for this user.", 409) from exc
@@ -387,6 +389,7 @@ def upload_session_payload(session: EvidenceUploadSession, *, idempotent_replay:
     return {
         "id": str(session.id),
         "caseId": session.case_id,
+        "routeRef": str(session.case.route_ref),
         "status": session.status,
         "filename": session.expected_filename,
         "expectedSizeBytes": session.expected_size_bytes,
