@@ -13,6 +13,35 @@ from common.readiness import legal_review_checklist
 from common.storage import write_binary_artifact, write_text_artifact
 
 
+def report_analysis_from_snapshot(case: Case) -> dict:
+    snapshot = getattr(case, "analysis_snapshot", None)
+    workspace = snapshot.snapshot_json if snapshot and isinstance(snapshot.snapshot_json, dict) else {}
+    if not workspace:
+        return {}
+    summary = workspace.get("summary") if isinstance(workspace.get("summary"), dict) else {}
+    suspicious = workspace.get("suspiciousActivity") if isinstance(workspace.get("suspiciousActivity"), dict) else {}
+    traffic = workspace.get("trafficEvidence") if isinstance(workspace.get("trafficEvidence"), dict) else {}
+    return {
+        "caseId": case.id,
+        "case": workspace.get("case") or {},
+        "evidence": workspace.get("evidence") or {},
+        "summary": summary,
+        "topAttackClass": summary.get("topAttackClass", "Normal Baseline"),
+        "riskLevel": summary.get("riskLevel", "low"),
+        "toolStatus": summary.get("toolStatus", {}),
+        "zeek": summary.get("zeek") or {},
+        "alerts": suspicious.get("alerts") or [],
+        "anomalies": suspicious.get("anomalies") or [],
+        "detectionMatches": suspicious.get("detectionMatches") or [],
+        "trafficTimeline": suspicious.get("trafficPattern") or [],
+        "packets": traffic.get("packetsPreview") or [],
+        "sessions": traffic.get("sessionsPreview") or [],
+        "decodedProtocols": traffic.get("protocols") or [],
+        "payloadFindings": traffic.get("payloadClues") or [],
+        "graph": traffic.get("communicationMap") or {"nodes": [], "edges": []},
+    }
+
+
 def _artifact_analysis(case_id: str, analysis: dict, case: Case | None = None) -> dict:
     if not analysis:
         analysis = empty_analysis()

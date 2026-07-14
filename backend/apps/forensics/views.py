@@ -27,7 +27,7 @@ from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, 
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
-from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
+from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact, report_analysis_from_snapshot
 from common.async_pipeline import queue_uploaded_evidence
 from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case, workspace_status_payload
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
@@ -2613,9 +2613,7 @@ def case_reports(request, case_id: str):
 @csrf_exempt
 @require_http_methods(["POST"])
 def report_generate(request, case_id: str):
-    case = Case.objects.annotate(
-        _has_analysis_snapshot=Exists(CaseAnalysisSnapshot.objects.filter(case_id=OuterRef("pk")))
-    ).filter(id=case_id).first()
+    case = Case.objects.select_related("analysis_snapshot").filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
     denied = require_permission(request, "report", case=case, resource_type="Report", resource_id=case_id)
@@ -2635,7 +2633,7 @@ def report_generate(request, case_id: str):
     payload = _json_body(request)
     language = payload.get("language", "en")
     report_format = (payload.get("format") or "html").lower()
-    analysis = _analysis(case_id=case_id)
+    analysis = report_analysis_from_snapshot(case) or _analysis(case_id=case_id)
     if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
         extension = "pdf" if report_format == "pdf" else "html"
         report_id = f"{case_id}-{language}-{uuid4().hex[:6]}.{extension}"
