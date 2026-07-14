@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import socket
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 
 from django.conf import settings
@@ -23,6 +25,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         worker_id = options["worker_id"] or os.getenv("RAILWAY_REPLICA_ID") or f"{socket.gethostname()}-{uuid4().hex[:8]}"
+        self._start_health_server()
         self.stdout.write(f"Starting durable NETRA worker {worker_id}")
         while True:
             job = claim_next_job(worker_id)
@@ -58,3 +61,28 @@ class Command(BaseCommand):
                 },
             },
         )
+
+    @staticmethod
+    def _start_health_server() -> None:
+        port = int(os.getenv("PORT", "0"))
+        if not port:
+            return
+
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.rstrip("/") != "/api/health":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                payload = b'{"status":"ok","service":"netra-worker"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, _format, *_args):
+                return
+
+        server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+        threading.Thread(target=server.serve_forever, name="worker-health", daemon=True).start()
