@@ -108,7 +108,8 @@ class HackathonGoldenPathTests(TestCase):
                 self.assertNotIn("stored_path", payload)
 
                 case = Case.objects.get(pk="CASE-GOLDEN-PCAP")
-                self.assertEqual(case.department, "Hackathon QA")
+                self.assertEqual(case.investigator, "Golden Investigator")
+                self.assertEqual(case.department, "Gujarat Cyber Crime Cell")
                 self.assertEqual(case.flags_json, ["synthetic", "release-gate"])
                 job = ProcessingJob.objects.get(pk=payload["jobId"])
                 analysis = job.stats["analysis"]
@@ -132,6 +133,54 @@ class HackathonGoldenPathTests(TestCase):
                 download = self.client.get(report_payload["downloadUrl"], **self.headers)
                 self.assertEqual(download.status_code, 200)
                 self.assertTrue(download.content.startswith(b"%PDF"))
+
+    def test_server_profile_identity_and_case_flag_allowlist_are_enforced(self):
+        response = self.client.post(
+            "/api/cases",
+            data=json.dumps(
+                {
+                    "title": "Server-owned identity check",
+                    "investigator": "Spoofed Investigator",
+                    "department": "Spoofed Department",
+                    "flags": ["not-approved"],
+                }
+            ),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_case_flags")
+
+        response = self.client.post(
+            "/api/cases",
+            data=json.dumps(
+                {
+                    "title": "Server-owned identity check",
+                    "investigator": "Spoofed Investigator",
+                    "department": "Spoofed Department",
+                    "flags": ["synthetic"],
+                }
+            ),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        case = Case.objects.get(pk=response.json()["id"])
+        self.assertEqual(case.investigator, "Golden Investigator")
+        self.assertEqual(case.department, "Gujarat Cyber Crime Cell")
+        self.assertEqual(case.flags_json, ["synthetic"])
+
+    def test_normalization_preview_is_capped_at_64_kib(self):
+        response = self.client.post(
+            "/api/evidence/normalize-preview",
+            data={
+                "evidenceType": "Auto-detect",
+                "file": SimpleUploadedFile("oversized-preview.pcap", b"\xd4\xc3\xb2\xa1" + (b"x" * (64 * 1024)), content_type="application/vnd.tcpdump.pcap"),
+            },
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["maximumBytes"], 64 * 1024)
 
     @patch("apps.forensics.views.publish_event", return_value=True)
     def test_real_pcapng_is_auto_detected_and_analyzed(self, _publish):

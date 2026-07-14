@@ -19,6 +19,9 @@
     "hostRiskHintCount",
     "serviceRiskHintCount"
   ],
+  "experimental": true,
+  "trustPolicy": "sha256-and-feature-schema",
+  "artifactSha256": "8bd6dd64edbfd27bcdff6bf773489b3b47faa16bb5940f7d74d437ebc5b37cf3",
   "trainingRows": 6,
   "metrics": {
     "precision": 1.0,
@@ -36,6 +39,7 @@
     ]
   },
   "limitations": [
+    "Experimental hackathon model: results support investigator triage and are not a standalone evidentiary conclusion.",
     "This model is trained on the available local benchmark manifest and is not independent legal certification.",
     "Fallback explainable scoring remains active when the model artifact is unavailable."
   ]

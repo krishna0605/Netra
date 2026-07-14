@@ -206,7 +206,17 @@ def build_report_pdf(analysis: dict[str, Any], language: str, legal: dict[str, A
         ListItem(_para(f"{item.get('entity')}: {item.get('observed')} vs {item.get('baseline')} ({item.get('confidence', 0)}% confidence)", styles["Body"]))
         for item in anomalies[:8]
     ] or [ListItem(_para("No high-confidence anomaly was recorded for this case.", styles["Body"]))]
-    story.append(_section("ML-Assisted Anomaly Summary", [ListFlowable(anomaly_items, bulletType="bullet", leftIndent=12)], styles))
+    story.append(
+        _section(
+            "Experimental ML-Assisted Anomaly Summary",
+            [
+                _para("This experimental model supports investigator triage only. Its output is not a standalone forensic or legal conclusion.", styles["Small"]),
+                Spacer(1, 4),
+                ListFlowable(anomaly_items, bulletType="bullet", leftIndent=12),
+            ],
+            styles,
+        )
+    )
 
     protocol_rows = [["Protocol", "Sessions", "Packets", "Risk", "Decoded summary"]]
     for item in decoded[:10]:

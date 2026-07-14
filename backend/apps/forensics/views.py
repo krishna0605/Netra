@@ -25,13 +25,14 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
+from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
 from common.case_workspace import bump_case_list_cache_version, case_list_cache_version, workspace_for_case
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
-from common.evidence_normalization import normalize_evidence_upload
+from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize_evidence_upload
 from common.indexing import search_index
 from common.jobs import job_status_payload
 from common.kafka import probe_supabase_queue, publish_event
@@ -366,6 +367,7 @@ def auth_me(request):
     actor = actor_from_request(request)
     if not actor.authenticated:
         return JsonResponse({"error": "Authentication required"}, status=401)
+    investigator, department = server_case_identity(actor)
     is_admin = actor.role == "Admin"
     operator = can(actor, "operations")
     modules = {
@@ -402,7 +404,8 @@ def auth_me(request):
     }
     return JsonResponse(
         {
-            "user": actor.user,
+            "user": investigator,
+            "department": department,
             "role": actor.role,
             "authenticated": True,
             "deployment": {
@@ -476,12 +479,17 @@ def cases(request):
             return JsonResponse({"error": "caseNumber cannot be empty"}, status=400)
         if Case.objects.filter(id=case_id).exists():
             return JsonResponse({"error": "A case with that identifier already exists."}, status=409)
+        investigator, department = server_case_identity(actor)
+        try:
+            flags = validated_case_flags(payload.get("flags", []))
+        except InvalidCaseFlags as exc:
+            return JsonResponse({"error": str(exc), "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
         with transaction.atomic():
             case = Case.objects.create(
                 id=case_id,
                 title=payload.get("title") or f"Investigation {case_id}",
-                investigator=payload.get("investigator") or actor.user,
-                department=payload.get("department") or "",
+                investigator=investigator,
+                department=department,
                 priority=payload.get("priority") or "Standard",
                 origin=payload.get("origin") if payload.get("origin") in {choice[0] for choice in Case.Origin.choices} else Case.Origin.OFFICER_UPLOAD,
                 is_test=bool(payload.get("isTest", False)),
@@ -489,13 +497,20 @@ def cases(request):
                 closed_at=parse_datetime(payload.get("closedAt")) if payload.get("closedAt") else None,
                 source_location=payload.get("sourceLocation", ""),
                 remarks=payload.get("remarks", ""),
-                flags_json=payload.get("flags", []),
+                flags_json=flags,
             )
             if actor.django_user_id:
                 CaseMembership.objects.create(case=case, user_id=actor.django_user_id, role=actor.role, added_by=actor.user)
             add_history(case, actor, "Case created", "Investigation case created from API.")
         bump_case_list_cache_version()
-        publish_event("netra.case.events", {"type": "case.created", "caseId": case_id, "payload": payload})
+        publish_event(
+            "netra.case.events",
+            {
+                "type": "case.created",
+                "caseId": case_id,
+                "payload": {**payload, "investigator": investigator, "department": department, "flags": flags},
+            },
+        )
         return JsonResponse(_case_dict(case), status=201)
     actor_scope = actor.django_user_id or hashlib.sha256(f"{actor.role}:{actor.user}".encode("utf-8")).hexdigest()[:16]
     cache_key = f"netra:cases:list:{case_list_cache_version()}:{actor.role}:{actor_scope}:{request.GET.urlencode() or 'default'}"
@@ -522,8 +537,6 @@ def case_detail(request, case_id: str):
         payload = _json_body(request)
         for field, attr in {
             "title": "title",
-            "investigator": "investigator",
-            "department": "department",
             "status": "status",
             "priority": "priority",
             "sourceLocation": "source_location",
@@ -531,8 +544,11 @@ def case_detail(request, case_id: str):
         }.items():
             if field in payload:
                 setattr(case, attr, payload[field] or "")
-        if "flags" in payload and isinstance(payload["flags"], list):
-            case.flags_json = payload["flags"]
+        if "flags" in payload:
+            try:
+                case.flags_json = validated_case_flags(payload["flags"])
+            except InvalidCaseFlags as exc:
+                return JsonResponse({"error": str(exc), "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
         if "closedAt" in payload:
             case.closed_at = parse_datetime(payload["closedAt"]) if payload["closedAt"] else None
         case.save()
@@ -708,7 +724,11 @@ def case_flags(request, case_id: str):
     incoming = payload.get("flags", [])
     if not isinstance(incoming, list):
         incoming = [payload.get("flag", "")]
-    flags = list(dict.fromkeys([str(flag).strip() for flag in [*(case.flags_json or []), *incoming] if str(flag).strip()]))
+    try:
+        approved_incoming = validated_case_flags(incoming)
+    except InvalidCaseFlags as exc:
+        return JsonResponse({"error": str(exc), "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
+    flags = list(dict.fromkeys([*(case.flags_json or []), *approved_incoming]))
     case.flags_json = flags
     case.save(update_fields=["flags_json", "updated_at"])
     add_history(case, actor_from_request(request), "Case flags updated", ", ".join(flags) or "Flags cleared.")
@@ -958,6 +978,15 @@ def evidence_normalize_preview(request):
     upload = request.FILES.get("file")
     if not upload:
         return JsonResponse({"error": "file is required"}, status=400)
+    if upload.size > NORMALIZATION_PREVIEW_BYTES:
+        return JsonResponse(
+            {
+                "error": "Normalization preview is limited to the first 64 KiB.",
+                "code": "normalization_preview_too_large",
+                "maximumBytes": NORMALIZATION_PREVIEW_BYTES,
+            },
+            status=413,
+        )
     normalization = normalize_evidence_upload(upload, request.POST.get("evidenceType")).to_dict()
     return JsonResponse(normalization)
 
@@ -1074,6 +1103,13 @@ def evidence_upload(request):
     filter_error = _analysis_filter_error(request, normalization_result.normalized_type, requested_bpf)
     if filter_error:
         return filter_error
+    try:
+        intake_flags = json.loads(request.POST.get("flags") or "[]")
+        approved_flags = validated_case_flags(intake_flags)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Case flags must be a valid JSON array.", "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
+    except InvalidCaseFlags as exc:
+        return JsonResponse({"error": str(exc), "code": "invalid_case_flags", "allowedFlags": list(ALLOWED_CASE_FLAGS)}, status=400)
     evidence_id = f"ev-{uuid4().hex[:8]}"
     job_id = f"job-{uuid4().hex[:8]}"
     try:
@@ -1093,21 +1129,16 @@ def evidence_upload(request):
         if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
             return _storage_configuration_response()
         return _storage_failure_response()
-    try:
-        intake_flags = json.loads(request.POST.get("flags") or "[]")
-        if not isinstance(intake_flags, list):
-            intake_flags = []
-    except json.JSONDecodeError:
-        intake_flags = []
+    investigator, department = server_case_identity(actor)
     saved["intake"] = {
-        "investigator": (request.POST.get("investigator") or actor.user).strip(),
-        "department": (request.POST.get("department") or "").strip(),
+        "investigator": investigator,
+        "department": department,
         "selectedEvidenceType": normalization_result.selected_type,
         "evidenceType": normalization_result.normalized_type,
         "sourceLocation": (request.POST.get("sourceLocation") or "").strip(),
         "priority": (request.POST.get("priority") or "Standard").strip(),
         "remarks": (request.POST.get("remarks") or "").strip(),
-        "flags": [str(flag).strip() for flag in intake_flags if str(flag).strip()],
+        "flags": approved_flags,
         "origin": Case.Origin.OFFICER_UPLOAD,
         "sourceIp": (request.POST.get("sourceIp") or "").strip(),
         "destinationIp": (request.POST.get("destinationIp") or "").strip(),

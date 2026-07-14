@@ -50,14 +50,12 @@ def sync_supabase_actor(supabase_user) -> Actor:
     if not username:
         return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
     user, _ = User.objects.get_or_create(username=username, defaults={"email": username})
-    display_name = getattr(supabase_user, "display_name", "") or username
     profile, _created = UserProfile.objects.get_or_create(
         user=user,
-        defaults={"role": UserProfile.Role.VIEWER, "display_name": display_name},
+        # Supabase user_metadata is user-editable. New identities therefore use
+        # the verified login identifier until an administrator assigns a name.
+        defaults={"role": UserProfile.Role.VIEWER, "display_name": username},
     )
-    if not profile.display_name or profile.display_name == user.username:
-        profile.display_name = display_name
-    profile.save(update_fields=["role", "display_name", "updated_at"])
     return Actor(
         user=profile.display_name or user.username,
         role=profile.role,

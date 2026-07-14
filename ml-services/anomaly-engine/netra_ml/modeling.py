@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import pickle
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,30 @@ FEATURE_NAMES = [
     "hostRiskHintCount",
     "serviceRiskHintCount",
 ]
+
+
+class ModelArtifactError(RuntimeError):
+    pass
+
+
+def trusted_model_metadata(model_path: Path) -> dict[str, Any]:
+    metadata_path = model_path.with_suffix(".json")
+    if not metadata_path.exists():
+        raise ModelArtifactError("Model metadata sidecar is missing.")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ModelArtifactError("Model metadata sidecar is unreadable.") from exc
+
+    expected_hash = str(metadata.get("artifactSha256") or "").strip().lower()
+    actual_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    if len(expected_hash) != 64 or not hmac.compare_digest(expected_hash, actual_hash):
+        raise ModelArtifactError("Model artifact SHA-256 does not match the trusted sidecar.")
+    if metadata.get("featureNames") != FEATURE_NAMES:
+        raise ModelArtifactError("Model feature schema does not match the runtime feature order.")
+    if metadata.get("experimental") is not True:
+        raise ModelArtifactError("Model metadata must explicitly label the artifact as experimental.")
+    return metadata
 
 
 def vectorize_features(features: dict[str, Any]) -> list[float]:
@@ -78,6 +104,8 @@ def train_model(rows: list[dict[str, Any]], model_path: Path, metadata_path: Pat
         "modelType": model_type,
         "trainedAt": datetime.now(timezone.utc).isoformat(),
         "featureNames": FEATURE_NAMES,
+        "experimental": True,
+        "trustPolicy": "sha256-and-feature-schema",
         "trainingRows": len(rows),
         "metrics": {
             "precision": round(float(precision), 4),
@@ -93,6 +121,7 @@ def train_model(rows: list[dict[str, Any]], model_path: Path, metadata_path: Pat
     model_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     model_path.write_bytes(pickle.dumps({"model": model, "metadata": metadata}))
+    metadata["artifactSha256"] = hashlib.sha256(model_path.read_bytes()).hexdigest()
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return metadata | {"rows": [{"id": row["id"], "label": row["label"], "prediction": prediction, "score": round(score, 4)} for row, prediction, score in zip(rows, predictions, scores)]}
 
@@ -100,12 +129,19 @@ def train_model(rows: list[dict[str, Any]], model_path: Path, metadata_path: Pat
 def load_model(model_path: Path) -> tuple[Any, dict[str, Any]] | None:
     if not model_path.exists():
         return None
+    trusted_metadata = trusted_model_metadata(model_path)
     payload = pickle.loads(model_path.read_bytes())
-    return payload["model"], payload.get("metadata", {})
+    embedded_metadata = payload.get("metadata", {})
+    if embedded_metadata.get("featureNames") != FEATURE_NAMES:
+        raise ModelArtifactError("Embedded model feature schema does not match the runtime feature order.")
+    return payload["model"], {**embedded_metadata, **trusted_metadata}
 
 
 def score_with_model(features: dict[str, Any], model_path: Path) -> dict[str, Any] | None:
-    loaded = load_model(model_path)
+    try:
+        loaded = load_model(model_path)
+    except (ModelArtifactError, OSError, pickle.UnpicklingError, KeyError, TypeError, ValueError):
+        return None
     if not loaded:
         return None
     model, metadata = loaded
@@ -123,4 +159,6 @@ def score_with_model(features: dict[str, Any], model_path: Path) -> dict[str, An
         "mlAnomalyScore": max(0, min(99, int(score))),
         "mlPrediction": "anomalous" if prediction else "baseline",
         "featureSchema": metadata.get("featureNames", FEATURE_NAMES),
+        "mlExperimental": True,
+        "modelArtifactTrusted": True,
     }

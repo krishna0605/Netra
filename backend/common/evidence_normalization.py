@@ -22,6 +22,7 @@ ALLOWED_EXTENSIONS_BY_TYPE = {
 }
 ALL_ALLOWED_EXTENSIONS = sorted({extension for extensions in ALLOWED_EXTENSIONS_BY_TYPE.values() for extension in extensions})
 TEXT_EXTENSIONS = {".log", ".txt", ".csv", ".json", ".ndjson"}
+NORMALIZATION_PREVIEW_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -173,7 +174,7 @@ def _unsupported_extension_result(selected: str, extension: str, mime_guess: str
     )
 
 
-def _read_sample(upload: BinaryIO, size: int = 16384) -> bytes:
+def _read_sample(upload: BinaryIO, size: int = NORMALIZATION_PREVIEW_BYTES) -> bytes:
     position = upload.tell() if hasattr(upload, "tell") else None
     sample = upload.read(size)
     if position is not None:
