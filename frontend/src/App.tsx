@@ -1489,7 +1489,7 @@ function SidebarContent({ collapsed = false, onToggle }: { collapsed?: boolean; 
     <>
       <div className={cn("mb-8 flex items-center", collapsed ? "flex-col gap-3" : "justify-between gap-2")}>
         <Link className={cn("flex min-w-0 items-center gap-3", collapsed && "justify-center")} to="/">
-          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border)] bg-[#f3eadb] p-1">
+          <span className="flex size-10 shrink-0 items-center justify-center">
             <img className="size-full object-contain" src="/brand/netra-logo-mark.svg" alt="" aria-hidden="true" />
           </span>
           {!collapsed && (
@@ -2805,11 +2805,11 @@ function EvidenceReportPage() {
           <MetricTile label="Reports" value={reports.length} detail="Generated PDF/HTML artifacts" />
           <MetricTile label="Exports" value={exports.length} detail="JSON, CSV, and CEF bundles" />
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Button onClick={exportPdfReport} disabled={busyAction !== null}><FileText className="size-4" />{busyAction === "report" ? "Generating..." : "Generate and download PDF"}</Button>
-          <Button variant="secondary" onClick={() => createExport("Evidence JSON")} disabled={busyAction !== null}><Download className="size-4" />Export JSON bundle</Button>
-          <Button variant="secondary" onClick={() => createExport("Alert CSV")} disabled={busyAction !== null}><Download className="size-4" />Export alert CSV</Button>
-          <Button variant="secondary" onClick={verifyEvidence} disabled={busyAction !== null || !currentCase.evidenceFileId}><Fingerprint className="size-4" />Verify evidence hash</Button>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Button className="whitespace-nowrap" onClick={exportPdfReport} disabled={busyAction !== null}><FileText className="size-4" />{busyAction === "report" ? "Generating..." : "Generate and download PDF"}</Button>
+          <Button className="whitespace-nowrap" variant="secondary" onClick={() => createExport("Evidence JSON")} disabled={busyAction !== null}><Download className="size-4" />Export JSON bundle</Button>
+          <Button className="whitespace-nowrap" variant="secondary" onClick={() => createExport("Alert CSV")} disabled={busyAction !== null}><Download className="size-4" />Export alert CSV</Button>
+          <Button className="whitespace-nowrap" variant="secondary" onClick={verifyEvidence} disabled={busyAction !== null || !currentCase.evidenceFileId}><Fingerprint className="size-4" />Verify evidence hash</Button>
         </div>
       </div>
 

@@ -1321,6 +1321,6 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
   }
 }
 
-/* Updates page: remove the decorative arcs banner shown above the footer Pages/Social columns. */
-.updates-public-site .footer-links > .footer-arcs { display: none; }
-.updates-public-site .footer-links { grid-template-rows: auto; }
+/* Remove the decorative arcs banner shown above the footer Pages/Social columns (all public pages). */
+.footer-links > .footer-arcs { display: none; }
+.footer-links { grid-template-rows: auto; }
