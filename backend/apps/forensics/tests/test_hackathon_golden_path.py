@@ -230,6 +230,45 @@ class HackathonGoldenPathTests(TestCase):
                 canceled = mark_job_failure(claimed.id, "test-worker", JobCancellationRequested("cancel"))
                 self.assertEqual(canceled.status, ProcessingJob.Status.CANCELED)
 
+    def test_supabase_multipart_upload_uses_v2_chunks_without_persisting_internal_manifest(self):
+        with tempfile.TemporaryDirectory(prefix="netra-v2-upload-") as temporary_root:
+            encrypted = {
+                "stored_path": "supabase://netra-evidence/v2/ev-test/manifest.v2.json",
+                "size_bytes": len(self._capture_bytes("pcap")),
+                "sha256": "a" * 64,
+                "plaintext_sha256": "a" * 64,
+                "encrypted_sha256": "b" * 64,
+                "encryption_algorithm": "AES-256-GCM-chunked-v2",
+                "key_id": "golden-test-key-001",
+                "v2_manifest": {"wrappedDataKey": "internal-only"},
+            }
+            with self.settings(
+                NETRA_STORAGE_PROVIDER="supabase",
+                NETRA_PROCESSING_MODE="postgres-worker",
+                NETRA_TEMP_ROOT=Path(temporary_root),
+            ), patch("common.storage.encrypt_evidence_v2", return_value=encrypted) as encrypt_v2:
+                response = self.client.post(
+                    "/api/evidence/upload",
+                    data={
+                        "caseId": "CASE-V2-MULTIPART",
+                        "evidenceType": "Auto-detect",
+                        "file": SimpleUploadedFile(
+                            "v2.pcap",
+                            self._capture_bytes("pcap"),
+                            content_type="application/vnd.tcpdump.pcap",
+                        ),
+                    },
+                    **self.headers,
+                )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        job = ProcessingJob.objects.get(pk=payload["jobId"])
+        encrypt_v2.assert_called_once()
+        self.assertTrue(job.evidence_file.stored_path.endswith("/manifest.v2.json"))
+        self.assertNotIn("v2_manifest", job.stats["saved"])
+        self.assertNotIn("v2_manifest", payload)
+
     def test_mixed_structured_evidence_runs_the_analysis_flow(self):
         records = [
             {
