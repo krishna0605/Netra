@@ -159,7 +159,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
         ),
         _deployment_check("sensor-key-set", bool(getattr(settings, "NETRA_SENSOR_SHARED_KEY", "")) and settings.NETRA_SENSOR_SHARED_KEY != "netra-phase5-local-sensor-key", "Sensor shared key is non-default.", "Set a random NETRA_SENSOR_SHARED_KEY.", required=False),
         _deployment_check("webhook-secret-set", bool(getattr(settings, "NETRA_WEBHOOK_SIGNING_SECRET", "")), "Webhook signing secret is configured.", "Set NETRA_WEBHOOK_SIGNING_SECRET for SIEM delivery signing.", required=False),
-        _deployment_check("queue-provider", getattr(settings, "NETRA_QUEUE_PROVIDER", "") == "supabase-pgmq", "Supabase PGMQ is the queue provider.", "Set NETRA_QUEUE_PROVIDER=supabase-pgmq.", required=False),
+        _deployment_check("queue-provider", getattr(settings, "NETRA_QUEUE_PROVIDER", "") == "postgres-row-lock", "PostgreSQL row locking is the durable queue provider.", "Set NETRA_QUEUE_PROVIDER=postgres-row-lock.", required=False),
         _deployment_check("search-provider", getattr(settings, "NETRA_SEARCH_PROVIDER", "") == "postgres", "Postgres search is active.", "Set NETRA_SEARCH_PROVIDER=postgres for Supabase mode.", required=False),
         _deployment_check(
             "https-plan",

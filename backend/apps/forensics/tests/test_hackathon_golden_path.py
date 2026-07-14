@@ -11,6 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from scapy.all import DNS, DNSQR, Ether, IP, TCP, UDP, PcapNgWriter, PcapWriter
 
 from apps.forensics.models import Case, ProcessingJob, UserProfile
+from common.postgres_jobs import JobCancellationRequested, claim_next_job, mark_job_failure, request_job_cancellation
 
 
 SECURE_GOLDEN_SETTINGS = override_settings(
@@ -175,3 +176,55 @@ class HackathonGoldenPathTests(TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertEqual(response.json()["code"], "bpf_filter_unavailable")
         self.assertFalse(Case.objects.filter(pk="CASE-BPF-DISABLED").exists())
+
+    def test_durable_upload_is_idempotent_leased_and_cancelable(self):
+        with tempfile.TemporaryDirectory(prefix="netra-durable-storage-") as storage:
+            with self.settings(
+                NETRA_PROCESSING_MODE="postgres-worker",
+                NETRA_STORAGE_ROOT=Path(storage),
+                NETRA_WORKER_MAX_RETRIES=3,
+            ):
+                request_data = {
+                    "caseId": "CASE-DURABLE-PCAP",
+                    "evidenceType": "Auto-detect",
+                    "idempotencyKey": "durable-upload-1",
+                }
+                first = self.client.post(
+                    "/api/evidence/upload",
+                    data=request_data
+                    | {
+                        "file": SimpleUploadedFile(
+                            "durable.pcap",
+                            self._capture_bytes("pcap"),
+                            content_type="application/vnd.tcpdump.pcap",
+                        )
+                    },
+                    **self.headers,
+                )
+                replay = self.client.post(
+                    "/api/evidence/upload",
+                    data=request_data
+                    | {
+                        "file": SimpleUploadedFile(
+                            "durable.pcap",
+                            self._capture_bytes("pcap"),
+                            content_type="application/vnd.tcpdump.pcap",
+                        )
+                    },
+                    **self.headers,
+                )
+
+                self.assertEqual(first.status_code, 202, first.content)
+                self.assertEqual(replay.status_code, 202, replay.content)
+                self.assertEqual(replay.json()["jobId"], first.json()["jobId"])
+                self.assertTrue(replay.json()["idempotentReplay"])
+                self.assertEqual(ProcessingJob.objects.count(), 1)
+
+                claimed = claim_next_job("test-worker")
+                self.assertIsNotNone(claimed)
+                self.assertEqual(claimed.status, ProcessingJob.Status.RUNNING)
+                self.assertEqual(claimed.attempt_count, 1)
+
+                request_job_cancellation(claimed.id)
+                canceled = mark_job_failure(claimed.id, "test-worker", JobCancellationRequested("cancel"))
+                self.assertEqual(canceled.status, ProcessingJob.Status.CANCELED)

@@ -834,6 +834,7 @@ const DEPLOYMENT_PROFILE = import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local";
 const HACKATHON_CORE = DEPLOYMENT_PROFILE === "hackathon-core";
 const BPF_FILTER_ENABLED = import.meta.env.VITE_BPF_FILTER_ENABLED === "1";
 const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
+const ACTIVE_UPLOAD_JOB_KEY = "netra-active-upload-job";
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
 const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
   "Auto-detect": [".pcap", ".pcapng", ".log", ".txt", ".csv", ".json", ".ndjson", ".zip"],
@@ -1659,6 +1660,8 @@ function UploadPage() {
   const [events, setEvents] = useState<OperationalEventRecord[]>([]);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [normalization, setNormalization] = useState<EvidenceNormalizationPreview | null>(null);
+  const [uploadIdempotencyKey, setUploadIdempotencyKey] = useState(() => window.crypto.randomUUID());
+  const activeJobPollRef = useRef<string | null>(null);
   const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
   const selectedFileExtensionAllowed = selectedFile ? fileExtensionAllowed(selectedFile, draft.evidenceType) : true;
   const selectedFileTooLarge = Boolean(selectedFile && selectedFile.size > MAX_UPLOAD_MB * 1024 * 1024);
@@ -1769,6 +1772,7 @@ function UploadPage() {
     setUploadResult(null);
     setUploadStage("idle");
     setUploadProgress(0);
+    setUploadIdempotencyKey(window.crypto.randomUUID());
   }
 
   useEffect(() => {
@@ -1846,6 +1850,7 @@ function UploadPage() {
     form.append("packetLimit", draft.packetLimit);
     form.append("bpfFilter", draft.bpfFilter);
     form.append("flags", JSON.stringify(draft.flags ?? []));
+    form.append("idempotencyKey", uploadIdempotencyKey);
     try {
       const response = await uploadFormWithProgress<EvidenceUploadPayload>(
         "/evidence/upload",
@@ -1866,7 +1871,10 @@ function UploadPage() {
         setUploadStage("queued");
         setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: payload.keyId, jobId: payload.jobId, steps: payload.job?.steps });
         toast.success("Evidence encrypted and queued for async worker analysis.");
-        if (payload.jobId) void followUploadJob(payload.jobId);
+        if (payload.jobId) {
+          window.localStorage.setItem(ACTIVE_UPLOAD_JOB_KEY, JSON.stringify({ jobId: payload.jobId, caseId: payload.caseId }));
+          void followUploadJob(payload.jobId, payload.caseId);
+        }
         return;
       }
       await reloadAnalysis(payload.caseId ?? null);
@@ -1895,26 +1903,52 @@ function UploadPage() {
     }
   }
 
-  async function followUploadJob(jobId: string) {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 2000));
-      const job = await apiGet<{ status: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
-      if (!job) continue;
-      setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
-      if (job.status === "completed") {
-        setUploadStage("complete");
-        await reloadAnalysis();
-        toast.success("Async evidence analysis completed.");
-        return;
+  const followUploadJob = useCallback(async (jobId: string, caseId?: string) => {
+    if (activeJobPollRef.current === jobId) return;
+    activeJobPollRef.current = jobId;
+    try {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const job = await apiGet<{ status: string; progress?: number; error?: string; steps?: { name: string; status: string }[] }>(`/jobs/${jobId}/status`).catch(() => null);
+        if (job) {
+          setUploadProgress(Math.max(0, Math.min(100, job.progress ?? 0)));
+          setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
+          if (job.status === "completed") {
+            window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
+            setUploadStage("complete");
+            await reloadAnalysis(caseId);
+            toast.success("Async evidence analysis completed.");
+            return;
+          }
+          if (job.status === "failed" || job.status === "canceled") {
+            window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
+            setUploadStage("failed");
+            toast.error(job.error || `Async evidence analysis ${job.status}.`);
+            return;
+          }
+          setUploadStage("queued");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
-      if (job.status === "failed") {
-        setUploadStage("failed");
-        toast.error("Async evidence analysis failed. Recovery fallback is available in the job record.");
-        return;
-      }
+      toast.error("Async analysis is still queued. Check System Monitor for worker health.");
+    } finally {
+      if (activeJobPollRef.current === jobId) activeJobPollRef.current = null;
     }
-    toast.error("Async analysis is still queued. Check System Monitor for worker health.");
-  }
+  }, [reloadAnalysis]);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem(ACTIVE_UPLOAD_JOB_KEY);
+    if (!raw) return;
+    try {
+      const active = JSON.parse(raw) as { jobId?: string; caseId?: string };
+      if (!active.jobId) return;
+      setUploadStage("queued");
+      setUploadResult((current) => ({ ...(current ?? {}), jobId: active.jobId }));
+      if (active.caseId) setActiveCaseId(active.caseId);
+      void followUploadJob(active.jobId, active.caseId);
+    } catch {
+      window.localStorage.removeItem(ACTIVE_UPLOAD_JOB_KEY);
+    }
+  }, [followUploadJob, setActiveCaseId]);
 
   async function startReplay() {
     if (!replayFile) {
