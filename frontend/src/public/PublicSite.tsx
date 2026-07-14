@@ -15,12 +15,17 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { Button, Input, Textarea } from "../components/ui/primitives";
 import { capabilityRows, faqRows, integrationRows, publicUpdates } from "./content";
 import "./public-site.css";
 
 type PublicPageProps = { languageControl?: ReactNode };
+
+// Use "instant" so the page jumps to the top rather than smooth-scrolling
+// through the newly navigated page (html { scroll-behavior: smooth } is global).
+const resetScroll = () => window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+const resetScrollAfterNavigation = () => window.setTimeout(resetScroll, 0);
 
 const workflow = [
   ["Register evidence", "Record case, source, investigator, priority, and SHA-256 identity."],
@@ -48,6 +53,55 @@ function useDispatchReveal() {
     animate: { opacity: 1, y: 0 },
     transition: { type: "spring" as const, duration: 1, bounce: .2, delay },
   };
+}
+
+function useSectionRail(prefix: string, count: number) {
+  const [activeSection, setActiveSection] = useState(0);
+  const [sectionProgress, setSectionProgress] = useState(0);
+  const activeSectionRef = useRef(0);
+
+  useEffect(() => {
+    const sections = Array.from({ length: count }, (_, index) => document.getElementById(`${prefix}-${index + 1}`)).filter((section): section is HTMLElement => Boolean(section));
+    if (!sections.length) return;
+
+    const activate = (index: number) => {
+      activeSectionRef.current = index;
+      setActiveSection(index);
+    };
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible) activate(sections.indexOf(visible.target as HTMLElement));
+    }, { rootMargin: "-12% 0px -58% 0px", threshold: [0, .1, .25, .5, .75] });
+    sections.forEach((section) => observer.observe(section));
+
+    let scheduled = false;
+    const updateProgress = () => {
+      scheduled = false;
+      const marker = window.innerHeight * .32;
+      let index = sections.findIndex((section) => {
+        const rect = section.getBoundingClientRect();
+        return rect.top <= marker && rect.bottom > marker;
+      });
+      if (index < 0) index = activeSectionRef.current;
+      const rect = sections[index].getBoundingClientRect();
+      const progress = Math.max(0, Math.min(1, (marker - rect.top) / Math.max(rect.height, 1)));
+      if (index !== activeSectionRef.current) activate(index);
+      setSectionProgress(progress);
+    };
+    const onScroll = () => {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(updateProgress);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    updateProgress();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, [prefix, count]);
+
+  return { activeSection, sectionProgress };
 }
 
 function BrandLockup() {
@@ -239,8 +293,6 @@ function CyberVideo() {
 function PublicFooter() {
   const githubUrl = String(import.meta.env.VITE_GITHUB_URL ?? "https://github.com/krishna0605/Netra").trim();
   const linkedinUrl = String(import.meta.env.VITE_LINKEDIN_URL ?? "").trim();
-  const resetScroll = () => window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  const resetScrollAfterNavigation = () => window.setTimeout(resetScroll, 0);
   return (
     <footer className="public-footer">
       <div className="footer-dark-frame">
@@ -267,57 +319,19 @@ function PublicFooter() {
 }
 
 function PublicShell({ children, languageControl, className = "" }: PublicPageProps & { children: ReactNode; className?: string }) {
+  const { pathname } = useLocation();
+  // Reset to the top of the page whenever the route changes (e.g. Home / About / Updates nav).
+  useEffect(() => {
+    resetScroll();
+  }, [pathname]);
   return <div id="public-top" className={`public-site ${className}`.trim()}><PublicHeader languageControl={languageControl} />{children}<PublicFooter /></div>;
 }
 
 export function PublicHomePage({ languageControl }: PublicPageProps) {
   const [activeLayer, setActiveLayer] = useState(0);
   const [openFaq, setOpenFaq] = useState(0);
-  const [activeSection, setActiveSection] = useState(0);
-  const [sectionProgress, setSectionProgress] = useState(0);
-  const activeSectionRef = useRef(0);
+  const { activeSection, sectionProgress } = useSectionRail("home", homeSections.length);
   const reveal = useDispatchReveal();
-
-  useEffect(() => {
-    const sections = homeSections.map((_, index) => document.getElementById(`home-${index + 1}`)).filter((section): section is HTMLElement => Boolean(section));
-    if (!sections.length) return;
-
-    const activate = (index: number) => {
-      activeSectionRef.current = index;
-      setActiveSection(index);
-    };
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visible) activate(sections.indexOf(visible.target as HTMLElement));
-    }, { rootMargin: "-12% 0px -58% 0px", threshold: [0, .1, .25, .5, .75] });
-    sections.forEach((section) => observer.observe(section));
-
-    let scheduled = false;
-    const updateProgress = () => {
-      scheduled = false;
-      const marker = window.innerHeight * .32;
-      let index = sections.findIndex((section) => {
-        const rect = section.getBoundingClientRect();
-        return rect.top <= marker && rect.bottom > marker;
-      });
-      if (index < 0) index = activeSectionRef.current;
-      const rect = sections[index].getBoundingClientRect();
-      const progress = Math.max(0, Math.min(1, (marker - rect.top) / Math.max(rect.height, 1)));
-      if (index !== activeSectionRef.current) activate(index);
-      setSectionProgress(progress);
-    };
-    const onScroll = () => {
-      if (scheduled) return;
-      scheduled = true;
-      window.requestAnimationFrame(updateProgress);
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    updateProgress();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("scroll", onScroll);
-    };
-  }, []);
 
   return (
     <PublicShell languageControl={languageControl} className="home-public-site">
@@ -410,8 +424,11 @@ function InteriorHero({ label, title, body }: { label: string; title: string; bo
   return <section className="interior-hero"><motion.div {...reveal(0)}><SectionLabel>{label}</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>{title}</motion.h1><motion.p {...reveal(.2)}>{body}</motion.p></section>;
 }
 
+const aboutSections = ["Values", "Disciplines", "Contribute", "Scenario"] as const;
+
 export function PublicAboutPage(props: PublicPageProps) {
   const reveal = useDispatchReveal();
+  const { activeSection, sectionProgress } = useSectionRail("about", aboutSections.length);
   const values = [
     ["Evidence before inference", "Every alert and anomaly should lead back to observable traffic and case context."],
     ["Explain the limits", "Encrypted content, fallback analysis, model uncertainty, and missing data remain visible."],
@@ -430,7 +447,7 @@ export function PublicAboutPage(props: PublicPageProps) {
   return <PublicShell {...props} className="about-public-site"><main className="about-page">
     <section className="about-hero" id="about-top"><aside /><div className="about-hero-content"><motion.div {...reveal(0)}><SectionLabel>About NETRA</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>A focused system,<br />built with intent.</motion.h1><motion.p {...reveal(.2)}>Network evidence is complex. NETRA is designed to help cybercrime teams preserve what was observed, understand how signals connect, and communicate conclusions without hiding uncertainty.</motion.p><motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/upload" }}>Open investigation console</Link></Button></motion.div></div></section>
     <section className="about-story"><aside /><div className="about-story-content"><div className="about-operations-image"><MosaicPoster /><span>NETRA / EVIDENCE OPERATIONS</span></div><div className="about-story-grid"><div><SectionLabel>Hello</SectionLabel><h2>Build conclusions from evidence, not opacity.</h2><p>NETRA brings packet capture, protocol evidence, explainable detections, anomaly review, case context, custody history, and reporting into one investigation workflow.</p><p>The system is built around a simple constraint: an investigator should be able to move from a conclusion back to the traffic and reasoning that support it.</p></div><div className="about-metrics"><article><strong>12</strong><span>Detection families</span></article><article><strong>08</strong><span>Decoded protocols</span></article><article><strong>24/7</strong><span>Sensor-ready operations</span></article><article><strong>03</strong><span>Report languages</span></article></div></div></div></section>
-    <div className="about-section-system"><aside className="about-rail">{["Values", "Disciplines", "Contribute", "Scenario"].map((label, index) => <a key={label} href={`#about-${index + 1}`}><span>0{index + 1}</span>{label}</a>)}</aside><div className="about-section-stack">
+    <div className="about-section-system"><aside className="about-rail" aria-label="About sections">{aboutSections.map((label, index) => <a key={label} href={`#about-${index + 1}`} className={activeSection === index ? "active" : ""} aria-current={activeSection === index ? "location" : undefined}><span>0{index + 1}</span>{label}<i style={{ transform: `scaleX(${activeSection === index ? sectionProgress : 0})` }} /></a>)}</aside><div className="about-section-stack">
       <section className="about-values ticket-panel" id="about-1"><SectionLabel index="01">Our values</SectionLabel><div className="about-panel-intro"><h2>Principles that guide how we build.</h2><p>Investigation tooling earns trust through clarity, provenance, and honest boundaries.</p></div><div className="about-value-list">{values.map(([title, body], index) => <article key={title}><span>0{index + 1}</span><div><h3>{title}</h3><p>{body}</p></div><i>+</i></article>)}</div></section>
       <section className="about-disciplines ticket-panel" id="about-2"><SectionLabel index="02">The work</SectionLabel><div className="about-panel-intro"><h2>Disciplines behind the investigation workflow.</h2><p>NETRA combines several technical responsibilities without inventing a public team roster.</p></div><div className="discipline-list">{disciplines.map(([title, body], index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{title}</h3><p>{body}</p></div><strong>NETRA</strong></article>)}</div></section>
       <section className="about-careers ticket-panel" id="about-3"><SectionLabel index="03">Contribute</SectionLabel><div className="about-panel-intro"><h2>Help strengthen evidence-aware infrastructure.</h2><p>Contribution areas are shown as technical workstreams, not fabricated open positions.</p></div><div className="contribution-list">{[["Detection validation", "Rules · benchmarks · explanations"], ["Protocol coverage", "Decoders · sessions · encrypted metadata"], ["Forensic reporting", "Custody · exports · multilingual output"], ["Platform reliability", "Queues · sensors · monitoring · retention"]].map(([title, meta]) => <article key={title}><h3>{title}</h3><span>{meta}</span><ArrowRight /></article>)}</div></section>

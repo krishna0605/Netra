@@ -708,6 +708,20 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
 .about-rail { position: sticky; top: 60px; grid-column: 1; display: grid; align-self: start; border-right: 1px solid var(--hairline); }
 .about-rail a { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; min-height: 42px; padding: 0 16px; color: var(--sand-muted); border-bottom: 1px solid var(--hairline); font-size: 11px; }
 .about-rail a:first-child { border-top: 1px solid var(--hairline); }
+.about-rail a { position: relative; overflow: hidden; transition: color .18s ease, background-color .18s ease; }
+.about-rail a > i {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--signal-orange);
+  transform-origin: left center;
+  transition: transform .08s linear;
+}
+.about-rail a:hover { color: var(--cream-bright); background: rgba(233, 224, 209, .05); }
+.about-rail a.active { color: var(--cream-bright); background: rgba(233, 224, 209, .055); }
+.about-rail a.active::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--signal-orange); }
 .about-rail span { color: var(--signal-orange); font-family: "IBM Plex Mono", monospace; font-size: 9px; }
 .about-section-stack { grid-column: 3; min-width: 0; padding: 80px 0; border-left: 1px solid var(--hairline); }
 .about-section-stack > section { margin-bottom: 80px; padding: 36px; color: var(--charcoal-deep); background: #e3d8c5; clip-path: polygon(0 18px, 18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px)); }
@@ -1306,3 +1320,7 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
     pointer-events: none;
   }
 }
+
+/* Updates page: remove the decorative arcs banner shown above the footer Pages/Social columns. */
+.updates-public-site .footer-links > .footer-arcs { display: none; }
+.updates-public-site .footer-links { grid-template-rows: auto; }
