@@ -38,25 +38,29 @@ def _permission_error() -> JsonResponse:
     return JsonResponse({"error": "Permission denied", "code": "permission_denied"}, status=403)
 
 
-def _feature_disabled() -> JsonResponse:
-    return JsonResponse({"error": "Feature unavailable in this deployment profile", "code": "feature_disabled"}, status=404)
-
-
-def _profile_allows_route(path: str) -> bool:
-    if settings.NETRA_DEPLOYMENT_PROFILE != "hackathon-core" or settings.NETRA_ENABLE_LAB_TOOLS:
-        return True
-    lab_prefixes = (
-        "/api/capture",
-        "/api/sensors",
-        "/api/sensor-groups",
-        "/api/capture-schedules",
-        "/api/events",
-        "/api/logs/import/zeek",
-        "/api/integrations",
-        "/api/system",
-        "/api/retention",
+def _feature_disabled(feature: str) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": f"{feature} is not configured for this deployment profile.",
+            "code": "feature_disabled",
+            "feature": feature,
+            "profile": settings.NETRA_DEPLOYMENT_PROFILE,
+        },
+        status=404,
     )
-    return not any(path == prefix or path.startswith(f"{prefix}/") for prefix in lab_prefixes)
+
+
+def _disabled_feature(path: str) -> str | None:
+    feature_gates = (
+        (("/api/capture", "/api/sensors", "/api/sensor-groups", "/api/events", "/api/logs/import/zeek"), settings.NETRA_ENABLE_LAB_TOOLS, "Lab Tools"),
+        (("/api/capture-schedules",), settings.NETRA_ENABLE_CAPTURE_SCHEDULES, "Capture schedules"),
+        (("/api/integrations",), settings.NETRA_ENABLE_INTEGRATIONS, "Integrations and webhooks"),
+        (("/api/retention",), settings.NETRA_ENABLE_RETENTION_OPERATIONS, "Retention operations"),
+    )
+    for prefixes, enabled, label in feature_gates:
+        if not enabled and any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes):
+            return label
+    return None
 
 
 def _required_permission(method: str, path: str) -> str | None:
@@ -66,6 +70,7 @@ def _required_permission(method: str, path: str) -> str | None:
         ("/api/users", "manage_users"),
         ("/api/setup", "manage_users"),
         ("/api/system", "operations"),
+        ("/api/capture", "operations"),
         ("/api/sensors", "operations"),
         ("/api/sensor-groups", "operations"),
         ("/api/capture-schedules", "operations"),
@@ -105,8 +110,9 @@ class NetraApiAuthMiddleware:
         if _is_sensor_agent_route(request.method, request.path):
             if not sensor_key_valid(request):
                 return _authentication_error()
-            if not _profile_allows_route(request.path.rstrip("/")):
-                return _feature_disabled()
+            disabled_feature = _disabled_feature(request.path.rstrip("/"))
+            if disabled_feature:
+                return _feature_disabled(disabled_feature)
             request.netra_sensor_authenticated = True
             return self.get_response(request)
 
@@ -123,8 +129,9 @@ class NetraApiAuthMiddleware:
         if actor is None:
             return None
 
-        if not _profile_allows_route(request.path.rstrip("/")):
-            return _feature_disabled()
+        disabled_feature = _disabled_feature(request.path.rstrip("/"))
+        if disabled_feature:
+            return _feature_disabled(disabled_feature)
 
         permission = _required_permission(request.method, request.path.rstrip("/"))
         if permission and not can(actor, permission):
