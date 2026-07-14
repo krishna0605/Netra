@@ -43,6 +43,7 @@ from common.fleet import backpressure_allows_new_capture, capacity_payload, ensu
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, ensure_capture_case, expire_stale_replay, finalize_capture, heartbeat_state, ingest_capture_chunk, mark_capture_running, sensor_key_valid, sensor_payload, start_replay, stop_capture, validate_capture_bounds, worker_payload
 from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
+from common.structured_analysis import analyze_structured_evidence
 from common.vault import fernet, read_encrypted_or_plain
 
 
@@ -944,22 +945,13 @@ def evidence_upload(request):
     normalization = normalization_result.to_dict()
     if not normalization_result.valid:
         return _normalization_error_response(normalization)
-    if normalization_result.normalized_type != EvidenceFile.EvidenceType.PCAP:
-        return JsonResponse(
-            {
-                "error": f"{normalization_result.normalized_type} normalization is available, but analysis for this evidence type is not enabled in the officer upload flow yet.",
-                "code": "evidence_type_not_analyzable",
-                **normalization,
-            },
-            status=422,
-        )
     try:
-        saved = save_uploaded_file(upload, "pcap")
+        saved = save_uploaded_file(upload, "pcap" if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP else "structured")
     except OverflowError as exc:
         return JsonResponse({"error": str(exc)}, status=413)
     except ValueError as exc:
         message = str(exc)
-        status = 422 if "valid PCAP" in message else 400
+        status = 422 if "valid PCAP" in message or "Mixed-evidence" in message else 400
         return JsonResponse({"error": message}, status=status)
     except RuntimeError as exc:
         if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
@@ -1008,7 +1000,11 @@ def evidence_upload(request):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
             return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **client_saved}, status=202)
     try:
-        analysis = analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
+        analysis = (
+            analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
+            if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP
+            else analyze_structured_evidence(saved["analysis_path"], case_id, evidence_id, job_id, saved)
+        )
         analysis["processingPath"] = "sync-fallback"
         if settings.NETRA_PROCESSING_MODE == "async-primary":
             analysis["fallbackReason"] = "kafka-publish-failed"
@@ -1989,11 +1985,11 @@ def _probe_security() -> dict:
 def _probe_evidence_normalization() -> dict:
     return {
         "status": "ok",
-        "detail": "Evidence normalization and unsupported extension blocking are enabled. PCAP is fully analyzable; firewall, DNS, TLS, and mixed evidence are validation-only until their parsers are connected.",
+        "detail": "Evidence normalization, type-specific structured parsing, and unsupported extension blocking are enabled.",
         "supportedTypes": ["PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"],
-        "fullyAnalyzable": ["PCAP"],
+        "fullyAnalyzable": ["PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"],
         "unsupportedExtensionBlocking": "enabled",
-        "logEvidence": "validation-only",
+        "logEvidence": "structured-analysis-enabled",
     }
 
 

@@ -92,9 +92,36 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
     search_completeness = "truncated-search-index" if observed_packet_count > len(rows) else "complete"
     packets = [_packet_from_row(row, index + 1) for index, row in enumerate(rows)]
     packets = _apply_intake_filters(packets, saved.get("intake", {}))
+    zeek = run_zeek_analysis(pcap_path, job_id)
+    return assemble_analysis(
+        packets,
+        observed_packet_count,
+        case_id,
+        evidence_id,
+        job_id,
+        saved,
+        zeek=zeek,
+        source_label="PCAP",
+        search_completeness=search_completeness,
+    )
+
+
+def assemble_analysis(
+    packets: list[dict[str, Any]],
+    observed_record_count: int,
+    case_id: str,
+    evidence_id: str,
+    job_id: str,
+    saved: dict[str, Any],
+    *,
+    zeek: dict[str, Any] | None = None,
+    source_label: str = "PCAP",
+    search_completeness: str = "complete",
+    structured_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     indexed_packet_count = len(packets)
     sessions = _build_sessions(packets)
-    zeek = run_zeek_analysis(pcap_path, job_id)
+    zeek = zeek or _empty_zeek("not-applicable")
     features = extract_features(packets=packets, sessions=sessions, zeek=zeek, filename=saved["filename"])
     normalization = saved.get("normalization") or {
         "selectedType": "PCAP",
@@ -113,6 +140,14 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "normalizationSignals": normalization.get("signals") or normalization.get("features", {}).get("sampleSignals", []),
         }
     )
+    if structured_summary:
+        features["structuredEvidence"] = structured_summary
+        features["summary"].update(
+            {
+                "structuredRecordCount": structured_summary.get("recordCount", observed_record_count),
+                "structuredRejectedCount": structured_summary.get("rejectedCount", 0),
+            }
+        )
     alerts, detection_matches = _build_detections(packets, sessions, features, zeek, saved["filename"])
     payload_findings = _build_payload_findings(packets, alerts)
     decoded_protocols = _build_protocols(packets, sessions, zeek)
@@ -151,7 +186,7 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             "storageUri": saved.get("stored_path", ""),
             "uploadedAt": now,
             "capturedAt": packets[0]["timestamp"] if packets else now,
-            "investigator": "Uploaded PCAP",
+            "investigator": saved.get("intake", {}).get("investigator") or f"Uploaded {source_label}",
             "status": "verified" if packets else "failed",
             "evidenceType": normalization.get("normalizedType", "PCAP"),
             "normalization": normalization,
@@ -160,14 +195,14 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "case": {
             "id": case_id,
             "title": f"{top_attack_class}: {saved['filename']}",
-            "investigator": "Uploaded PCAP",
+            "investigator": saved.get("intake", {}).get("investigator") or f"Uploaded {source_label}",
             "status": "reviewing" if alerts else "open",
             "evidenceFileId": evidence_id,
             "alertIds": [alert["id"] for alert in alerts],
             "notes": [
-                f"Parsed {len(packets)} indexed packet metadata row(s) and reconstructed {len(sessions)} sessions from real PCAP evidence.",
+                f"Parsed {len(packets)} indexed network metadata row(s) and reconstructed {len(sessions)} sessions from {source_label} evidence.",
                 f"Top classification: {top_attack_class}. Zeek status: {zeek['status']}.",
-                f"Search completeness: {search_completeness}. Observed packets: {observed_packet_count}; indexed packet metadata rows: {indexed_packet_count}.",
+                f"Search completeness: {search_completeness}. Observed records: {observed_record_count}; indexed network metadata rows: {indexed_packet_count}.",
             ],
             "history": [
                 {
@@ -181,8 +216,8 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
                     "id": f"hist-{job_id}-analysis",
                     "timestamp": now,
                     "actor": "Netra analysis engine",
-                    "action": "Real PCAP analyzed",
-                    "details": f"tshark parsed packets, Zeek produced {len(zeek.get('logs', []))} log file(s), and detectors generated {len(alerts)} alert(s).",
+                    "action": f"{source_label} analyzed",
+                    "details": f"Netra parsed {observed_record_count} record(s), reconstructed sessions, and generated {len(alerts)} alert(s).",
                 },
             ],
             "createdAt": now,
@@ -198,13 +233,14 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
         "trafficTimeline": traffic_timeline,
         "protocolChartData": protocol_chart,
         "graph": graph,
+        "structuredEvidence": structured_summary or {},
         "searchCompleteness": search_completeness,
-        "observedPackets": observed_packet_count,
+        "observedPackets": observed_record_count,
         "indexedPackets": indexed_packet_count,
         "packetMetadataLimit": MAX_PACKETS,
         "summary": {
             "packets": len(packets),
-            "observedPackets": observed_packet_count,
+            "observedPackets": observed_record_count,
             "indexedPackets": indexed_packet_count,
             "packetMetadataLimit": MAX_PACKETS,
             "searchCompleteness": search_completeness,
