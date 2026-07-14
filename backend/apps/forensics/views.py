@@ -24,7 +24,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
-from common.audit import access_log_dict, actor_from_request, add_history, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
+from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
@@ -366,7 +366,52 @@ def auth_me(request):
     actor = actor_from_request(request)
     if not actor.authenticated:
         return JsonResponse({"error": "Authentication required"}, status=401)
-    return JsonResponse({"user": actor.user, "role": actor.role, "authenticated": True})
+    is_admin = actor.role == "Admin"
+    operator = can(actor, "operations")
+    modules = {
+        "lab": {
+            "enabled": settings.NETRA_ENABLE_LAB_TOOLS,
+            "visible": operator,
+            "reason": "Requires a trusted native sensor or isolated PCAP replay environment.",
+        },
+        "sensors": {
+            "enabled": settings.NETRA_ENABLE_LAB_TOOLS,
+            "visible": is_admin,
+            "reason": "Native capture runs on an enrolled sensor, never inside the Railway web container.",
+        },
+        "schedules": {
+            "enabled": settings.NETRA_ENABLE_CAPTURE_SCHEDULES,
+            "visible": is_admin,
+            "reason": "Capture scheduling is disabled in the public hackathon profile.",
+        },
+        "integrations": {
+            "enabled": settings.NETRA_ENABLE_INTEGRATIONS,
+            "visible": is_admin,
+            "reason": "SIEM and webhook delivery require administrator configuration.",
+        },
+        "retention": {
+            "enabled": settings.NETRA_ENABLE_RETENTION_OPERATIONS,
+            "visible": is_admin,
+            "reason": "Retention execution is disabled until an administrator verifies policy and backups.",
+        },
+        "system": {
+            "enabled": True,
+            "visible": is_admin,
+            "reason": "Administrator diagnostics only.",
+        },
+    }
+    return JsonResponse(
+        {
+            "user": actor.user,
+            "role": actor.role,
+            "authenticated": True,
+            "deployment": {
+                "profile": settings.NETRA_DEPLOYMENT_PROFILE,
+                "hostCaptureEnabled": settings.NETRA_ENABLE_HOST_CAPTURE,
+                "modules": modules,
+            },
+        }
+    )
 
 
 @csrf_exempt

@@ -148,12 +148,23 @@ class ApiAccessControlTests(TestCase):
             403,
         )
 
-    @override_settings(NETRA_DEPLOYMENT_PROFILE="hackathon-core", NETRA_ENABLE_LAB_TOOLS=False)
-    def test_hackathon_profile_hides_unfinished_lab_surface(self):
+    @override_settings(
+        NETRA_DEPLOYMENT_PROFILE="hackathon-core",
+        NETRA_ENABLE_LAB_TOOLS=False,
+        NETRA_ENABLE_INTEGRATIONS=False,
+        NETRA_ENABLE_CAPTURE_SCHEDULES=False,
+        NETRA_ENABLE_RETENTION_OPERATIONS=False,
+    )
+    def test_hackathon_profile_gates_operations_but_keeps_admin_diagnostics(self):
         _admin, headers = self._user("profile-admin@example.test", "Admin")
-        response = self.client.get("/api/system/metrics", **headers)
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "feature_disabled")
+        identity = self.client.get("/api/auth/me", **headers)
+        self.assertEqual(identity.status_code, 200)
+        self.assertFalse(identity.json()["deployment"]["modules"]["lab"]["enabled"])
+        for path in ("/api/sensors", "/api/capture-schedules", "/api/integrations", "/api/retention/policy"):
+            response = self.client.get(path, **headers)
+            self.assertEqual(response.status_code, 404, path)
+            self.assertEqual(response.json()["code"], "feature_disabled")
+        self.assertEqual(self.client.get("/api/system/metrics", **headers).status_code, 200)
 
     def test_hosted_setup_endpoint_is_disabled(self):
         _admin, headers = self._user("admin@example.test", "Admin")

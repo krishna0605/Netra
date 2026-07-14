@@ -122,6 +122,18 @@ NETRA_ENABLE_LAB_TOOLS = os.getenv(
     "NETRA_ENABLE_LAB_TOOLS",
     "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
 ) == "1"
+NETRA_ENABLE_INTEGRATIONS = os.getenv(
+    "NETRA_ENABLE_INTEGRATIONS",
+    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
+) == "1"
+NETRA_ENABLE_CAPTURE_SCHEDULES = os.getenv(
+    "NETRA_ENABLE_CAPTURE_SCHEDULES",
+    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
+) == "1"
+NETRA_ENABLE_RETENTION_OPERATIONS = os.getenv(
+    "NETRA_ENABLE_RETENTION_OPERATIONS",
+    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
+) == "1"
 NETRA_AUTH_PROXY_ENABLED = os.getenv(
     "NETRA_AUTH_PROXY_ENABLED",
     "1" if DEBUG and NETRA_DEPLOYMENT_PROFILE == "local" and os.getenv("NETRA_AUTH_PROVIDER", "django").lower() == "django" else "0",
