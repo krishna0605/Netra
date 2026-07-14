@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import BinaryIO
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 from django.conf import settings
 
 from common.hashing import sha256_file, sha256_text
@@ -24,10 +24,16 @@ PCAP_MAGIC = {
 }
 
 
-def fernet() -> Fernet:
-    raw = settings.NETRA_EVIDENCE_KEY.encode("utf-8")
+def _fernet_for_secret(secret: str) -> Fernet:
+    raw = secret.encode("utf-8")
     key = base64.urlsafe_b64encode(raw.ljust(32, b"0")[:32])
     return Fernet(key)
+
+
+def fernet() -> MultiFernet:
+    # Encrypt with the active key and retain decrypt-only access to prior keys.
+    secrets = [settings.NETRA_EVIDENCE_KEY, *settings.NETRA_EVIDENCE_PREVIOUS_KEYS]
+    return MultiFernet([_fernet_for_secret(secret) for secret in dict.fromkeys(secrets) if secret])
 
 
 def validate_pcap_upload(upload) -> None:

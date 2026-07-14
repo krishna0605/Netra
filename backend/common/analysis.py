@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from hashlib import sha1
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -237,7 +237,11 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
         for packet in packets
         if (not source_ip or source_ip in str(packet.get("sourceIp", "")).lower())
         and (not destination_ip or destination_ip in str(packet.get("destinationIp", "")).lower())
-        and (not protocol or protocol == str(packet.get("protocol", "")).upper())
+        and (
+            not protocol
+            or protocol == str(packet.get("protocol", "")).upper()
+            or protocol == str(packet.get("transportProtocol", "")).upper()
+        )
         and (not port or port in {int(packet.get("sourcePort") or 0), int(packet.get("destinationPort") or 0)})
     ]
     if duration_seconds and filtered:
@@ -374,6 +378,13 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
     destination = row["ip_dst"] or row["ipv6_dst"] or row["dns_query"] or row["sni"] or row["http_host"] or "unknown"
     source_port = _int(row["tcp_srcport"] or row["udp_srcport"])
     destination_port = _int(row["tcp_dstport"] or row["udp_dstport"])
+    transport_protocol = (
+        "TCP"
+        if row["tcp_srcport"] or row["tcp_dstport"]
+        else "UDP"
+        if row["udp_srcport"] or row["udp_dstport"]
+        else (row["protocol"] or "UNKNOWN").upper()
+    )
     protocol = _normalize_protocol(row["protocol"], destination_port, source_port)
     size = _int(row["size"])
     risk, severity, reason = _score_packet(protocol, destination_port, size, row)
@@ -388,6 +399,7 @@ def _packet_from_row(row: dict[str, str], index: int) -> dict[str, Any]:
         "sourcePort": source_port,
         "destinationPort": destination_port,
         "protocol": protocol,
+        "transportProtocol": transport_protocol,
         "size": size,
         "flags": row["flags"] or "-",
         "sessionId": session_id,
@@ -1051,7 +1063,7 @@ def build_alert_csv(analysis: dict[str, Any]) -> str:
 
 
 def _session_id(source: str, destination: str, source_port: int, destination_port: int, protocol: str) -> str:
-    digest = sha1(f"{source}|{destination}|{source_port}|{destination_port}|{protocol}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{source}|{destination}|{source_port}|{destination_port}|{protocol}".encode("utf-8")).hexdigest()
     return f"sess-{digest[:10]}"
 
 

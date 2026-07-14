@@ -81,7 +81,7 @@ class UserProfile(TimeStampedModel):
         VIEWER = "Viewer", "Viewer"
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="netra_profile", on_delete=models.CASCADE)
-    role = models.CharField(max_length=32, choices=Role.choices, default=Role.INVESTIGATOR)
+    role = models.CharField(max_length=32, choices=Role.choices, default=Role.VIEWER)
     display_name = models.CharField(max_length=160, blank=True)
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")
 

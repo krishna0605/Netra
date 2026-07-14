@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import shutil
 import subprocess
 import tempfile
@@ -43,7 +44,8 @@ def emit_operational_event(event_type: str, payload: dict[str, Any], capture_job
 
 def sensor_key_valid(request) -> bool:
     expected = settings.NETRA_SENSOR_SHARED_KEY
-    return bool(expected) and request.headers.get("X-Netra-Sensor-Key", "") == expected
+    supplied = request.headers.get("X-Netra-Sensor-Key", "")
+    return bool(expected and supplied) and hmac.compare_digest(supplied, expected)
 
 
 def validate_capture_bounds(duration_seconds: int, packet_limit: int, chunk_interval_seconds: int, bpf_filter: str = "") -> None:
