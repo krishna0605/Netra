@@ -86,7 +86,7 @@ import type {
   SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
-import { getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
 import {
   PublicAboutPage,
@@ -1013,6 +1013,10 @@ function localNormalizationPreview(file: File, selectedType: EvidenceIntakeForm[
 }
 
 async function apiGet<T>(path: string): Promise<T> {
+  if (SUPABASE_AUTH_ENABLED && !getCurrentAccessToken()) {
+    const token = await ensureCurrentAccessToken();
+    if (!token) throw new Error(`API ${path} requires an authenticated session`);
+  }
   const response = await fetch(`${API_BASE}${path}`, { headers: netraHeaders() });
   if (!response.ok) throw new Error(`API ${path} failed with ${response.status}`);
   return response.json() as Promise<T>;
