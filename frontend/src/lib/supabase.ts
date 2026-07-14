@@ -5,7 +5,26 @@ export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 export const SUPABASE_AUTH_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export const SUPABASE_REALTIME_ENABLED = import.meta.env.VITE_SUPABASE_REALTIME_ENABLED === "1";
 
-export const supabase = SUPABASE_AUTH_ENABLED ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let currentAccessToken = "";
+
+export const supabase = SUPABASE_AUTH_ENABLED
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        storage: window.sessionStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
+  : null;
+
+export function getCurrentAccessToken() {
+  return currentAccessToken;
+}
+
+export function setCurrentAccessToken(token?: string | null) {
+  currentAccessToken = token ?? "";
+}
 
 async function withAuthTimeout<T>(operation: Promise<T>, fallback: T, timeoutMs = 5000): Promise<T> {
   return Promise.race([
@@ -21,7 +40,7 @@ export async function refreshStoredSupabaseSession() {
   const { data } = await withAuthTimeout(supabase.auth.getSession(), { data: { session: null }, error: null });
   const session = data.session;
   if (!session?.access_token) {
-    window.localStorage.removeItem("netra-supabase-access-token");
+    setCurrentAccessToken();
     return null;
   }
 
@@ -30,12 +49,10 @@ export async function refreshStoredSupabaseSession() {
     { data: { user: null }, error: null } as unknown as Awaited<ReturnType<typeof supabase.auth.getUser>>,
   );
   if (error || !userData.user) {
-    window.localStorage.removeItem("netra-supabase-access-token");
+    setCurrentAccessToken();
     return null;
   }
 
-  if (session.access_token) {
-    window.localStorage.setItem("netra-supabase-access-token", session.access_token);
-  }
+  setCurrentAccessToken(session.access_token);
   return session;
 }

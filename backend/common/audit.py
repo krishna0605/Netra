@@ -38,10 +38,6 @@ def _admin_exists() -> bool:
     return User.objects.filter(is_superuser=True).exists() or UserProfile.objects.filter(role="Admin").exists()
 
 
-def _role_from_supabase_claim(role: str) -> str:
-    return role if role in VALID_ROLES else "Investigator"
-
-
 def sync_supabase_actor(supabase_user) -> Actor:
     """Map a verified Supabase user into Netra's local authorization profile.
 
@@ -55,13 +51,10 @@ def sync_supabase_actor(supabase_user) -> Actor:
         return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
     user, _ = User.objects.get_or_create(username=username, defaults={"email": username})
     display_name = getattr(supabase_user, "display_name", "") or username
-    initial_role = _role_from_supabase_claim(getattr(supabase_user, "role", "Investigator"))
-    profile, created = UserProfile.objects.get_or_create(
+    profile, _created = UserProfile.objects.get_or_create(
         user=user,
-        defaults={"role": initial_role, "display_name": display_name},
+        defaults={"role": UserProfile.Role.VIEWER, "display_name": display_name},
     )
-    if created and not _admin_exists():
-        profile.role = "Admin"
     if not profile.display_name or profile.display_name == user.username:
         profile.display_name = display_name
     profile.save(update_fields=["role", "display_name", "updated_at"])
@@ -76,6 +69,9 @@ def sync_supabase_actor(supabase_user) -> Actor:
 
 
 def actor_from_request(request) -> Actor:
+    cached_actor = getattr(request, "netra_actor", None)
+    if isinstance(cached_actor, Actor):
+        return cached_actor
     if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan":
         return Actor(user=settings.NETRA_TRUSTED_LAN_ACTOR, role=settings.NETRA_TRUSTED_LAN_ROLE, authenticated=True)
     auth_header = request.headers.get("Authorization", "")
@@ -94,7 +90,7 @@ def actor_from_request(request) -> Actor:
             user = auth.get_user(validated)
             profile, _ = UserProfile.objects.get_or_create(
                 user=user,
-                defaults={"role": "Investigator", "display_name": user.get_full_name() or user.get_username()},
+                defaults={"role": UserProfile.Role.VIEWER, "display_name": user.get_full_name() or user.get_username()},
             )
             return Actor(user=profile.display_name or user.get_username(), role=profile.role, authenticated=True, django_user_id=user.id)
         except Exception:
@@ -111,14 +107,33 @@ def can(actor: Actor, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(actor.role, set())
 
 
+def visible_cases_for_actor(actor: Actor):
+    rows = Case.objects.all()
+    if actor.role == "Admin":
+        return rows
+    if actor.django_user_id:
+        return rows.filter(memberships__user_id=actor.django_user_id).distinct()
+    # Header/trusted-LAN actors exist only in explicit local development mode.
+    if settings.DEBUG and (settings.NETRA_DEV_ROLE_HEADERS or settings.NETRA_ACCESS_MODE == "trusted-lan"):
+        return rows
+    return rows.none()
+
+
+def can_actor_access_case(actor: Actor, case: Case | str) -> bool:
+    if not actor.authenticated:
+        return False
+    case_id = case.id if isinstance(case, Case) else case
+    return visible_cases_for_actor(actor).filter(id=case_id).exists()
+
+
 def require_permission(request, permission: str, case: Case | None = None, resource_type: str = "", resource_id: str = ""):
     actor = actor_from_request(request)
     if not actor.authenticated:
         log_access(actor, f"permission:{permission}", case=case, resource_type=resource_type, resource_id=resource_id, result="denied")
         return JsonResponse({"error": "Authentication required"}, status=401)
     allowed = can(actor, permission)
-    if allowed and case and actor.django_user_id and actor.role != "Admin":
-        allowed = CaseMembership.objects.filter(case=case, user_id=actor.django_user_id).exists() or permission == "upload"
+    if allowed and case:
+        allowed = can_actor_access_case(actor, case)
     log_access(actor, f"permission:{permission}", case=case, resource_type=resource_type, resource_id=resource_id, result="allowed" if allowed else "denied")
     if allowed:
         return None

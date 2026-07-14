@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import dj_database_url
@@ -10,6 +11,9 @@ REPO_ROOT = BASE_DIR.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "netra-development-only-secret")
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
+NETRA_DEPLOYMENT_PROFILE = os.getenv("NETRA_DEPLOYMENT_PROFILE", "local").strip().lower()
+if NETRA_DEPLOYMENT_PROFILE not in {"local", "hackathon-core", "full"}:
+    raise RuntimeError("NETRA_DEPLOYMENT_PROFILE must be local, hackathon-core, or full")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -25,10 +29,12 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "common.cors.LocalCorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "common.security_headers.ApiSecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "common.api_auth.NetraApiAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -55,7 +61,10 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_POOLER_DATABASE_URL") or os.getenv("SUPABASE_DIRECT_DATABASE_URL")
 DATABASE_CONN_MAX_AGE = int(os.getenv("DATABASE_CONN_MAX_AGE", "0" if os.getenv("NETRA_DATABASE_PROVIDER", "").lower() == "supabase" else "60"))
-if DATABASE_URL:
+NETRA_TEST_SQLITE = os.getenv("NETRA_TEST_SQLITE", "0") == "1" or ("test" in sys.argv and not DATABASE_URL)
+if NETRA_TEST_SQLITE:
+    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "test.sqlite3"}}
+elif DATABASE_URL:
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=DATABASE_CONN_MAX_AGE, ssl_require=True)}
 else:
     DATABASES = {
@@ -101,14 +110,28 @@ SUPABASE_QUEUE_VISIBILITY_SECONDS = int(os.getenv("SUPABASE_QUEUE_VISIBILITY_SEC
 SUPABASE_QUEUE_BATCH_SIZE = int(os.getenv("SUPABASE_QUEUE_BATCH_SIZE", "10"))
 NETRA_SUPABASE_START_WORKERS = os.getenv("NETRA_SUPABASE_START_WORKERS", "0") == "1"
 NETRA_PROCESSING_MODE = os.getenv("NETRA_PROCESSING_MODE", "hybrid")
-NETRA_DEV_ROLE_HEADERS = os.getenv("NETRA_DEV_ROLE_HEADERS", "1") == "1"
-NETRA_ACCESS_MODE = os.getenv("NETRA_ACCESS_MODE", "role-headers").lower()
+NETRA_DEV_ROLE_HEADERS = os.getenv(
+    "NETRA_DEV_ROLE_HEADERS",
+    "1" if DEBUG and NETRA_DEPLOYMENT_PROFILE == "local" else "0",
+) == "1"
+NETRA_ACCESS_MODE = os.getenv("NETRA_ACCESS_MODE", "bearer").lower()
+NETRA_PUBLIC_API_AUTH_REQUIRED = os.getenv("NETRA_PUBLIC_API_AUTH_REQUIRED", "1") == "1"
+NETRA_ENABLE_LAB_TOOLS = os.getenv(
+    "NETRA_ENABLE_LAB_TOOLS",
+    "0" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "1",
+) == "1"
+NETRA_AUTH_PROXY_ENABLED = os.getenv(
+    "NETRA_AUTH_PROXY_ENABLED",
+    "1" if DEBUG and NETRA_DEPLOYMENT_PROFILE == "local" and os.getenv("NETRA_AUTH_PROVIDER", "django").lower() == "django" else "0",
+) == "1"
+NETRA_SUPABASE_TOKEN_CACHE_SECONDS = max(0, min(int(os.getenv("NETRA_SUPABASE_TOKEN_CACHE_SECONDS", "30")), 300))
 NETRA_TRUSTED_LAN_ACTOR = os.getenv("NETRA_TRUSTED_LAN_ACTOR", "Local Investigator")
 NETRA_TRUSTED_LAN_ROLE = os.getenv("NETRA_TRUSTED_LAN_ROLE", "LAN Operator")
 NETRA_EVIDENCE_ENCRYPTION = os.getenv("NETRA_EVIDENCE_ENCRYPTION", "on")
 NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-evidence-key")
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
-NETRA_MAX_UPLOAD_MB = int(os.getenv("NETRA_MAX_UPLOAD_MB", "200"))
+NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
+NETRA_MAX_UPLOAD_MB = int(os.getenv("NETRA_MAX_UPLOAD_MB", "25" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "500"))
 NETRA_ENABLE_HOST_CAPTURE = os.getenv("NETRA_ENABLE_HOST_CAPTURE", "0") == "1"
 NETRA_WORKER_MAX_RETRIES = int(os.getenv("NETRA_WORKER_MAX_RETRIES", "3"))
 NETRA_SENSOR_SHARED_KEY = os.getenv("NETRA_SENSOR_SHARED_KEY", "netra-phase5-local-sensor-key")
@@ -128,13 +151,12 @@ NETRA_PUBLIC_BASE_URL = os.getenv("NETRA_PUBLIC_BASE_URL", "http://localhost:808
 NETRA_REQUIRE_HTTPS = os.getenv("NETRA_REQUIRE_HTTPS", "0") == "1"
 NETRA_RELEASE_ID = os.getenv("NETRA_RELEASE_ID", "local-dev")
 NETRA_ALLOWED_STACK = [
-    "Django",
-    "PostgreSQL",
-    "Elasticsearch",
-    "Apache Kafka",
+    "Django/Gunicorn on Railway",
+    "Supabase Postgres/Auth/Storage/PGMQ",
+    "React/Vite on Vercel",
     "Scapy",
     "tshark/Wireshark",
-    "Zeek",
+    "Zeek (when present in the selected image)",
     "Scikit-learn",
 ]
 
@@ -149,12 +171,25 @@ if not DEBUG:
         raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=0")
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
+    SECURE_REFERRER_POLICY = "same-origin"
+    SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = NETRA_REQUIRE_HTTPS
+    # Railway's private deployment probe is HTTP inside its network. Exempt only
+    # the minimal health route while retaining HTTPS redirects everywhere else.
+    SECURE_REDIRECT_EXEMPT = [r"^api/health/?$"]
     SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "0"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", "0") == "1"
     SECURE_HSTS_PRELOAD = os.getenv("DJANGO_SECURE_HSTS_PRELOAD", "0") == "1"
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if origin.strip()]
     if os.getenv("DJANGO_SECURE_PROXY_SSL_HEADER", "0") == "1":
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    if NETRA_DEV_ROLE_HEADERS or NETRA_ACCESS_MODE != "bearer":
+        raise RuntimeError("Hosted deployments require bearer access mode and disabled development role headers")
+    if NETRA_AUTH_PROVIDER == "supabase" and (not SUPABASE_URL or not SUPABASE_ANON_KEY):
+        raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY are required for Supabase authentication")
+    if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-phase3-development-evidence-key":
+        raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
+    if NETRA_DEPLOYMENT_PROFILE == "full" and NETRA_SENSOR_SHARED_KEY == "netra-phase5-local-sensor-key":
+        raise RuntimeError("NETRA_SENSOR_SHARED_KEY must be replaced for the full deployment profile")

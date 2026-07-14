@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import hmac
 import hashlib
@@ -13,7 +14,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils.dateparse import parse_datetime
@@ -22,7 +23,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
-from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission, sync_supabase_actor
+from common.audit import access_log_dict, actor_from_request, add_history, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.analysis import analyze_pcap, empty_analysis
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.async_pipeline import queue_uploaded_evidence
@@ -42,6 +43,9 @@ from common.operations import capture_job_payload, create_capture_job, emit_oper
 from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
 from common.vault import fernet, read_encrypted_or_plain
+
+
+logger = logging.getLogger(__name__)
 
 
 def _json_body(request) -> dict:
@@ -73,7 +77,21 @@ def _paged(rows: list[dict], request) -> dict:
 
 def _analysis(request=None, case_id: str | None = None) -> dict:
     selected_case = case_id or (request.GET.get("caseId") if request is not None else None)
+    if request is not None and not selected_case:
+        selected_case = _selected_case_id(request)
+        if actor_from_request(request).role != "Admin" and not selected_case:
+            return empty_analysis()
     return analysis_for_case(selected_case) or empty_analysis()
+
+
+def _selected_case_id(request) -> str:
+    requested = (request.GET.get("caseId") or request.POST.get("caseId") or "").strip()
+    if requested:
+        return requested
+    actor = actor_from_request(request)
+    if actor.role == "Admin":
+        return ""
+    return visible_cases_for_actor(actor).order_by("-updated_at").values_list("id", flat=True).first() or ""
 
 
 def _results(key: str, request=None) -> list[dict]:
@@ -90,7 +108,7 @@ def _is_probable_validator_case(case: Case) -> bool:
 
 
 def _visible_cases_queryset(request):
-    rows = Case.objects.order_by("-updated_at")
+    rows = visible_cases_for_actor(actor_from_request(request)).order_by("-updated_at")
     include_test = request.GET.get("includeTest") in {"1", "true", "yes"}
     if not include_test:
         test_query = Q(is_test=True) | Q(origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
@@ -227,14 +245,7 @@ def _case_list_dict(case: Case) -> dict:
 
 
 def health(_request):
-    return JsonResponse(
-        {
-            "status": "ok",
-            "service": "netra-backend",
-            "allowedStack": settings.NETRA_ALLOWED_STACK,
-            "packetTools": available_packet_tools(),
-        }
-    )
+    return JsonResponse({"status": "ok", "service": "netra-backend"})
 
 
 def _admin_count() -> int:
@@ -245,6 +256,8 @@ def _admin_count() -> int:
 
 
 def setup_status(_request):
+    if not settings.NETRA_AUTH_PROXY_ENABLED:
+        raise Http404("Endpoint disabled")
     admin_count = _admin_count()
     return JsonResponse({"requiresSetup": admin_count == 0, "adminCount": admin_count})
 
@@ -252,6 +265,8 @@ def setup_status(_request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def setup_admin(request):
+    if not settings.NETRA_AUTH_PROXY_ENABLED or settings.NETRA_DEPLOYMENT_PROFILE != "local":
+        raise Http404("Endpoint disabled")
     if _admin_count() > 0:
         return JsonResponse({"error": "First-run setup is already complete."}, status=409)
     payload = _json_body(request)
@@ -300,14 +315,14 @@ def auth_login(request):
                     "id": supabase_user.id if supabase_user else "",
                     "email": supabase_user.email if supabase_user else email,
                     "name": actor.user if actor else (supabase_user.display_name if supabase_user else email),
-                    "role": actor.role if actor else "Investigator",
+                    "role": actor.role if actor else "Viewer",
                 },
             }
         )
     user = authenticate(request, username=email, password=password)
     if not user:
         return JsonResponse({"error": "Invalid credentials"}, status=401)
-    profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "Investigator", "display_name": user.get_full_name() or user.username})
+    profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "Viewer", "display_name": user.get_full_name() or user.username})
     refresh = RefreshToken.for_user(user)
     return JsonResponse(
         {
@@ -406,28 +421,34 @@ def cases(request):
         if denied:
             return denied
         payload = _json_body(request)
-        case_id = payload.get("caseNumber") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:4].upper()}"
-        case, _ = Case.objects.update_or_create(
-            id=case_id,
-            defaults={
-                "title": payload.get("title") or f"Investigation {case_id}",
-                "investigator": payload.get("investigator") or actor.user,
-                "department": payload.get("department") or "",
-                "priority": payload.get("priority") or "Standard",
-                "origin": payload.get("origin") if payload.get("origin") in {choice[0] for choice in Case.Origin.choices} else Case.Origin.OFFICER_UPLOAD,
-                "is_test": bool(payload.get("isTest", False)),
-                "opened_at": parse_datetime(payload.get("openedAt")) if payload.get("openedAt") else datetime.now(timezone.utc),
-                "closed_at": parse_datetime(payload.get("closedAt")) if payload.get("closedAt") else None,
-                "source_location": payload.get("sourceLocation", ""),
-                "remarks": payload.get("remarks", ""),
-                "flags_json": payload.get("flags", []),
-            },
-        )
-        add_history(case, actor, "Case created", "Investigation case created from API.")
+        case_id = str(payload.get("caseNumber") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:8].upper()}").strip()[:64]
+        if not case_id:
+            return JsonResponse({"error": "caseNumber cannot be empty"}, status=400)
+        if Case.objects.filter(id=case_id).exists():
+            return JsonResponse({"error": "A case with that identifier already exists."}, status=409)
+        with transaction.atomic():
+            case = Case.objects.create(
+                id=case_id,
+                title=payload.get("title") or f"Investigation {case_id}",
+                investigator=payload.get("investigator") or actor.user,
+                department=payload.get("department") or "",
+                priority=payload.get("priority") or "Standard",
+                origin=payload.get("origin") if payload.get("origin") in {choice[0] for choice in Case.Origin.choices} else Case.Origin.OFFICER_UPLOAD,
+                is_test=bool(payload.get("isTest", False)),
+                opened_at=parse_datetime(payload.get("openedAt")) if payload.get("openedAt") else datetime.now(timezone.utc),
+                closed_at=parse_datetime(payload.get("closedAt")) if payload.get("closedAt") else None,
+                source_location=payload.get("sourceLocation", ""),
+                remarks=payload.get("remarks", ""),
+                flags_json=payload.get("flags", []),
+            )
+            if actor.django_user_id:
+                CaseMembership.objects.create(case=case, user_id=actor.django_user_id, role=actor.role, added_by=actor.user)
+            add_history(case, actor, "Case created", "Investigation case created from API.")
         bump_case_list_cache_version()
         publish_event("netra.case.events", {"type": "case.created", "caseId": case_id, "payload": payload})
         return JsonResponse(_case_dict(case), status=201)
-    cache_key = f"netra:cases:list:{case_list_cache_version()}:{request.GET.urlencode() or 'default'}"
+    actor_scope = actor.django_user_id or hashlib.sha256(f"{actor.role}:{actor.user}".encode("utf-8")).hexdigest()[:16]
+    cache_key = f"netra:cases:list:{case_list_cache_version()}:{actor.role}:{actor_scope}:{request.GET.urlencode() or 'default'}"
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
         return JsonResponse(cached)
@@ -930,20 +951,26 @@ def evidence_upload(request):
     evidence_id = f"ev-{uuid4().hex[:8]}"
     job_id = f"job-{uuid4().hex[:8]}"
     public_saved = {key: value for key, value in saved.items() if key != "analysis_path"}
+    client_saved = {
+        key: public_saved[key]
+        for key in ("filename", "size_bytes", "sha256", "plaintext_sha256", "encrypted_sha256", "normalization")
+        if key in public_saved
+    } | {"keyId": settings.NETRA_EVIDENCE_KEY_ID}
     if settings.NETRA_PROCESSING_MODE == "async-primary":
         job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor)
         event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "processingMode": settings.NETRA_PROCESSING_MODE, "saved": public_saved, "intake": saved["intake"]}
         if publish_event("netra.pcap.uploaded", event, key=job_id):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
-            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **public_saved}, status=202)
+            return JsonResponse({"id": evidence_id, "caseId": case_id, "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **client_saved}, status=202)
     try:
         analysis = analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
         analysis["processingPath"] = "sync-fallback"
         if settings.NETRA_PROCESSING_MODE == "async-primary":
             analysis["fallbackReason"] = "kafka-publish-failed"
         job = persist_analysis(analysis, saved, actor)
-    except Exception as exc:
-        return JsonResponse({"error": f"PCAP analysis failed: {exc}", "id": evidence_id, "caseId": case_id, "jobId": job_id, **saved}, status=422)
+    except Exception:
+        logger.exception("PCAP analysis failed for job %s", job_id)
+        return JsonResponse({"error": "PCAP analysis failed.", "id": evidence_id, "caseId": case_id, "jobId": job_id, **client_saved}, status=422)
     finally:
         if saved.get("analysis_path"):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
@@ -961,7 +988,7 @@ def evidence_upload(request):
             "topAlerts": analysis.get("alerts", [])[:3],
             "riskLevel": analysis.get("riskLevel", "low"),
             "toolStatus": analysis.get("toolStatus", available_packet_tools()),
-            **public_saved,
+            **client_saved,
         },
         status=201,
     )
@@ -2038,7 +2065,7 @@ def alerts(request):
 
 def packets(request):
     fallback = _filter_rows(_results("packets", request), request.GET, {"sourceIp": "sourceIp", "destinationIp": "destinationIp", "protocol": "protocol", "sessionId": "sessionId", "severity": "severity"})
-    rows, backend = search_index("packets", request.GET.get("caseId", ""), request.GET.get("q", ""), fallback)
+    rows, backend = search_index("packets", _selected_case_id(request), request.GET.get("q", ""), fallback)
     rows = _filter_rows(rows, request.GET, {"sourceIp": "sourceIp", "destinationIp": "destinationIp", "protocol": "protocol", "sessionId": "sessionId", "severity": "severity"})
     port = request.GET.get("port")
     if port:
@@ -2057,7 +2084,7 @@ def packet_detail(_request, packet_id: str):
 
 def sessions(request):
     fallback = _results("sessions", request)
-    rows, backend = search_index("sessions", request.GET.get("caseId", ""), request.GET.get("q", ""), fallback)
+    rows, backend = search_index("sessions", _selected_case_id(request), request.GET.get("q", ""), fallback)
     rows = _filter_rows(rows, request.GET, {"source": "source", "destination": "destination", "protocol": "protocol"})
     min_risk = request.GET.get("minRisk")
     if min_risk:
@@ -2099,7 +2126,7 @@ def decoder_protocol(_request, protocol: str):
 
 def payloads(request):
     fallback = _filter_rows(_results("payloadFindings", request), request.GET, {"protocol": "protocol", "risk": "risk"})
-    rows, backend = search_index("payloads", request.GET.get("caseId", ""), request.GET.get("q", ""), fallback)
+    rows, backend = search_index("payloads", _selected_case_id(request), request.GET.get("q", ""), fallback)
     rows = _filter_rows(rows, request.GET, {"protocol": "protocol", "risk": "risk"})
     return JsonResponse({"results": rows, "searchBackend": backend})
 
@@ -2223,7 +2250,7 @@ def graph_attack_path(_request):
 
 def search(request):
     kind = request.GET.get("type", "packets")
-    case_id = request.GET.get("caseId", "")
+    case_id = _selected_case_id(request)
     query_text = request.GET.get("q", "")
     fallback_key = {"packets": "packets", "sessions": "sessions", "alerts": "alerts", "zeek": "decodedProtocols"}.get(kind, "packets")
     rows, backend = search_index(kind if kind in {"packets", "sessions", "alerts", "zeek", "payloads"} else "packets", case_id, query_text, _analysis(request, case_id=case_id).get(fallback_key, []))
@@ -2260,7 +2287,8 @@ def report_preview(request, case_id: str):
 
 
 def reports(request):
-    rows = Report.objects.select_related("case").order_by("-created_at")
+    actor = actor_from_request(request)
+    rows = Report.objects.filter(case__in=visible_cases_for_actor(actor)).select_related("case").order_by("-created_at")
     case_id = request.GET.get("caseId")
     if case_id:
         rows = rows.filter(case_id=case_id)
@@ -2273,7 +2301,7 @@ def reports(request):
     if request.GET.get("includeTest") not in {"1", "true", "yes"}:
         test_query = Q(case__is_test=True) | Q(case__origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
         for prefix in VALIDATOR_CASE_PREFIXES:
-            test_query |= Q(case_id__startswith=prefix)
+            test_query |= Q(case__id__startswith=prefix)
         rows = rows.exclude(test_query)
     return JsonResponse(_paged([_report_dict(row) for row in rows[:250]], request))
 
@@ -2342,6 +2370,9 @@ def exports(request):
         case = Case.objects.filter(id=case_id).first()
         if not case:
             raise Http404("Case not found")
+        denied = require_permission(request, "export", case=case, resource_type="Export", resource_id=case_id)
+        if denied:
+            return denied
         analysis = _analysis(case_id=case_id)
         export_type = (payload.get("type") or "json").lower()
         if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
@@ -2359,13 +2390,13 @@ def exports(request):
     if denied:
         return denied
     case_id = request.GET.get("caseId")
-    queryset = Export.objects.select_related("case").order_by("-created_at")
+    queryset = Export.objects.filter(case__in=visible_cases_for_actor(actor_from_request(request))).select_related("case").order_by("-created_at")
     if case_id:
         queryset = queryset.filter(case_id=case_id)
     if request.GET.get("includeTest") not in {"1", "true", "yes"}:
         test_query = Q(case__is_test=True) | Q(case__origin__in=[Case.Origin.VALIDATOR, Case.Origin.SYSTEM_TEST])
         for prefix in VALIDATOR_CASE_PREFIXES:
-            test_query |= Q(case_id__startswith=prefix)
+            test_query |= Q(case__id__startswith=prefix)
         queryset = queryset.exclude(test_query)
     generated = [
         {"id": row.id, "type": row.export_type, "caseId": row.case_id, "requestedBy": row.requested_by, "timestamp": row.created_at.isoformat(), "hash": row.sha256 or row.stored_path, "status": row.status, "downloadUrl": f"/api/exports/{row.id}/download"}

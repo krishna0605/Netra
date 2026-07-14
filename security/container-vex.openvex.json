@@ -1,0 +1,39 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://netra.local/vex/backend-phase1/2026-07-14",
+  "author": "security@netra.local",
+  "timestamp": "2026-07-14T08:00:00+05:30",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {"name": "CVE-2026-12087"},
+      "products": [{
+        "@id": "pkg:docker/netra-backend@phase1",
+        "subcomponents": [{"@id": "pkg:deb/debian/perl@5.36.0-7%2Bdeb12u3?os_distro=bookworm&os_name=debian&os_version=12"}]
+      }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The vulnerable Perl Socket XS module is deleted during the image build and import failure is asserted; Netra has no Perl execution path."
+    },
+    {
+      "vulnerability": {"name": "CVE-2026-48959"},
+      "products": [{
+        "@id": "pkg:docker/netra-backend@phase1",
+        "subcomponents": [{"@id": "pkg:deb/debian/perl@5.36.0-7%2Bdeb12u3?os_distro=bookworm&os_name=debian&os_version=12"}]
+      }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "IO::Uncompress::Unzip is not installed in the runtime image."
+    },
+    {
+      "vulnerability": {"name": "CVE-2026-48962"},
+      "products": [{
+        "@id": "pkg:docker/netra-backend@phase1",
+        "subcomponents": [{"@id": "pkg:deb/debian/perl@5.36.0-7%2Bdeb12u3?os_distro=bookworm&os_name=debian&os_version=12"}]
+      }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "IO::Compress is not installed in the runtime image."
+    }
+  ]
+}

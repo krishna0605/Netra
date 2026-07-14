@@ -86,7 +86,7 @@ import type {
   SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
-import { refreshStoredSupabaseSession, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
 import {
   PublicAboutPage,
@@ -811,7 +811,7 @@ type AppState = {
   packets: PacketRecord[];
   payloadFindings: PayloadFinding[];
   protocolChartData: { name: string; value: number }[];
-  reloadAnalysis: () => Promise<void>;
+  reloadAnalysis: (caseIdOverride?: string | null) => Promise<void>;
   sessions: SessionRecord[];
   summary: DashboardSummary;
   trafficTimelineData: { time: string; mb: number; alerts: number }[];
@@ -830,6 +830,9 @@ type AppState = {
 const NetraContext = createContext<AppState | null>(null);
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const DEPLOYMENT_PROFILE = import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local";
+const HACKATHON_CORE = DEPLOYMENT_PROFILE === "hackathon-core";
+const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
 const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
   "Auto-detect": [".pcap", ".pcapng", ".log", ".txt", ".csv", ".json", ".ndjson", ".zip"],
@@ -857,6 +860,70 @@ type EvidenceNormalizationPreview = {
   signals: string[];
   features?: { extension?: string; magicType?: string; lineFormat?: string | null; sampleSignals?: string[] };
 };
+
+type UploadStage = "idle" | "uploading" | "processing" | "queued" | "complete" | "failed";
+type EvidenceUploadPayload = Partial<EvidenceNormalizationPreview> & {
+  error?: string;
+  reason?: string;
+  caseId?: string;
+  status?: string;
+  sha256?: string;
+  encrypted_sha256?: string;
+  keyId?: string;
+  jobId?: string;
+  job?: { steps?: { name: string; status: string }[] };
+  detectedAttackClasses?: string[];
+  riskLevel?: string;
+  analysis?: {
+    packets?: number;
+    sessions?: number;
+    protocolsDecoded?: number;
+    payloadFindings?: number;
+    alerts?: number;
+  };
+};
+
+type UploadResult = {
+  topClass?: string;
+  risk?: string;
+  hash?: string;
+  encryptedHash?: string;
+  keyId?: string;
+  jobId?: string;
+  filename?: string;
+  packets?: number;
+  sessions?: number;
+  protocolsDecoded?: number;
+  payloadFindings?: number;
+  alerts?: number;
+  steps?: { name: string; status: string }[];
+};
+
+function uploadFormWithProgress<T>(path: string, form: FormData, onProgress: (percent: number) => void, onUploaded: () => void) {
+  return new Promise<{ ok: boolean; status: number; payload: T }>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_BASE}${path}`);
+    new Headers(netraHeaders()).forEach((value, name) => request.setRequestHeader(name, value));
+    request.timeout = 240_000;
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    };
+    request.upload.onload = () => {
+      onProgress(100);
+      onUploaded();
+    };
+    request.onload = () => {
+      try {
+        resolve({ ok: request.status >= 200 && request.status < 300, status: request.status, payload: JSON.parse(request.responseText) as T });
+      } catch {
+        reject(new Error(`Upload returned an unreadable response (${request.status || "network error"}).`));
+      }
+    };
+    request.onerror = () => reject(new Error("Upload failed before the server responded."));
+    request.ontimeout = () => reject(new Error("Upload timed out while the server was processing the evidence."));
+    request.send(form);
+  });
+}
 
 function createDefaultIntakeForm(): EvidenceIntakeForm {
   const now = new Date();
@@ -952,7 +1019,7 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 function netraHeaders(extra?: HeadersInit): HeadersInit {
-  const token = window.localStorage.getItem("netra-supabase-access-token");
+  const token = getCurrentAccessToken();
   return {
     ...(extra ?? {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1089,8 +1156,9 @@ function NetraProvider({ children }: { children: ReactNode }) {
     else window.localStorage.removeItem("netra-active-case");
   }, []);
 
-  const reloadAnalysis = useCallback(async () => {
-    const data = await loadAnalysisData(activeCaseId);
+  const reloadAnalysis = useCallback(async (caseIdOverride?: string | null) => {
+    const requestedCaseId = caseIdOverride === undefined ? activeCaseId : caseIdOverride;
+    const data = await loadAnalysisData(requestedCaseId);
     setAccessLogRecordsState(data.accessLogs);
     setComplianceRecordsState(data.complianceRecords);
     setAlertRecords(data.alerts);
@@ -1122,7 +1190,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !window.localStorage.getItem("netra-supabase-access-token"))) return;
+    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !getCurrentAccessToken())) return;
     reloadAnalysis().catch(() => undefined);
   }, [reloadAnalysis]);
 
@@ -1134,14 +1202,16 @@ function NetraProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = client.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
-        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        setCurrentAccessToken(session.access_token);
         reloadAnalysis().catch(() => undefined);
       } else {
-        window.localStorage.removeItem("netra-supabase-access-token");
+        setCurrentAccessToken();
       }
     });
     if (!SUPABASE_REALTIME_ENABLED) {
+      const pollTimer = window.setInterval(scheduleRefresh, 5000);
       return () => {
+        window.clearInterval(pollTimer);
         subscription.unsubscribe();
       };
     }
@@ -1278,10 +1348,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
-        window.localStorage.setItem("netra-supabase-access-token", session.access_token);
+        setCurrentAccessToken(session.access_token);
         setStatus("signed-in");
       } else {
-        window.localStorage.removeItem("netra-supabase-access-token");
+        setCurrentAccessToken();
         setStatus("signed-out");
       }
     });
@@ -1297,7 +1367,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
         <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
           <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
           <h1 className="mt-2 text-2xl font-bold text-strong">Checking session</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">Verifying your Supabase sign-in before opening the investigation console.</p>
+          <p className="mt-2 text-sm leading-6 text-muted">Verifying your secure session before opening the investigation console.</p>
         </section>
       </main>
     );
@@ -1353,14 +1423,14 @@ function LoginPage() {
       toast.error(error.message);
       return;
     }
-    if (data.session?.access_token) window.localStorage.setItem("netra-supabase-access-token", data.session.access_token);
-    toast.success("Signed in to Supabase");
+    setCurrentAccessToken(data.session?.access_token);
+    toast.success("Secure session verified");
     navigate(from, { replace: true });
   }
 
   async function signOut() {
     if (supabase) await supabase.auth.signOut();
-    window.localStorage.removeItem("netra-supabase-access-token");
+    setCurrentAccessToken();
     setHasSession(false);
     toast.success("Signed out");
   }
@@ -1371,7 +1441,7 @@ function LoginPage() {
         <div className="mb-6">
           <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Secure access</Link>
           <h1 className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
-          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts are created in the Supabase project by an administrator.</p>
+          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
         </div>
         {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.</Alert>}
         {checkingSession && <Alert>Checking whether this browser already has an active Netra session.</Alert>}
@@ -1574,20 +1644,24 @@ function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [replayFile, setReplayFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sensors, setSensors] = useState<SensorRecord[]>([]);
   const [sensorId, setSensorId] = useState("");
   const [interfaceName, setInterfaceName] = useState("");
   const [captureJob, setCaptureJob] = useState<CaptureJobRecord | null>(null);
   const [events, setEvents] = useState<OperationalEventRecord[]>([]);
-  const [uploadResult, setUploadResult] = useState<{ topClass?: string; risk?: string; hash?: string; encryptedHash?: string; keyId?: string; jobId?: string; steps?: { name: string; status: string }[] } | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [normalization, setNormalization] = useState<EvidenceNormalizationPreview | null>(null);
   const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
   const selectedFileExtensionAllowed = selectedFile ? fileExtensionAllowed(selectedFile, draft.evidenceType) : true;
+  const selectedFileTooLarge = Boolean(selectedFile && selectedFile.size > MAX_UPLOAD_MB * 1024 * 1024);
   const effectiveExtensionAllowed = normalization ? normalization.extensionAllowed !== false : selectedFileExtensionAllowed;
   const normalizationCode = normalization?.code ?? "";
   const normalizationBlocked = Boolean(
     selectedFile && (
+      selectedFileTooLarge ||
       !effectiveExtensionAllowed ||
       normalization?.extensionAllowed === false ||
       normalization?.validForSelectedType === false ||
@@ -1599,6 +1673,7 @@ function UploadPage() {
   const normalizationLabel =
     !selectedFile ? "" :
     !normalization ? "Checking" :
+    normalizationCode === "upload_too_large" ? "File too large" :
     normalizationCode === "unsupported_evidence_extension" || normalization.extensionAllowed === false ? "Unsupported file type" :
     normalizationCode === "evidence_type_not_analyzable" || (normalization.validForSelectedType && normalization.normalizedType !== "PCAP") ? "Parser not enabled" :
     normalization.validForSelectedType ? "Verified" :
@@ -1606,8 +1681,17 @@ function UploadPage() {
   const activeCaptureJobId = captureJob?.jobId;
   const activeCaptureMode = captureJob?.mode;
   const activeCaptureStatus = captureJob?.status;
+  const uploadStageLabel: Record<UploadStage, string> = {
+    idle: "Ready",
+    uploading: "Uploading evidence",
+    processing: "Upload complete — validating, hashing, encrypting, and analyzing",
+    queued: "Encrypted and queued for analysis",
+    complete: "Evidence analysis complete",
+    failed: "Evidence processing failed",
+  };
 
   useEffect(() => {
+    if (HACKATHON_CORE) return;
     apiGet<{ results: SensorRecord[] }>("/sensors")
       .then((payload) => {
         setSensors(payload.results);
@@ -1674,9 +1758,35 @@ function UploadPage() {
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function selectEvidenceFile(file: File | null) {
+    setSelectedFile(file);
+    setNormalization(null);
+    setUploadResult(null);
+    setUploadStage("idle");
+    setUploadProgress(0);
+  }
+
   useEffect(() => {
     if (!selectedFile) {
       setNormalization(null);
+      return;
+    }
+    if (selectedFileTooLarge) {
+      const reason = `This deployment accepts files up to ${MAX_UPLOAD_MB} MiB. The selected file is ${formatBytes(selectedFile.size)}.`;
+      setNormalization({
+        code: "upload_too_large",
+        selectedType: draft.evidenceType,
+        detectedType: "Not checked",
+        normalizedType: "Unknown",
+        recommendedType: draft.evidenceType,
+        validForSelectedType: false,
+        valid: false,
+        confidence: 0,
+        parser: "none",
+        reason,
+        message: reason,
+        signals: ["client-size-limit"],
+      });
       return;
     }
     let cancelled = false;
@@ -1695,11 +1805,15 @@ function UploadPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedFile, draft.evidenceType]);
+  }, [selectedFile, selectedFileTooLarge, draft.evidenceType]);
 
   async function startProcessing() {
     if (!selectedFile) {
       toast.error("Choose an evidence file first.");
+      return;
+    }
+    if (selectedFileTooLarge) {
+      toast.error(`Choose a file no larger than ${MAX_UPLOAD_MB} MiB for this deployment.`);
       return;
     }
     if (normalizationBlocked) {
@@ -1708,6 +1822,8 @@ function UploadPage() {
     }
     setIntakeForm(draft);
     setProcessing(true);
+    setUploadStage("uploading");
+    setUploadProgress(0);
     const form = new FormData();
     form.append("caseId", draft.caseNumber);
     form.append("file", selectedFile);
@@ -1726,27 +1842,48 @@ function UploadPage() {
     form.append("bpfFilter", draft.bpfFilter);
     form.append("flags", JSON.stringify(draft.flags ?? []));
     try {
-      const response = await fetch(`${API_BASE}/evidence/upload`, { method: "POST", headers: netraHeaders(), body: form });
-      const payload = await response.json();
+      const response = await uploadFormWithProgress<EvidenceUploadPayload>(
+        "/evidence/upload",
+        form,
+        setUploadProgress,
+        () => setUploadStage("processing"),
+      );
+      const payload = response.payload;
       if (!response.ok) {
         if (payload.code === "unsupported_evidence_extension" || payload.code === "evidence_type_mismatch" || payload.code === "evidence_type_unrecognized" || payload.code === "invalid_pcap" || payload.code === "evidence_type_not_analyzable") {
-          setNormalization(payload);
+          setNormalization(payload as EvidenceNormalizationPreview);
         }
+        setUploadStage("failed");
         throw new Error(payload.reason ?? payload.error ?? "Upload failed");
       }
-      setActiveCaseId(payload.caseId);
+      setActiveCaseId(payload.caseId ?? null);
       if (payload.status === "queued") {
-        setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
+        setUploadStage("queued");
+        setUploadResult({ hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: payload.keyId, jobId: payload.jobId, steps: payload.job?.steps });
         toast.success("Evidence encrypted and queued for async worker analysis.");
-        navigate("/app/overview");
-        void followUploadJob(payload.jobId);
+        if (payload.jobId) void followUploadJob(payload.jobId);
         return;
       }
-      await reloadAnalysis();
-      setUploadResult({ topClass: payload.detectedAttackClasses?.[0], risk: payload.riskLevel, hash: payload.sha256, encryptedHash: payload.encrypted_sha256, keyId: "dev-key-001", jobId: payload.jobId, steps: payload.job?.steps });
+      await reloadAnalysis(payload.caseId ?? null);
+      setUploadStage("complete");
+      setUploadResult({
+        topClass: payload.detectedAttackClasses?.[0],
+        risk: payload.riskLevel,
+        hash: payload.sha256,
+        encryptedHash: payload.encrypted_sha256,
+        keyId: payload.keyId,
+        jobId: payload.jobId,
+        filename: selectedFile.name,
+        packets: payload.analysis?.packets,
+        sessions: payload.analysis?.sessions,
+        protocolsDecoded: payload.analysis?.protocolsDecoded,
+        payloadFindings: payload.analysis?.payloadFindings,
+        alerts: payload.analysis?.alerts,
+        steps: payload.job?.steps,
+      });
       toast.success(t("evidenceToast"));
-      navigate("/app/overview");
     } catch (error) {
+      setUploadStage("failed");
       toast.error(error instanceof Error ? error.message : "PCAP analysis failed");
     } finally {
       setProcessing(false);
@@ -1760,11 +1897,13 @@ function UploadPage() {
       if (!job) continue;
       setUploadResult((current) => ({ ...(current ?? {}), jobId, steps: job.steps }));
       if (job.status === "completed") {
+        setUploadStage("complete");
         await reloadAnalysis();
         toast.success("Async evidence analysis completed.");
         return;
       }
       if (job.status === "failed") {
+        setUploadStage("failed");
         toast.error("Async evidence analysis failed. Recovery fallback is available in the job record.");
         return;
       }
@@ -1847,12 +1986,12 @@ function UploadPage() {
             </div>
             <UploadCloud className="size-9 text-accent" aria-hidden="true" />
           </div>
-          <input ref={fileInputRef} className="hidden" type="file" accept={acceptForEvidenceType(draft.evidenceType)} onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+          <input ref={fileInputRef} className="hidden" type="file" accept={acceptForEvidenceType(draft.evidenceType)} onChange={(event) => selectEvidenceFile(event.target.files?.[0] ?? null)} />
           <div className="mt-6 rounded-[1.25rem] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-5">
             <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
               <div>
                 <div className="text-sm font-bold text-strong">{selectedFile?.name ?? "No file selected"}</div>
-                <div className="mt-1 text-xs text-muted">{selectedFile ? `${formatBytes(selectedFile.size)} | ${fileExtension(selectedFile) || "no extension"}` : evidenceTypeHelper(draft.evidenceType)}</div>
+                <div className="mt-1 text-xs text-muted">{selectedFile ? `${formatBytes(selectedFile.size)} | ${fileExtension(selectedFile) || "no extension"} | ${MAX_UPLOAD_MB} MiB deployment limit` : `${evidenceTypeHelper(draft.evidenceType)}. Maximum ${MAX_UPLOAD_MB} MiB.`}</div>
               </div>
               <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="size-4" />
@@ -1864,13 +2003,32 @@ function UploadPage() {
                 Unsupported file type {fileExtension(selectedFile) || "(none)"}. {evidenceTypeHelper(draft.evidenceType)}.
               </div>
             )}
+            {selectedFileTooLarge && (
+              <div className="mt-4 rounded-xl border border-[#7f2f23] bg-[#2b1410] px-4 py-3 text-sm text-[#ffd0c4]">
+                The selected file is {formatBytes(selectedFile?.size ?? 0)}. This deployment is verified for files up to {MAX_UPLOAD_MB} MiB.
+              </div>
+            )}
             <div className="mt-5 flex flex-wrap items-center gap-3">
-              <Button onClick={startProcessing} disabled={processing || !selectedFile || normalizationBlocked}>
-                {processing ? "Analyzing evidence..." : "Analyze Evidence"}
+              <Button onClick={startProcessing} disabled={processing || !selectedFile || normalizationBlocked || selectedFileTooLarge}>
+                {processing ? uploadStageLabel[uploadStage] : "Analyze Evidence"}
               </Button>
               {selectedFile && <Badge variant={normalizationBlocked ? "destructive" : "secondary"}>{normalizationBlocked ? normalizationLabel : "Ready to analyze"}</Badge>}
             </div>
           </div>
+          {uploadStage !== "idle" && (
+            <div className={cn("mt-5 rounded-[1.25rem] border p-4", uploadStage === "failed" ? "border-[#7f2f23] bg-[#2b1410]" : "border-[var(--border)] bg-[var(--surface-muted)]")} aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-strong">{uploadStageLabel[uploadStage]}</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted">
+                    {uploadStage === "uploading" ? `${uploadProgress}% of file bytes sent to Netra.` : uploadStage === "processing" ? "The browser upload is finished. Server-side evidence checks and analysis are still running." : uploadStage === "queued" ? "The worker status below will update automatically." : uploadStage === "complete" ? "Hashes, case records, findings, and report data are ready." : "Review the error message, correct the file or metadata, and retry."}
+                  </p>
+                </div>
+                <Badge variant={uploadStage === "failed" ? "destructive" : "secondary"}>{uploadStage === "uploading" ? `${uploadProgress}%` : uploadStage}</Badge>
+              </div>
+              <Progress className="mt-4" value={uploadProgress} aria-label="Evidence upload byte progress" />
+            </div>
+          )}
           {selectedFile && (
             <div
               className={cn(
@@ -1902,7 +2060,7 @@ function UploadPage() {
             </div>
           )}
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {[[t("packetsParsed"), formatNumber(packets.length)], [t("sessionsReconstructed"), sessions.length], [t("protocolsDecoded"), decodedProtocols.length], [t("payloadFindings"), payloadFindings.length], [t("alertsGenerated"), alertRecords.length]].map(([label, value]) => (
+            {[[t("packetsParsed"), formatNumber(uploadResult?.packets ?? packets.length)], [t("sessionsReconstructed"), uploadResult?.sessions ?? sessions.length], [t("protocolsDecoded"), uploadResult?.protocolsDecoded ?? decodedProtocols.length], [t("payloadFindings"), uploadResult?.payloadFindings ?? payloadFindings.length], [t("alertsGenerated"), uploadResult?.alerts ?? alertRecords.length]].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-3">
                 <div className="text-xs uppercase text-muted">{label}</div>
                 <div className="mt-1 text-xl font-black text-strong">{value}</div>
@@ -1912,7 +2070,7 @@ function UploadPage() {
         </div>
         <div className="surface rounded-[1.5rem] p-5">
           <h2 className="text-xl font-black text-strong">Case Details</h2>
-          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are already prepared for local investigation.</p>
+          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are prepared for the current investigation.</p>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <Field label={t("caseNumber")} value={draft.caseNumber} onChange={(value) => update("caseNumber", value)} disabled />
             <Field label={t("investigator")} value={draft.investigator} onChange={(value) => update("investigator", value)} />
@@ -1975,8 +2133,13 @@ function UploadPage() {
         </div>
       </details>
 
-      <details className="surface rounded-[1.5rem] p-5">
-        <summary className="cursor-pointer text-lg font-black text-strong">Advanced Capture And Demo Tools</summary>
+      {HACKATHON_CORE ? (
+        <Alert>
+          Lab capture and replay tools are intentionally disabled on the public hackathon deployment. They require a trusted native sensor or an isolated replay worker and are enabled only in the full deployment profile.
+        </Alert>
+      ) : (
+        <details className="surface rounded-[1.5rem] p-5">
+          <summary className="cursor-pointer text-lg font-black text-strong">Advanced Capture And Demo Tools</summary>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <div className="rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
             <h2 className="text-lg font-black text-strong">Capture from sensor</h2>
@@ -2007,7 +2170,8 @@ function UploadPage() {
             </div>
           </div>
         </div>
-      </details>
+        </details>
+      )}
       {captureJob && (
         <div className="surface rounded-[1.5rem] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2054,6 +2218,7 @@ function UploadPage() {
               <Badge key={step.name} variant={step.status === "completed" ? "secondary" : "warning"}>{step.name}: {step.status}</Badge>
             ))}
           </div>
+          {uploadStage === "complete" && <Button className="mt-4" onClick={() => navigate("/app/overview")}>Open case overview</Button>}
         </div>
       )}
       <EvidenceCard />
