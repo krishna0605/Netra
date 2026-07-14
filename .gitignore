@@ -1,9 +1,9 @@
 # Secrets and local configuration
 .env
 .env.*
-!.env.example
-!.env.supabase.example
-!.env.supabase.production.example
+*.env.example
+**/*.env.example
+railway.env.example
 *.local
 *.pem
 *.key
@@ -40,6 +40,7 @@ credentials/
 *.pcap
 *.pcapng
 *.cap
+!frontend/public/demo/netra-sanitized-demo.pcap
 storage/*
 !storage/README.md
 .netra-tmp/

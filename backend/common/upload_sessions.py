@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from apps.forensics.models import Case, CaseMembership, EvidenceFile, EvidenceUploadSession, ProcessingJob, UserProfile
 from common.audit import Actor, can_actor_access_case
+from common.case_metadata import InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.hashing import sha256_text
 from common.jobs import initial_steps
 from common.storage_provider import storage_provider
@@ -106,16 +107,12 @@ def _validated_size(value) -> int:
     return size_bytes
 
 
-def _profile_organization(user) -> str:
-    profile = UserProfile.objects.filter(user=user).first()
-    return (profile.department if profile else "") or "Gujarat Cyber Crime Cell"
-
-
 def _intake_payload(payload: dict, actor: Actor, organization: str, evidence_type: str) -> dict:
     raw_flags = payload.get("flags") or []
-    if not isinstance(raw_flags, list):
-        raise UploadSessionProblem("invalid_case_flags", "Case flags must be a JSON array.")
-    flags = [_text(value, maximum=80) for value in raw_flags[:20] if _text(value, maximum=80)]
+    try:
+        flags = validated_case_flags(raw_flags)
+    except InvalidCaseFlags as exc:
+        raise UploadSessionProblem("invalid_case_flags", str(exc)) from exc
     priority = _text(payload.get("priority"), maximum=32, default=Case.Priority.STANDARD)
     if priority not in {choice for choice, _label in Case.Priority.choices}:
         raise UploadSessionProblem("invalid_priority", "Priority must be Standard, Urgent, or Critical.")
@@ -166,8 +163,9 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
     user = get_user_model().objects.filter(pk=actor.django_user_id).first()
     if user is None:
         raise UploadSessionProblem("direct_upload_identity_unavailable", "The authenticated application profile is unavailable.", 403)
-    organization = _profile_organization(user)
+    investigator, organization = server_case_identity(actor)
     intake = _intake_payload(payload, actor, organization, evidence_type)
+    intake["investigator"] = investigator
 
     if idempotency_key:
         existing = EvidenceUploadSession.objects.filter(idempotency_key=idempotency_key, user=user).first()
@@ -199,7 +197,7 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
                 case = Case.objects.create(
                     id=case_id,
                     title=_text(payload.get("caseTitle"), maximum=255, default=f"Evidence intake: {filename}") or f"Evidence intake: {filename}",
-                    investigator=actor.user,
+                    investigator=investigator,
                     department=organization,
                     priority=intake["priority"],
                     origin=Case.Origin.OFFICER_UPLOAD,

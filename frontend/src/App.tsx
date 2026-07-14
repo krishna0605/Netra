@@ -834,6 +834,7 @@ type DeploymentModuleAccess = { enabled: boolean; visible: boolean; reason: stri
 type DeploymentAccess = {
   verified: boolean;
   user: string;
+  department: string;
   role: string;
   profile: string;
   hostCaptureEnabled: boolean;
@@ -843,6 +844,7 @@ type DeploymentAccess = {
 const DEFAULT_DEPLOYMENT_ACCESS: DeploymentAccess = {
   verified: false,
   user: "",
+  department: "",
   role: "Viewer",
   profile: import.meta.env.VITE_DEPLOYMENT_PROFILE ?? "local",
   hostCaptureEnabled: false,
@@ -866,6 +868,8 @@ const DIRECT_UPLOAD_ENABLED = import.meta.env.VITE_DIRECT_UPLOAD_ENABLED === "1"
 const MAX_UPLOAD_MB = Math.max(1, Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? (HACKATHON_CORE ? 25 : 500)) || 25);
 const ACTIVE_UPLOAD_JOB_KEY = "netra-active-upload-job";
 const EVIDENCE_TYPE_OPTIONS: EvidenceIntakeForm["evidenceType"][] = ["Auto-detect", "PCAP", "Firewall Logs", "DNS Logs", "TLS Metadata", "Mixed Evidence"];
+const CASE_FLAG_OPTIONS = ["urgent", "ransomware", "insider-threat", "exfiltration", "related-case", "needs-review", "synthetic", "release-gate"] as const;
+const NORMALIZATION_PREVIEW_BYTES = 64 * 1024;
 const EVIDENCE_EXTENSIONS: Record<EvidenceIntakeForm["evidenceType"], string[]> = {
   "Auto-detect": [".pcap", ".pcapng", ".log", ".txt", ".csv", ".json", ".ndjson", ".zip"],
   PCAP: [".pcap", ".pcapng"],
@@ -1207,12 +1211,14 @@ function NetraProvider({ children }: { children: ReactNode }) {
   const refreshDeploymentAccess = useCallback(async () => {
     const payload = await apiGet<{
       user: string;
+      department: string;
       role: string;
       deployment: { profile: string; hostCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
     }>("/auth/me");
     setDeploymentAccess({
       verified: true,
       user: payload.user,
+      department: payload.department,
       role: payload.role,
       profile: payload.deployment.profile,
       hostCaptureEnabled: payload.deployment.hostCaptureEnabled,
@@ -1744,7 +1750,7 @@ function TopBar() {
 }
 
 function UploadPage() {
-  const { t, alertRecords, decodedProtocols, evidence, intakeForm, packets, payloadFindings, reloadAnalysis, sessions, setActiveCaseId, setIntakeForm, summary } = useNetra();
+  const { t, alertRecords, decodedProtocols, deploymentAccess, evidence, intakeForm, packets, payloadFindings, reloadAnalysis, sessions, setActiveCaseId, setIntakeForm, summary } = useNetra();
   const navigate = useNavigate();
   const [draft, setDraft] = useState<EvidenceIntakeForm>(intakeForm);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -1768,6 +1774,15 @@ function UploadPage() {
   const activeJobPollRef = useRef<string | null>(null);
   const selectedFileExtensionAllowed = selectedFile ? fileExtensionAllowed(selectedFile, draft.evidenceType) : true;
   const selectedFileTooLarge = Boolean(selectedFile && selectedFile.size > MAX_UPLOAD_MB * 1024 * 1024);
+
+  useEffect(() => {
+    if (!deploymentAccess.verified) return;
+    setDraft((current) => ({
+      ...current,
+      investigator: deploymentAccess.user,
+      department: deploymentAccess.department,
+    }));
+  }, [deploymentAccess.department, deploymentAccess.user, deploymentAccess.verified]);
   const effectiveExtensionAllowed = normalization ? normalization.extensionAllowed !== false : selectedFileExtensionAllowed;
   const normalizationCode = normalization?.code ?? "";
   const normalizationBlocked = Boolean(
@@ -1840,8 +1855,8 @@ function UploadPage() {
     }
     let cancelled = false;
     const form = new FormData();
-    const previewFile = DIRECT_UPLOAD_ENABLED && selectedFile.size > 256 * 1024
-      ? new File([selectedFile.slice(0, 256 * 1024)], selectedFile.name, { type: selectedFile.type, lastModified: selectedFile.lastModified })
+    const previewFile = selectedFile.size > NORMALIZATION_PREVIEW_BYTES
+      ? new File([selectedFile.slice(0, NORMALIZATION_PREVIEW_BYTES)], selectedFile.name, { type: selectedFile.type, lastModified: selectedFile.lastModified })
       : selectedFile;
     form.append("file", previewFile);
     form.append("evidenceType", draft.evidenceType);
@@ -1978,8 +1993,6 @@ function UploadPage() {
     form.append("caseId", draft.caseNumber);
     form.append("file", selectedFile);
     form.append("evidenceType", draft.evidenceType);
-    form.append("investigator", draft.investigator);
-    form.append("department", draft.department);
     form.append("sourceLocation", draft.sourceLocation);
     form.append("priority", draft.priority);
     form.append("remarks", draft.remarks);
@@ -2201,11 +2214,11 @@ function UploadPage() {
         </div>
         <div className="surface rounded-[1.5rem] p-5">
           <h2 className="text-xl font-black text-strong">Case Details</h2>
-          <p className="mt-1 text-sm text-muted">These details go into the case record and forensic report. Defaults are prepared for the current investigation.</p>
+          <p className="mt-1 text-sm text-muted">Investigator and department come from your authenticated server profile; evidence details remain editable for this investigation.</p>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <Field label={t("caseNumber")} value={draft.caseNumber} onChange={(value) => update("caseNumber", value)} disabled />
-            <Field label={t("investigator")} value={draft.investigator} onChange={(value) => update("investigator", value)} />
-            <Field label={t("department")} value={draft.department} onChange={(value) => update("department", value)} />
+            <Field label={t("investigator")} value={draft.investigator || "Loading authenticated profile..."} onChange={() => undefined} disabled />
+            <Field label={t("department")} value={draft.department || "Loading authenticated profile..."} onChange={() => undefined} disabled />
             <Field label={t("sourceLocation")} value={draft.sourceLocation} onChange={(value) => update("sourceLocation", value)} />
             <SelectField label={t("priority")} value={draft.priority || "Select priority"} values={["Select priority", "Standard", "Urgent", "Critical"]} onChange={(value) => update("priority", value === "Select priority" ? "" : value as EvidenceIntakeForm["priority"])} />
             <SelectField label={t("evidenceType")} value={draft.evidenceType} values={EVIDENCE_TYPE_OPTIONS} onChange={(value) => update("evidenceType", value as EvidenceIntakeForm["evidenceType"])} helper={evidenceTypeHelper(draft.evidenceType)} tone={normalizationTone} />
@@ -2217,7 +2230,7 @@ function UploadPage() {
               <div className="text-sm font-semibold text-strong">Case flags</div>
               <p className="mt-1 text-xs leading-5 text-muted">Optional tags to help connect related investigations later.</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {["urgent", "ransomware", "insider-threat", "exfiltration", "related-case", "needs-review"].map((flag) => {
+                {CASE_FLAG_OPTIONS.map((flag) => {
                   const active = (draft.flags ?? []).includes(flag);
                   return (
                     <Button
@@ -3529,7 +3542,7 @@ function SystemPage() {
   const { deploymentAccess } = useNetra();
   const [health, setHealth] = useState<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string; rbac?: string; devRoleHeaders?: boolean; serviceRoleBackendOnly?: boolean; serviceRoleConfigured?: boolean; adminProfiles?: number }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; authorization?: string; publicInternet: string; actor?: string; role?: string }; incidentReadiness?: { status: string; summary: Record<string, number>; checks: { name: string; status: string; detail: string }[]; recommendedActions: string[] } } | null>(null);
   const [statusMatrix, setStatusMatrix] = useState<{ results: { area: string; targetStatus: string; detail: string; validation: string[] }[]; summary: { total: number; validated: number; gated: number } } | null>(null);
-  const [mlStatus, setMlStatus] = useState<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string } | null>(null);
+  const [mlStatus, setMlStatus] = useState<{ status: string; modelAvailable: boolean; experimental?: boolean; trustedArtifact?: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string } | null>(null);
   const [database, setDatabase] = useState<{ mode: string; host: string; port: string; name: string; user: string; tables: number; forensicsTables: string[]; access?: { mode: string; label: string; authentication: string; publicInternet: string } } | null>(null);
   const [metrics, setMetrics] = useState<Record<string, number>>({});
   const [deadLetters, setDeadLetters] = useState<{ id: string; workerName: string; caseId: string; error: string; status: string }[]>([]);
@@ -3541,7 +3554,7 @@ function SystemPage() {
       apiGet<{ status: string; checks: Record<string, { status: string; latencyMs?: number; detail?: string; rbac?: string; devRoleHeaders?: boolean; serviceRoleBackendOnly?: boolean; serviceRoleConfigured?: boolean; adminProfiles?: number }>; database?: { mode: string; host: string; port: string; name: string; tables: number }; access?: { mode: string; label: string; authentication: string; authorization?: string; publicInternet: string; actor?: string; role?: string } }>("/system/health/deep").then(setHealth).catch(() => undefined);
       apiGet<{ mode: string; host: string; port: string; name: string; user: string; tables: number; forensicsTables: string[]; access?: { mode: string; label: string; authentication: string; publicInternet: string } }>("/system/database").then(setDatabase).catch(() => undefined);
       apiGet<{ results: { area: string; targetStatus: string; detail: string; validation: string[] }[]; summary: { total: number; validated: number; gated: number } }>("/system/status-matrix").then(setStatusMatrix).catch(() => undefined);
-      apiGet<{ status: string; modelAvailable: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string }>("/ml/model-status").then(setMlStatus).catch(() => undefined);
+      apiGet<{ status: string; modelAvailable: boolean; experimental?: boolean; trustedArtifact?: boolean; version?: string; modelType?: string; trainingRows?: number; metrics?: Record<string, unknown>; detail?: string }>("/ml/model-status").then(setMlStatus).catch(() => undefined);
       apiGet<Record<string, number>>("/system/metrics").then(setMetrics).catch(() => undefined);
       apiGet<{ results: typeof deadLetters }>("/system/dead-letter").then((payload) => setDeadLetters(payload.results)).catch(() => undefined);
       apiGet<{ processingMode?: string; queueProvider?: string; workerMode?: string; results: { name: string; status: string; lastSeen?: string; currentJobId?: string; replicaCount?: number }[] }>("/system/workers").then(setWorkerStatus).catch(() => undefined);
@@ -3606,14 +3619,15 @@ function SystemPage() {
         </div>
       </div>
       <div className="surface rounded-[1.5rem] p-5">
-        <h2 className="text-xl font-black text-strong">ML anomaly model</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-black text-strong">ML anomaly model</h2><Badge variant="warning">Experimental</Badge></div>
         <div className="mt-4 grid gap-2 md:grid-cols-4">
           <MetadataRow label="Mode" value={mlStatus?.status ?? "-"} />
-          <MetadataRow label="Model" value={mlStatus?.modelAvailable ? "available" : "fallback scoring"} />
+          <MetadataRow label="Model" value={mlStatus?.modelAvailable ? "experimental / available" : "fallback scoring"} />
           <MetadataRow label="Version" value={mlStatus?.version ?? "-"} />
           <MetadataRow label="Training rows" value={`${mlStatus?.trainingRows ?? 0}`} />
         </div>
-        <p className="mt-3 text-sm text-muted">{mlStatus?.detail ?? (mlStatus?.modelAvailable ? "Trained model metadata is available. Reports still include explainable feature context." : "Run npm run netra:benchmark:ml to train the optional anomaly model.")}</p>
+        <p className="mt-3 text-sm text-muted">{mlStatus?.detail ?? (mlStatus?.modelAvailable ? "Experimental model is available for triage only; reports retain explainable feature context." : "Explainable fallback scoring is active.")}</p>
+        <p className="mt-2 text-xs leading-5 text-muted">Model output assists investigator review and must not be presented as a standalone forensic or legal conclusion. Trusted artifact: {mlStatus?.trustedArtifact ? "verified" : "not verified"}.</p>
       </div>
       <div className="surface rounded-[1.5rem] p-5">
         <h2 className="text-xl font-black text-strong">Database</h2>
@@ -4053,7 +4067,7 @@ function CaseDetailPage() {
   }
 
   async function addFlag() {
-    if (!record || !flagInput.trim()) return;
+    if (!record || !CASE_FLAG_OPTIONS.includes(flagInput as (typeof CASE_FLAG_OPTIONS)[number])) return;
     const response = await fetch(`${API_BASE}/cases/${record.id}/flags`, { method: "POST", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ flags: [flagInput.trim()] }) });
     const payload = await response.json();
     if (!response.ok) {
@@ -4134,7 +4148,7 @@ function CaseDetailPage() {
               </div>
               <div className="mt-5 grid gap-3">
                 <div className="flex gap-2">
-                  <Input value={flagInput} onChange={(event) => setFlagInput(event.target.value)} placeholder="Add flag, e.g. exfiltration" />
+                  <SelectField label="Approved case flag" value={flagInput || "Select flag"} values={["Select flag", ...CASE_FLAG_OPTIONS]} onChange={(value) => setFlagInput(value === "Select flag" ? "" : value)} />
                   <Button type="button" onClick={addFlag}>Add</Button>
                 </div>
                 <div className="flex flex-wrap gap-2">{(record.flags ?? []).map((flag) => <Badge key={flag} variant="secondary">{flag}</Badge>)}</div>
