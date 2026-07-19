@@ -146,6 +146,35 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         quoted_object = urllib.parse.quote(object_name, safe="/")
         return f"{self._base_url()}/storage/v1/object/{quoted_bucket}/{quoted_object}"
 
+    def _cache_path(self, bucket: str, object_name: str) -> Path:
+        # Object names are external identifiers. Hash both components so a
+        # malformed name cannot escape the private cache directory.
+        bucket_key = hashlib.sha256(bucket.encode("utf-8")).hexdigest()[:16]
+        object_key = hashlib.sha256(object_name.encode("utf-8")).hexdigest()
+        return settings.NETRA_STORAGE_ROOT / ".supabase-cache" / bucket_key / object_key
+
+    def _write_cache(self, bucket: str, object_name: str, content: bytes) -> Path:
+        cache_path = self._cache_path(bucket, object_name)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, dir=cache_path.parent) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content)
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, cache_path)
+        return cache_path
+
+    def _cache_uploaded_file(self, bucket: str, object_name: str, source: Path) -> None:
+        cache_path = self._cache_path(bucket, object_name)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, dir=cache_path.parent) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            shutil.copyfile(source, temporary_path)
+            os.chmod(temporary_path, 0o600)
+            os.replace(temporary_path, cache_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
     def uri_for(self, path: str | Path) -> str:
         target = Path(path).resolve()
         root = settings.NETRA_STORAGE_ROOT.resolve()
@@ -160,29 +189,21 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         if not raw.startswith(self.scheme):
             return super().resolve(storage_uri)
         bucket, object_name = self._parse_uri(raw)
-        cache_path = settings.NETRA_STORAGE_ROOT / ".supabase-cache" / bucket / object_name
+        cache_path = self._cache_path(bucket, object_name)
         if not cache_path.exists():
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(self._download_bytes(bucket, object_name))
+            self._write_cache(bucket, object_name, self._download_bytes_uncached(bucket, object_name))
         return cache_path
 
     def open_encrypted(self, storage_uri: str | Path, mode: str = "rb"):
         if str(storage_uri).startswith(self.scheme) and "r" in mode:
-            bucket, object_name = self._parse_uri(storage_uri)
-            handle = tempfile.NamedTemporaryFile(delete=False)
-            handle.write(self._download_bytes(bucket, object_name))
-            handle.close()
-            return Path(handle.name).open(mode)
+            return self.resolve(storage_uri).open(mode)
         return super().open_encrypted(storage_uri, mode)
 
     def stat(self, storage_uri: str | Path) -> StorageStat:
         if not str(storage_uri).startswith(self.scheme):
             return super().stat(storage_uri)
-        bucket, object_name = self._parse_uri(storage_uri)
-        content = self._download_bytes(bucket, object_name)
-        import hashlib
-
-        return StorageStat(size_bytes=len(content), sha256=hashlib.sha256(content).hexdigest())
+        cached = self.resolve(storage_uri)
+        return StorageStat(size_bytes=cached.stat().st_size, sha256=sha256_file(cached))
 
     def delete(self, storage_uri: str | Path) -> None:
         if not str(storage_uri).startswith(self.scheme):
@@ -191,6 +212,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, method="DELETE", headers=self._auth_headers())
         self._request(request, expected={200, 204, 404})
+        self._cache_path(bucket, object_name).unlink(missing_ok=True)
 
     def verify_hash(self, storage_uri: str | Path, expected_sha256: str) -> bool:
         try:
@@ -202,8 +224,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
         if str(source_uri).startswith(self.scheme):
-            bucket, object_name = self._parse_uri(source_uri)
-            target.write_bytes(self._download_bytes(bucket, object_name))
+            shutil.copyfile(self.resolve(source_uri), target)
             return target
         return super().copy_encrypted(source_uri, destination)
 
@@ -247,8 +268,19 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         if upsert:
             request.add_header("x-upsert", "true")
         self._request(request, expected={200, 201})
+        # Workers share NETRA_STORAGE_ROOT in production. Caching the encrypted
+        # upload prevents validation and analysis from downloading it again.
+        self._cache_uploaded_file(bucket, object_name, path)
 
     def _download_bytes(self, bucket: str, object_name: str) -> bytes:
+        cache_path = self._cache_path(bucket, object_name)
+        if cache_path.exists():
+            return cache_path.read_bytes()
+        content = self._download_bytes_uncached(bucket, object_name)
+        self._write_cache(bucket, object_name, content)
+        return content
+
+    def _download_bytes_uncached(self, bucket: str, object_name: str) -> bytes:
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, method="GET", headers=self._headers())
         return self._request(request, expected={200})
@@ -256,6 +288,12 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
     def health_check(self) -> dict:
         request = urllib.request.Request(f"{self._base_url()}/storage/v1/bucket", method="GET", headers=self._headers("application/json"))
         self._request(request, expected={200})
+        if not settings.NETRA_STORAGE_DEEP_HEALTHCHECK:
+            return {
+                "status": "ok",
+                "provider": "supabase-storage",
+                "detail": "bucket access probe succeeded; deep object transfer probe disabled",
+            }
         bucket = settings.SUPABASE_STORAGE_BUCKET_EVIDENCE
         probe_name = f"health/netra-storage-probe-{uuid4().hex}.txt"
         probe = tempfile.NamedTemporaryFile(delete=False)
