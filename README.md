@@ -40,7 +40,7 @@ Start the current production stack:
 npm run netra:start
 ```
 
-This builds the frontend and backend against Supabase Auth, Postgres, Storage, Realtime, and Queues. When `NETRA_SUPABASE_START_WORKERS=1`, the production worker profile is started as well.
+This builds the frontend and backend against Supabase Auth, Postgres, Storage, Realtime, and Queues. The default `hackathon-core` profile enables `NETRA_FREE_PLAN_GUARD`: evidence uploads are capped at 25 MiB, replay, direct uploads, deep Storage transfer probes, browser Realtime, and Supabase workers are disabled. Set `NETRA_FREE_PLAN_GUARD=0` before explicitly enabling those higher-traffic features on a paid deployment.
 
 Open:
 
@@ -61,11 +61,13 @@ npm run netra:sensor:interfaces
 npm run netra:sensor:start
 ```
 
-Equivalent direct Docker command:
+Equivalent direct Docker command for the Free-plan-safe web stack:
 
 ```powershell
-docker compose --env-file .env.supabase.production.local -f infra/docker/compose.netra-production.yml --profile workers up --build -d --remove-orphans
+docker compose --env-file .env.supabase.production.local -f infra/docker/compose.netra-production.yml up --build -d --remove-orphans frontend backend
 ```
+
+Supabase egress is cumulative within a billing cycle. Keep production validation against small fixtures, and do not enable deep Storage health checks for a continuously polled health endpoint.
 
 ## Evidence Upload
 
