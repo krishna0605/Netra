@@ -4,6 +4,7 @@
 *.env.example
 **/*.env.example
 railway.env.example
+!/.env.supabase.production.example
 *.local
 *.pem
 *.key
@@ -35,6 +36,7 @@ credentials/
 !/infra/scripts/start-netra-production.ps1
 !/infra/scripts/stop-netra.ps1
 !/infra/scripts/validate-production-phase11.ps1
+!/infra/scripts/migrate-netra-database.ps1
 
 # Packet captures, evidence, and generated forensic artifacts
 *.pcap
