@@ -2213,7 +2213,7 @@ def _probe_security() -> dict:
             status = "degraded"
     admin_count = _admin_count()
     if admin_count < 1:
-        details.append("No Netra Admin profile exists yet; the next authenticated Supabase user will bootstrap Admin.")
+        details.append("No Netra Admin profile exists yet; provision one server-side before production use.")
         if status == "ok":
             status = "degraded"
     return {
