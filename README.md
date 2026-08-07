@@ -1,5 +1,10 @@
 # Netra
 
+For the egress-limited Supabase project migration, use the guarded
+[`docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md`](docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md)
+runbook. It keeps source access behind an explicit quota-reset gate and excludes
+sessions, queued messages, and Realtime publications.
+
 Netra is a network and packet forensics platform for authorized cybercrime investigation workflows. It supports PCAP upload, packet parsing with `tshark` and Zeek, protocol and session analysis, alerting, anomaly views, evidence metadata, and report generation.
 
 > Use Netra only with packet captures and networks you are authorized to analyze.

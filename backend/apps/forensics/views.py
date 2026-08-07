@@ -16,14 +16,14 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.db import connection, transaction
-from django.db.models import Exists, F, OuterRef, Prefetch, Q
+from django.db.models import Exists, F, OuterRef, Prefetch, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, UserProfile, WorkerHeartbeat
+from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
@@ -2006,16 +2006,21 @@ def ml_model_status(request):
 
 
 def system_metrics(_request):
+    # Keep this operational endpoint on narrow, aggregate-only queries. Loading
+    # ProcessingJob.stats here used to pull every analysis JSON document from
+    # Supabase on every dashboard refresh, causing database egress to scale with
+    # historical evidence rather than with the tiny metrics response.
+    indexed_packets = SessionSummary.objects.aggregate(total=Sum("packet_count"))["total"] or 0
     return JsonResponse(
         {
             "cases": Case.objects.count(),
             "evidenceFiles": EvidenceFile.objects.count(),
-            "alerts": sum(len((job.stats.get("analysis") or {}).get("alerts", [])) for job in ProcessingJob.objects.all()),
-            "criticalAlerts": sum(1 for job in ProcessingJob.objects.all() for alert in (job.stats.get("analysis") or {}).get("alerts", []) if alert.get("severity") == "critical"),
+            "alerts": Alert.objects.count(),
+            "criticalAlerts": Alert.objects.filter(severity=Alert.Severity.CRITICAL).count(),
             "queuedJobs": ProcessingJob.objects.filter(status=ProcessingJob.Status.QUEUED).count(),
             "failedJobs": ProcessingJob.objects.filter(status=ProcessingJob.Status.FAILED).count(),
             "deadLetterEvents": DeadLetterEvent.objects.exclude(status=DeadLetterEvent.Status.RESOLVED).count(),
-            "indexedPackets": sum((job.stats.get("indexed") or {}).get("packets", 0) for job in ProcessingJob.objects.all()),
+            "indexedPackets": indexed_packets,
             "storageBytes": sum(path.stat().st_size for path in settings.NETRA_STORAGE_ROOT.rglob("*") if path.is_file()) if settings.NETRA_STORAGE_ROOT.exists() else 0,
         }
     )

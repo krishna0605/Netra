@@ -20,7 +20,7 @@ x-production-env: &production-env
     NETRA_DATABASE_MODE: supabase
     NETRA_STORAGE_PROVIDER: supabase
     NETRA_QUEUE_PROVIDER: supabase-pgmq
-    NETRA_REALTIME_PROVIDER: supabase
+    NETRA_REALTIME_PROVIDER: ${NETRA_REALTIME_PROVIDER:-sse}
     NETRA_AUTH_PROVIDER: supabase
     NETRA_ACCESS_MODE: supabase-auth
     NETRA_DEV_ROLE_HEADERS: "0"
@@ -69,6 +69,7 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?VITE_SUPABASE_ANON_KEY is required}
         VITE_SUPABASE_REALTIME_ENABLED: ${VITE_SUPABASE_REALTIME_ENABLED:-0}
+        VITE_NETRA_FREE_PLAN_GUARD: ${VITE_NETRA_FREE_PLAN_GUARD:-1}
     ports:
       - "${NETRA_HTTP_BIND:-0.0.0.0}:8080:80"
     depends_on:
@@ -81,7 +82,7 @@ services:
       context: ../..
       dockerfile: backend/Dockerfile
     <<: *production-env
-    command: sh -c "python manage.py migrate --run-syncdb && (python manage.py bootstrap_supabase || echo 'Supabase bootstrap failed; continuing so the API can start. Check Supabase keys/buckets.') && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${NETRA_GUNICORN_WORKERS:-2} --timeout ${NETRA_GUNICORN_TIMEOUT:-240}"
+    command: sh -c "python manage.py migrate --noinput && python manage.py bootstrap_supabase && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${NETRA_GUNICORN_WORKERS:-2} --timeout ${NETRA_GUNICORN_TIMEOUT:-240}"
     expose:
       - "8000"
     volumes:

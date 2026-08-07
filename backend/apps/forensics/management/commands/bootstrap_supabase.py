@@ -30,7 +30,14 @@ REALTIME_TABLES = [
 
 
 class Command(BaseCommand):
-    help = "Bootstrap Supabase extensions, queues, private buckets, and realtime publication for Netra."
+    help = "Bootstrap egress-safe Supabase extensions, queues, private buckets, and optional realtime for Netra."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--deep-storage-check",
+            action="store_true",
+            help="Upload, download, and delete one tiny probe per bucket. Never use this for routine startup checks.",
+        )
 
     def handle(self, *args, **options):
         if getattr(settings, "NETRA_DATABASE_PROVIDER", "") != "supabase":
@@ -38,19 +45,16 @@ class Command(BaseCommand):
         created = {
             "extensions": self._extensions(),
             "queues": self._queues(),
-            "buckets": self._buckets(),
+            "buckets": self._buckets(deep_storage_check=options["deep_storage_check"]),
             "realtimeTables": self._realtime_tables(),
         }
         self.stdout.write(json.dumps(created, indent=2))
         self.stdout.write(self.style.SUCCESS("Supabase bootstrap completed."))
 
     def _extensions(self) -> list[str]:
-        statements = [
-            "create extension if not exists pgcrypto with schema extensions",
-            "create extension if not exists pg_trgm with schema extensions",
-            "create extension if not exists pgmq",
-            "create extension if not exists pg_cron",
-        ]
+        # Supabase provisions pgcrypto. Netra's schedules and retention are
+        # Django workers, and the repository has no pg_trgm queries or indexes.
+        statements = ["create extension if not exists pgmq"]
         completed = []
         with connection.cursor() as cursor:
             for statement in statements:
@@ -71,7 +75,7 @@ class Command(BaseCommand):
                 completed.append(f"created:{queue_name}")
         return completed
 
-    def _buckets(self) -> list[str]:
+    def _buckets(self, *, deep_storage_check: bool = False) -> list[str]:
         if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
             return ["skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"]
         existing = self._storage_request("/storage/v1/bucket", method="GET")
@@ -84,8 +88,11 @@ class Command(BaseCommand):
                 body = json.dumps({"id": bucket, "name": bucket, "public": False}).encode("utf-8")
                 self._storage_request("/storage/v1/bucket", method="POST", body=body)
                 completed.append(f"created:{bucket}")
-            self._probe_bucket(bucket)
-            completed.append(f"verified:{bucket}")
+            if deep_storage_check:
+                self._probe_bucket(bucket)
+                completed.append(f"deep-verified:{bucket}")
+            else:
+                completed.append(f"metadata-verified:{bucket}")
         return completed
 
     def _realtime_tables(self) -> list[str]:
@@ -96,13 +103,25 @@ class Command(BaseCommand):
             cursor.execute("select exists(select 1 from pg_publication where pubname = 'supabase_realtime')")
             if not cursor.fetchone()[0]:
                 return ["skipped: supabase_realtime publication is not available"]
+            realtime_enabled = (
+                getattr(settings, "NETRA_REALTIME_PROVIDER", "") == "supabase"
+                and not getattr(settings, "NETRA_FREE_PLAN_GUARD", False)
+            )
             for table in tables:
                 cursor.execute("select exists(select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = %s)", [table])
-                if cursor.fetchone()[0]:
-                    completed.append(f"reused:{table}")
+                published = cursor.fetchone()[0]
+                if not realtime_enabled:
+                    if published:
+                        cursor.execute(f'alter publication supabase_realtime drop table public."{table}"')
+                        completed.append(f"removed:{table}")
+                    else:
+                        completed.append(f"disabled:{table}")
                     continue
-                cursor.execute(f'alter publication supabase_realtime add table public."{table}"')
-                completed.append(f"added:{table}")
+                if published:
+                    completed.append(f"reused:{table}")
+                else:
+                    cursor.execute(f'alter publication supabase_realtime add table public."{table}"')
+                    completed.append(f"added:{table}")
         return completed
 
     def _storage_request(self, path: str, method: str, body: bytes | None = None) -> str:
