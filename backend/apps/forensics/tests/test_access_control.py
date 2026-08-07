@@ -3,10 +3,12 @@ import re
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import Case, CaseMembership, Export, Report, UserProfile
+from apps.forensics.models import Case, CaseMembership, Export, ProcessingJob, Report, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
 from common.audit import sync_supabase_actor
 from common.vault import fernet
@@ -191,6 +193,29 @@ class ApiAccessControlTests(TestCase):
             self.assertEqual(response.status_code, 404, path)
             self.assertEqual(response.json()["code"], "feature_disabled")
         self.assertEqual(self.client.get("/api/system/metrics", **headers).status_code, 200)
+
+    def test_system_metrics_does_not_transfer_processing_job_analysis_json(self):
+        _admin, headers = self._user("metrics-admin@example.test", "Admin")
+        case = self._case("CASE-METRICS-EGRESS")
+        ProcessingJob.objects.create(
+            id="job-metrics-egress",
+            case=case,
+            status=ProcessingJob.Status.COMPLETED,
+            stats={"analysis": {"payload": "large-analysis-document"}},
+            events=[{"detail": "large-event-history"}],
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get("/api/system/metrics", **headers)
+
+        self.assertEqual(response.status_code, 200)
+        processing_job_queries = [
+            query["sql"].lower()
+            for query in captured.captured_queries
+            if "forensics_processingjob" in query["sql"].lower()
+        ]
+        self.assertTrue(processing_job_queries)
+        self.assertFalse(any('"stats"' in query or '"events"' in query for query in processing_job_queries))
 
     def test_hosted_setup_endpoint_is_disabled(self):
         _admin, headers = self._user("admin@example.test", "Admin")
