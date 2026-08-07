@@ -108,7 +108,9 @@ NETRA_ELASTICSEARCH_URL = os.getenv("NETRA_ELASTICSEARCH_URL", "http://localhost
 SUPABASE_PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+# Prefer Supabase's modern opaque server key. Keep the legacy variable as a
+# compatibility fallback for existing deployments during a controlled cutover.
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET_EVIDENCE = os.getenv("SUPABASE_STORAGE_BUCKET_EVIDENCE", "netra-evidence")
 SUPABASE_STORAGE_BUCKET_CAPTURE_CHUNKS = os.getenv("SUPABASE_STORAGE_BUCKET_CAPTURE_CHUNKS", "netra-capture-chunks")
 SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS = os.getenv("SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS", "netra-analysis-chunks")
