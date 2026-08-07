@@ -1131,6 +1131,8 @@ async function apiGet<T>(path: string): Promise<T> {
 }
 
 const WORKSPACE_CACHE_TTL_MS = 15_000;
+const BACKGROUND_ANALYSIS_REFRESH_MS = 5 * 60_000;
+const TECHNICAL_STATUS_REFRESH_MS = 60_000;
 const workspaceResponseCache = new Map<string, { expiresAt: number; request: Promise<CaseWorkspaceRecord> }>();
 let workspaceCacheAuthToken = "";
 
@@ -1369,8 +1371,9 @@ function NetraProvider({ children }: { children: ReactNode }) {
     });
     if (!SUPABASE_REALTIME_ENABLED) {
       const pollTimer = window.setInterval(() => {
-        if (document.visibilityState === "visible") scheduleRefresh();
-      }, 30_000);
+        const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
+        if (document.visibilityState === "visible" && isProtectedAppRoute && getCurrentAccessToken()) scheduleRefresh();
+      }, BACKGROUND_ANALYSIS_REFRESH_MS);
       return () => {
         window.clearInterval(pollTimer);
         subscription.unsubscribe();
@@ -3885,7 +3888,9 @@ function SystemPage() {
       apiGet<CapacityRecord>("/system/capacity").then(setCapacity).catch(() => undefined);
     }
     refresh();
-    const interval = window.setInterval(refresh, 10000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, TECHNICAL_STATUS_REFRESH_MS);
     return () => window.clearInterval(interval);
   }, []);
   return (
