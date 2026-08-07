@@ -40,7 +40,7 @@ Create these as Railway **shared variables** so the API and worker cannot drift.
 | `SUPABASE_PROJECT_REF` | `frjzewpyjgirorbguegm` | Public identifier. |
 | `SUPABASE_URL` | Target project API URL | Server-side Supabase client URL. |
 | `SUPABASE_ANON_KEY` | Target active publishable key | Compatibility name used by the current backend. It must not contain the secret/service-role key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Target service-role/secret key | Railway only; sensitive; never add to Vercel or a `VITE_` variable. |
+| `SUPABASE_SECRET_KEY` | Dedicated target `sb_secret_...` key | Railway only; sensitive; never add to Vercel or a `VITE_` variable. Remove the legacy `SUPABASE_SERVICE_ROLE_KEY` variable after cutover. |
 | `DJANGO_SECRET_KEY` | Existing production value | Preserve exactly; do not rotate during the database migration. |
 | `NETRA_EVIDENCE_KEY` | Existing production value | Preserve exactly or existing encrypted evidence becomes unreadable. |
 | `NETRA_EVIDENCE_KEY_ID` | Existing production value | Preserve exactly. |
@@ -106,7 +106,7 @@ policy is approved.
 Never add any of the following to Vercel:
 
 - `DATABASE_URL` or either database URL alias
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_SECRET_KEY` or the legacy `SUPABASE_SERVICE_ROLE_KEY`
 - `DJANGO_SECRET_KEY`
 - `NETRA_EVIDENCE_KEY` or previous evidence keys
 - sensor or webhook secrets

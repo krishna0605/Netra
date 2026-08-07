@@ -14,6 +14,7 @@ from pathlib import Path
 from django.conf import settings
 
 from common.hashing import sha256_file
+from common.supabase_keys import elevated_api_headers
 
 
 @dataclass(frozen=True)
@@ -112,19 +113,10 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         return settings.SUPABASE_SERVICE_ROLE_KEY
 
     def _headers(self, content_type: str = "application/octet-stream") -> dict[str, str]:
-        key = self._service_key()
-        return {
-            "Authorization": f"Bearer {key}",
-            "apikey": key,
-            "Content-Type": content_type,
-        }
+        return elevated_api_headers(self._service_key(), content_type=content_type)
 
     def _auth_headers(self) -> dict[str, str]:
-        key = self._service_key()
-        return {
-            "Authorization": f"Bearer {key}",
-            "apikey": key,
-        }
+        return elevated_api_headers(self._service_key())
 
     def _bucket_for_relative(self, relative: Path) -> str:
         root_folder = relative.parts[0] if relative.parts else "pcaps"

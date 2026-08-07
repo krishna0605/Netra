@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db import connection
 
 from common.kafka import TOPIC_QUEUE_MAP
+from common.supabase_keys import elevated_api_headers
 
 
 BUCKETS = [
@@ -130,7 +131,7 @@ class Command(BaseCommand):
             f"{settings.SUPABASE_URL.rstrip('/')}{path}",
             method=method,
             data=body,
-            headers={"Authorization": f"Bearer {key}", "apikey": key, "Content-Type": "application/json"},
+            headers=elevated_api_headers(key, content_type="application/json"),
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
@@ -145,10 +146,10 @@ class Command(BaseCommand):
         key = settings.SUPABASE_SERVICE_ROLE_KEY
         object_name = f"bootstrap/netra-bootstrap-probe-{uuid.uuid4().hex}.txt"
         url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_name}"
-        headers = {"Authorization": f"Bearer {key}", "apikey": key, "Content-Type": "text/plain", "x-upsert": "true"}
+        headers = {**elevated_api_headers(key, content_type="text/plain"), "x-upsert": "true"}
         upload = urllib.request.Request(url, method="POST", data=b"netra-bootstrap-probe", headers=headers)
-        download = urllib.request.Request(url, method="GET", headers={"Authorization": f"Bearer {key}", "apikey": key})
-        delete = urllib.request.Request(url, method="DELETE", headers={"Authorization": f"Bearer {key}", "apikey": key, "Content-Type": "application/json"})
+        download = urllib.request.Request(url, method="GET", headers=elevated_api_headers(key))
+        delete = urllib.request.Request(url, method="DELETE", headers=elevated_api_headers(key, content_type="application/json"))
         try:
             with urllib.request.urlopen(upload, timeout=30) as response:
                 response.read()
