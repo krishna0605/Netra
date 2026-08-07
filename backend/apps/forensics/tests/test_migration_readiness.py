@@ -23,6 +23,12 @@ class FreePlanMigrationReadinessTests(SimpleTestCase):
         ):
             self.assertEqual(checks[name]["status"], "pass")
 
+    @override_settings(NETRA_QUEUE_PROVIDER="postgres-row-lock")
+    def test_existing_postgres_worker_topology_is_a_valid_queue_provider(self):
+        checks = {item["name"]: item for item in deployment_readiness_payload()["checks"]}
+
+        self.assertEqual(checks["queue-provider"]["status"], "pass")
+
     @override_settings(NETRA_REALTIME_PROVIDER="sse")
     def test_status_matrix_does_not_claim_database_realtime_is_enabled(self):
         realtime = next(item for item in status_matrix_payload()["results"] if item["area"] == "Supabase Realtime")
