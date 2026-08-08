@@ -83,13 +83,8 @@ def _paged(rows: list[dict], request) -> dict:
     return {"count": len(rows), "limit": limit, "offset": offset, "nextOffset": next_offset, "results": sliced}
 
 
-def _analysis(request=None, case_id: str | None = None) -> dict:
-    selected_case = case_id or (request.GET.get("caseId") if request is not None else None)
-    if request is not None and not selected_case:
-        selected_case = _selected_case_id(request)
-        if actor_from_request(request).role != "Admin" and not selected_case:
-            return empty_analysis()
-    return analysis_for_case(selected_case) or empty_analysis()
+def _analysis(case_id: str) -> dict:
+    return analysis_for_case(case_id) or empty_analysis()
 
 
 def _selected_case_id(request) -> str:
@@ -102,8 +97,8 @@ def _selected_case_id(request) -> str:
     return visible_cases_for_actor(actor).order_by("-updated_at").values_list("id", flat=True).first() or ""
 
 
-def _results(key: str, request=None) -> list[dict]:
-    return _analysis(request).get(key, [])
+def _results(key: str, request) -> list[dict]:
+    return _analysis(_selected_case_id(request)).get(key, [])
 
 
 def _is_probable_validator_case(case: Case) -> bool:
@@ -2353,7 +2348,7 @@ def _dead_letter_dict(row: DeadLetterEvent) -> dict:
 
 
 def dashboard_summary(request):
-    analysis = _analysis(request)
+    analysis = _analysis(_selected_case_id(request))
     return JsonResponse(
         dashboard_summary_payload(request.GET.get("caseId") or analysis.get("caseId", ""))
         | {
@@ -2365,11 +2360,11 @@ def dashboard_summary(request):
 
 
 def traffic_timeline(request):
-    return JsonResponse({"results": _analysis(request).get("trafficTimeline", [])})
+    return JsonResponse({"results": _analysis(_selected_case_id(request)).get("trafficTimeline", [])})
 
 
 def protocol_distribution(request):
-    return JsonResponse({"results": _analysis(request).get("protocolChartData", [])})
+    return JsonResponse({"results": _analysis(_selected_case_id(request)).get("protocolChartData", [])})
 
 
 def alerts(request):
@@ -2389,8 +2384,8 @@ def packets(request):
     return JsonResponse(payload)
 
 
-def packet_detail(_request, packet_id: str):
-    packet = next((row for row in _results("packets") if row["id"] == packet_id), None)
+def packet_detail(request, packet_id: str):
+    packet = next((row for row in _results("packets", request) if row["id"] == packet_id), None)
     if not packet:
         raise Http404("Packet not found")
     return JsonResponse(packet)
@@ -2408,22 +2403,22 @@ def sessions(request):
     return JsonResponse(payload)
 
 
-def session_detail(_request, session_id: str):
-    session = next((row for row in _results("sessions") if row["id"] == session_id), None)
+def session_detail(request, session_id: str):
+    session = next((row for row in _results("sessions", request) if row["id"] == session_id), None)
     if not session:
         raise Http404("Session not found")
     return JsonResponse(session | {"reconstruction": f"{session['packetCount']} packet(s) reconstructed from uploaded PCAP metadata."})
 
 
-def session_timeline(_request, session_id: str):
-    session = next((row for row in _results("sessions") if row["id"] == session_id), None)
+def session_timeline(request, session_id: str):
+    session = next((row for row in _results("sessions", request) if row["id"] == session_id), None)
     if not session:
         return JsonResponse({"sessionId": session_id, "results": []})
     return JsonResponse({"sessionId": session_id, "results": [{"time": session["startTime"], "event": "Session started"}, {"time": session["endTime"], "event": "Session ended"}]})
 
 
 def decoder_summary(request):
-    analysis = _analysis(request)
+    analysis = _analysis(_selected_case_id(request))
     return JsonResponse(
         {
             "encryptedTrafficPolicy": "Encrypted content is not decrypted; metadata patterns are analyzed.",
@@ -2433,8 +2428,8 @@ def decoder_summary(request):
     )
 
 
-def decoder_protocol(_request, protocol: str):
-    rows = [row for row in _results("decodedProtocols") if protocol.lower() in row["protocol"].lower()]
+def decoder_protocol(request, protocol: str):
+    rows = [row for row in _results("decodedProtocols", request) if protocol.lower() in row["protocol"].lower()]
     return JsonResponse({"protocol": protocol, "results": rows})
 
 
@@ -2445,8 +2440,8 @@ def payloads(request):
     return JsonResponse({"results": rows, "searchBackend": backend})
 
 
-def payload_detail(_request, finding_id: str):
-    finding = next((row for row in _results("payloadFindings") if row["id"] == finding_id), None)
+def payload_detail(request, finding_id: str):
+    finding = next((row for row in _results("payloadFindings", request) if row["id"] == finding_id), None)
     if not finding:
         raise Http404("Payload finding not found")
     return JsonResponse(finding)
@@ -2512,22 +2507,22 @@ def anomaly_baseline(request):
 
 
 def anomaly_risk_timeline(request):
-    return JsonResponse({"results": [{"time": row["time"], "risk": min(100, row.get("alerts", 0) * 20)} for row in _analysis(request).get("trafficTimeline", [])]})
+    return JsonResponse({"results": [{"time": row["time"], "risk": min(100, row.get("alerts", 0) * 20)} for row in _analysis(_selected_case_id(request)).get("trafficTimeline", [])]})
 
 
 def graph(request):
-    return JsonResponse(_analysis(request).get("graph", {"nodes": [], "edges": []}))
+    return JsonResponse(_analysis(_selected_case_id(request)).get("graph", {"nodes": [], "edges": []}))
 
 
-def graph_node(_request, node_id: str):
-    node = next((row for row in _analysis().get("graph", {}).get("nodes", []) if row["id"] == node_id), None)
-    analysis = _analysis()
+def graph_node(request, node_id: str):
+    analysis = _analysis(_selected_case_id(request))
+    node = next((row for row in analysis.get("graph", {}).get("nodes", []) if row["id"] == node_id), None)
     related_alerts = [alert for alert in analysis.get("alerts", []) if alert["id"] in (node or {}).get("alertIds", [])]
     return JsonResponse({"id": node_id, "riskScore": node.get("risk", 0) if node else 0, "node": node, "relatedAlerts": related_alerts})
 
 
-def graph_attack_path(_request):
-    graph_data = _analysis().get("graph", {"edges": []})
+def graph_attack_path(request):
+    graph_data = _analysis(_selected_case_id(request)).get("graph", {"edges": []})
     path = [graph_data["edges"][0]["source"], graph_data["edges"][0]["target"]] if graph_data.get("edges") else []
     return JsonResponse({"path": path})
 
@@ -2537,7 +2532,7 @@ def search(request):
     case_id = _selected_case_id(request)
     query_text = request.GET.get("q", "")
     fallback_key = {"packets": "packets", "sessions": "sessions", "alerts": "alerts", "zeek": "decodedProtocols"}.get(kind, "packets")
-    rows, backend = search_index(kind if kind in {"packets", "sessions", "alerts", "zeek", "payloads"} else "packets", case_id, query_text, _analysis(request, case_id=case_id).get(fallback_key, []))
+    rows, backend = search_index(kind if kind in {"packets", "sessions", "alerts", "zeek", "payloads"} else "packets", case_id, query_text, _analysis(case_id).get(fallback_key, []))
     payload = _paged(rows, request)
     payload["searchBackend"] = backend
     return JsonResponse(payload)
@@ -2660,7 +2655,9 @@ def exports(request):
             return denied
         actor = actor_from_request(request)
         payload = _json_body(request)
-        case_id = payload.get("caseId") or request.GET.get("caseId") or _analysis().get("caseId", "")
+        case_id = str(payload.get("caseId") or request.GET.get("caseId") or "").strip()
+        if not case_id:
+            return JsonResponse({"error": "caseId is required.", "code": "analysis_scope_required"}, status=400)
         case = Case.objects.filter(id=case_id).first()
         if not case:
             raise Http404("Case not found")
@@ -2811,7 +2808,9 @@ def integration_send_alerts(request, integration_id: str):
     if not connection:
         raise Http404("Integration not found")
     payload = _json_body(request)
-    case_id = payload.get("caseId") or _analysis().get("caseId", "")
+    case_id = str(payload.get("caseId") or "").strip()
+    if not case_id:
+        return JsonResponse({"error": "caseId is required.", "code": "analysis_scope_required"}, status=400)
     analysis = _analysis(case_id=case_id)
     case = Case.objects.filter(id=case_id).first()
     deliveries = []
@@ -2887,7 +2886,9 @@ def siem_export(request):
         return denied
     actor = actor_from_request(request)
     payload = _json_body(request)
-    case_id = payload.get("caseId") or _analysis().get("caseId", "")
+    case_id = str(payload.get("caseId") or "").strip()
+    if not case_id:
+        return JsonResponse({"error": "caseId is required.", "code": "analysis_scope_required"}, status=400)
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")

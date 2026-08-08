@@ -70,6 +70,7 @@ def _resource_response(request, route_ref, job_id, collection: str, resource_id:
     return JsonResponse(row) if row else analysis_not_found(request)
 
 
+@require_http_methods(["GET"])
 def summary(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -88,16 +89,19 @@ def summary(request, route_ref, job_id):
     )
 
 
+@require_http_methods(["GET"])
 def traffic_timeline(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     return scope if isinstance(scope, JsonResponse) else JsonResponse({"results": _rows(scope, "trafficTimeline")})
 
 
+@require_http_methods(["GET"])
 def protocol_distribution(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     return scope if isinstance(scope, JsonResponse) else JsonResponse({"results": _rows(scope, "protocolChartData")})
 
 
+@require_http_methods(["GET"])
 def alerts(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -106,6 +110,7 @@ def alerts(request, route_ref, job_id):
     return JsonResponse({"results": rows})
 
 
+@require_http_methods(["GET"])
 def packets(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -118,10 +123,12 @@ def packets(request, route_ref, job_id):
     return JsonResponse(_paged(rows, request))
 
 
+@require_http_methods(["GET"])
 def packet_detail(request, route_ref, job_id, packet_id):
     return _resource_response(request, route_ref, job_id, "packets", packet_id)
 
 
+@require_http_methods(["GET"])
 def sessions(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -130,6 +137,7 @@ def sessions(request, route_ref, job_id):
     return JsonResponse(_paged(rows, request))
 
 
+@require_http_methods(["GET"])
 def session_detail(request, route_ref, job_id, session_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -140,6 +148,7 @@ def session_detail(request, route_ref, job_id, session_id):
     return JsonResponse(row | {"reconstruction": f"{row.get('packetCount', 0)} packet(s) reconstructed from uploaded PCAP metadata."})
 
 
+@require_http_methods(["GET"])
 def session_timeline(request, route_ref, job_id, session_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -158,6 +167,7 @@ def session_timeline(request, route_ref, job_id, session_id):
     )
 
 
+@require_http_methods(["GET"])
 def decoder(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -171,6 +181,7 @@ def decoder(request, route_ref, job_id):
     )
 
 
+@require_http_methods(["GET"])
 def decoder_protocol(request, route_ref, job_id, protocol):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -179,6 +190,7 @@ def decoder_protocol(request, route_ref, job_id, protocol):
     return JsonResponse({"protocol": protocol, "results": rows})
 
 
+@require_http_methods(["GET"])
 def payloads(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -187,10 +199,12 @@ def payloads(request, route_ref, job_id):
     return JsonResponse({"results": rows})
 
 
+@require_http_methods(["GET"])
 def payload_detail(request, route_ref, job_id, finding_id):
     return _resource_response(request, route_ref, job_id, "payloadFindings", finding_id)
 
 
+@require_http_methods(["GET"])
 def detections(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -202,11 +216,13 @@ def detections(request, route_ref, job_id):
     return JsonResponse({"results": rows})
 
 
+@require_http_methods(["GET"])
 def anomalies(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     return scope if isinstance(scope, JsonResponse) else JsonResponse({"results": _rows(scope, "anomalies")})
 
 
+@require_http_methods(["GET"])
 def anomaly_baseline(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -221,6 +237,7 @@ def anomaly_baseline(request, route_ref, job_id):
     )
 
 
+@require_http_methods(["GET"])
 def anomaly_risk_timeline(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -228,11 +245,13 @@ def anomaly_risk_timeline(request, route_ref, job_id):
     return JsonResponse({"results": [{"time": row.get("time"), "risk": min(100, row.get("alerts", 0) * 20)} for row in _rows(scope, "trafficTimeline")]})
 
 
+@require_http_methods(["GET"])
 def graph(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     return scope if isinstance(scope, JsonResponse) else JsonResponse(scope.analysis.get("graph", {"nodes": [], "edges": []}))
 
 
+@require_http_methods(["GET"])
 def graph_node(request, route_ref, job_id, node_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):
@@ -245,6 +264,7 @@ def graph_node(request, route_ref, job_id, node_id):
     return JsonResponse({"id": node_id, "riskScore": node.get("risk", 0), "node": node, "relatedAlerts": related_alerts})
 
 
+@require_http_methods(["GET"])
 def graph_attack_path(request, route_ref, job_id):
     scope = _scope_or_error(request, route_ref, job_id)
     if isinstance(scope, JsonResponse):

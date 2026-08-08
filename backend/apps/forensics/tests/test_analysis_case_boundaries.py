@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import Alert, Case, CaseHistoryEvent, CaseMembership, CustodyLedgerEvent, DetectionMatch, ProcessingJob, UserProfile
+from apps.forensics.urls import urlpatterns as api_urlpatterns
 
 
 SECURE_TEST_SETTINGS = override_settings(
@@ -111,6 +114,63 @@ class AnalysisCaseBoundaryTests(TestCase):
             response = self.client.get(path, **self.alice_headers)
             self.assertEqual(response.status_code, 404, path)
             self.assertEqual(response.json()["error"]["code"], "analysis_resource_not_found")
+
+    def test_analysis_route_inventory_is_explicit_and_scoped(self):
+        expected_canonical = {
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/summary",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/traffic-timeline",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/protocol-distribution",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/alerts",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/alerts/<str:alert_id>/status",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/packets",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/packets/<str:packet_id>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions/<str:session_id>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions/<str:session_id>/timeline",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/decoder",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/decoder/<str:protocol>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/payloads",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/payloads/<str:finding_id>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/detections",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/detections/<str:match_id>/status",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies/baseline-comparison",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies/risk-timeline",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/nodes/<str:node_id>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/attack-path",
+        }
+        canonical_patterns = {
+            str(pattern.pattern)
+            for pattern in api_urlpatterns
+            if "/analysis/jobs/" in str(pattern.pattern)
+        }
+        self.assertEqual(canonical_patterns, expected_canonical)
+        for pattern in api_urlpatterns:
+            if str(pattern.pattern) in expected_canonical:
+                self.assertEqual(pattern.callback.__module__, "apps.forensics.api.analysis")
+
+    def test_canonical_read_routes_reject_non_get_methods(self):
+        path = f"{self._prefix(self.alice_case, self.alice_job)}/packets"
+        self.assertEqual(self.client.get(path, **self.alice_headers).status_code, 200)
+        self.assertEqual(self.client.post(path, data={}, content_type="application/json", **self.alice_headers).status_code, 405)
+
+    def test_scope_query_uses_case_and_job_without_cross_case_job_lookup(self):
+        allowed_path = f"{self._prefix(self.alice_case, self.alice_job)}/packets/shared-packet"
+        with CaptureQueriesContext(connection) as allowed_queries:
+            response = self.client.get(allowed_path, **self.alice_headers)
+        self.assertEqual(response.status_code, 200)
+        job_queries = [query["sql"] for query in allowed_queries.captured_queries if "forensics_processingjob" in query["sql"].lower()]
+        self.assertEqual(len(job_queries), 1)
+        self.assertIn("case_id", job_queries[0].lower())
+        self.assertIn(self.alice_job.id, job_queries[0])
+
+        denied_path = f"{self._prefix(self.bob_case, self.bob_job)}/packets/shared-packet"
+        with CaptureQueriesContext(connection) as denied_queries:
+            denied = self.client.get(denied_path, **self.alice_headers)
+        self.assertEqual(denied.status_code, 404)
+        denied_job_queries = [query["sql"] for query in denied_queries.captured_queries if "forensics_processingjob" in query["sql"].lower()]
+        self.assertEqual(denied_job_queries, [])
 
     def test_workspace_and_job_must_belong_to_each_other(self):
         prefix = self._prefix(self.alice_case, self.bob_job)

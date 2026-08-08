@@ -14,37 +14,12 @@ from typing import Any
 from django.conf import settings
 
 from common.pcap import available_packet_tools
-from common.storage import ensure_storage_tree
 from netra_ml.features import extract_features
 from netra_ml.scoring import score_anomalies
 
 
-LATEST_ANALYSIS = "latest-analysis.json"
 MAX_PACKETS = 5000
 SENSITIVE_PORTS = {21, 22, 23, 25, 80, 1099, 135, 139, 443, 445, 1098, 3306, 3389, 3632, 5900, 6667, 8009, 8080}
-
-def analysis_path(filename: str = LATEST_ANALYSIS) -> Path:
-    ensure_storage_tree()
-    return settings.NETRA_STORAGE_ROOT / "logs" / filename
-
-
-def load_latest_analysis() -> dict[str, Any]:
-    path = analysis_path()
-    if not path.exists():
-        return empty_analysis()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return empty_analysis()
-
-
-def save_analysis(analysis: dict[str, Any]) -> None:
-    by_job = analysis_path(f"{analysis['jobId']}.analysis.json")
-    latest = analysis_path()
-    content = json.dumps(analysis, indent=2)
-    by_job.write_text(content, encoding="utf-8")
-    latest.write_text(content, encoding="utf-8")
-
 
 def empty_analysis() -> dict[str, Any]:
     return {
@@ -325,7 +300,6 @@ def assemble_analysis(
             "filterExecution": filter_summary or {},
         },
     }
-    save_analysis(analysis)
     return analysis
 
 

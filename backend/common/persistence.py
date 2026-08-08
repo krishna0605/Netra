@@ -46,11 +46,10 @@ def case_origin(case_id: str, intake: dict[str, Any] | None = None, default: str
     return Case.Origin.VALIDATOR if is_validator_case(case_id, intake) else default
 
 
-def analysis_for_case(case_id: str | None = None) -> dict[str, Any] | None:
-    jobs = ProcessingJob.objects.filter(status=ProcessingJob.Status.COMPLETED).order_by("-updated_at")
-    if case_id:
-        jobs = jobs.filter(case_id=case_id)
-    job = jobs.first()
+def analysis_for_case(case_id: str) -> dict[str, Any] | None:
+    if not case_id:
+        return None
+    job = ProcessingJob.objects.filter(case_id=case_id, status=ProcessingJob.Status.COMPLETED).order_by("-updated_at").first()
     if not job:
         return None
     analysis = job.stats.get("analysis")
@@ -59,11 +58,20 @@ def analysis_for_case(case_id: str | None = None) -> dict[str, Any] | None:
     return None
 
 
-def latest_job_for_case(case_id: str | None = None) -> ProcessingJob | None:
-    jobs = ProcessingJob.objects.order_by("-updated_at")
-    if case_id:
-        jobs = jobs.filter(case_id=case_id)
-    return jobs.first()
+def analysis_for_job(case_id: str, job_id: str) -> dict[str, Any] | None:
+    if not case_id or not job_id:
+        return None
+    job = ProcessingJob.objects.filter(case_id=case_id, pk=job_id, status=ProcessingJob.Status.COMPLETED).first()
+    if not job:
+        return None
+    analysis = (job.stats or {}).get("analysis")
+    return analysis if isinstance(analysis, dict) else None
+
+
+def latest_job_for_case(case_id: str) -> ProcessingJob | None:
+    if not case_id:
+        return None
+    return ProcessingJob.objects.filter(case_id=case_id).order_by("-updated_at").first()
 
 
 @transaction.atomic
