@@ -1,3 +1,5 @@
+import base64
+import binascii
 import os
 import sys
 from pathlib import Path
@@ -164,6 +166,9 @@ NETRA_TRUSTED_LAN_ROLE = os.getenv("NETRA_TRUSTED_LAN_ROLE", "LAN Operator")
 NETRA_EVIDENCE_ENCRYPTION = os.getenv("NETRA_EVIDENCE_ENCRYPTION", "on")
 NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-evidence-key")
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
+NETRA_CUSTODY_ANCHORS_ENABLED = os.getenv("NETRA_CUSTODY_ANCHORS_ENABLED", "0") == "1"
+NETRA_CUSTODY_SIGNING_PRIVATE_KEY = os.getenv("NETRA_CUSTODY_SIGNING_PRIVATE_KEY", "")
+NETRA_CUSTODY_SIGNING_KEY_ID = os.getenv("NETRA_CUSTODY_SIGNING_KEY_ID", "")
 NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
 NETRA_EVIDENCE_WRITE_FORMAT = os.getenv("NETRA_EVIDENCE_WRITE_FORMAT", "v2").lower()
 NETRA_MAX_UPLOAD_MB = max(
@@ -263,6 +268,14 @@ if not DEBUG:
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
     if NETRA_EVIDENCE_ENCRYPTION != "on" or NETRA_EVIDENCE_WRITE_FORMAT != "v2":
         raise RuntimeError("Hosted deployments require encrypted v2 artifact writes")
+    if NETRA_CUSTODY_ANCHORS_ENABLED:
+        if not NETRA_CUSTODY_SIGNING_PRIVATE_KEY or not NETRA_CUSTODY_SIGNING_KEY_ID:
+            raise RuntimeError("Signed custody anchors require a private key and stable key ID")
+        try:
+            if len(base64.b64decode(NETRA_CUSTODY_SIGNING_PRIVATE_KEY, validate=True)) != 32:
+                raise ValueError
+        except (ValueError, binascii.Error) as exc:
+            raise RuntimeError("NETRA_CUSTODY_SIGNING_PRIVATE_KEY must be 32 raw Ed25519 bytes in base64") from exc
     if NETRA_DIRECT_UPLOAD_ENABLED:
         if NETRA_DEPLOYMENT_PROFILE != "full":
             raise RuntimeError("NETRA_DIRECT_UPLOAD_ENABLED requires NETRA_DEPLOYMENT_PROFILE=full")
