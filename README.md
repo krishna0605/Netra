@@ -1,131 +1,192 @@
-# Netra
+<p align="center">
+  <img src="frontend/public/brand/netra-wordmark-full.svg" alt="Netra - network evidence, total response, assured" width="360">
+</p>
 
-For the egress-limited Supabase project migration, use the guarded
-[`docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md`](docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md)
-runbook. It keeps source access behind an explicit quota-reset gate and excludes
-sessions, queued messages, and Realtime publications.
+<h1 align="center">See the traffic. Build the case.</h1>
 
-Netra is a network and packet forensics platform for authorized cybercrime investigation workflows. It supports PCAP upload, packet parsing with `tshark` and Zeek, protocol and session analysis, alerting, anomaly views, evidence metadata, and report generation.
+<p align="center">
+  Netra is a case-oriented network forensics platform that turns authorized packet captures into structured evidence, explainable signals, custody history, and investigator-ready reports.
+</p>
 
-> Use Netra only with packet captures and networks you are authorized to analyze.
+> [!IMPORTANT]
+> Netra is a controlled demonstration and active security-remediation project. Use it only on networks and packet captures you are authorized to investigate. Automated detections support investigator review; they are not certified legal conclusions. The current remediation branch is not yet approved for production deployment.
 
-## Project Structure
+![Netra controlled-demo landing page using synthetic content](docs/assets/readme/netra-controlled-demo.webp)
 
-```txt
-backend/          Django API, forensic analysis, and worker commands
-frontend/         React/Vite investigation console served by nginx
-infra/docker/     Unified production Docker Compose configuration
-infra/scripts/    Public production start, stop, and validation scripts
-ml-services/      Explainable anomaly-analysis package
-sensor-agent/     Native Windows/Linux capture companion
-storage/          Runtime storage layout; generated contents are Git ignored
+<p align="center"><em>Synthetic demonstration data. No real identity, evidence, case, address, or credential is shown.</em></p>
+
+## What Netra does
+
+```mermaid
+flowchart LR
+    CAPTURE["Capture or upload<br/>PCAP / PCAPNG"]
+    PRESERVE["Preserve<br/>hash, encrypt, custody"]
+    DECODE["Decode<br/>packets and protocols"]
+    DETECT["Detect<br/>rules and anomalies"]
+    INVESTIGATE["Investigate<br/>sessions, graph, timeline"]
+    REPORT["Report<br/>reviewed findings and exports"]
+
+    CAPTURE --> PRESERVE --> DECODE --> DETECT --> INVESTIGATE --> REPORT
 ```
 
-## Prerequisites
+- Case-scoped evidence intake and processing jobs
+- Packet, protocol, payload, session, timeline, and communication-graph views
+- TShark and Zeek assisted analysis with rule-based and explainable anomaly signals
+- Encrypted evidence, immutable artifact generations, custody history, reports, and exports
+- Organization boundaries, role-based access, AAL2 administrator operations, and audit privacy
+- Free-plan-aware Storage caching, bounded polling, and metadata-only routine health checks
+
+## Explore Netra and its references
+
+Every QR code below resolves directly to the visible destination. Scanning is optional; each resource is also a standard link.
+
+| Resource | QR | Direct link |
+|---|---:|---|
+| Controlled live demo | <img src="docs/assets/readme/qr/live-demo.png" alt="QR code for the controlled Netra live demo" width="116"> | [Open the controlled demo](https://netra-hackathon-console-20260714.vercel.app) |
+| Source code | <img src="docs/assets/readme/qr/source-code.png" alt="QR code for the Netra GitHub repository" width="116"> | [View the GitHub repository](https://github.com/krishna0605/Netra) |
+| CIC-IDS2017 | <img src="docs/assets/readme/qr/cic-ids2017.png" alt="QR code for the CIC-IDS2017 dataset" width="116"> | [View the CIC-IDS2017 dataset](https://www.unb.ca/cic/datasets/ids-2017.html) |
+| UNSW-NB15 | <img src="docs/assets/readme/qr/unsw-nb15.png" alt="QR code for the UNSW-NB15 dataset" width="116"> | [View the UNSW-NB15 dataset](https://research.unsw.edu.au/projects/unsw-nb15-dataset) |
+| ICISSP research paper | <img src="docs/assets/readme/qr/research-paper.png" alt="QR code for the cited ICISSP paper" width="116"> | [Open the paper through its DOI](https://doi.org/10.5220/0006639801080116) |
+
+The public datasets and paper are references, not bundled training data. Their respective owners and licenses govern their use.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    USER["Authorized investigator"]
+    WEB["React + Vite console<br/>Vercel"]
+    API["Django API and workers<br/>Railway"]
+    DB["PostgreSQL<br/>Supabase"]
+    AUTH["Supabase Auth"]
+    OBJECTS["Private Supabase Storage"]
+    CACHE["Encrypted bounded cache<br/>persistent Railway volume"]
+    QUEUE["Postgres / PGMQ jobs"]
+    TOOLS["TShark, Zeek, Scapy, ML services"]
+
+    USER --> WEB --> API
+    WEB --> AUTH
+    API --> AUTH
+    API --> DB
+    API --> QUEUE
+    API --> CACHE
+    CACHE -->|"first verified immutable read only"| OBJECTS
+    API --> TOOLS
+```
+
+The browser does not receive a Supabase service-role key and does not query application tables directly. Netra application access is mediated by authenticated Django endpoints. Browser-facing Supabase Realtime is disabled; authenticated API refreshes and SSE provide application state.
+
+## Security model
+
+Netra’s remediation work is organized as independently verified phases. The current local branch includes:
+
+- workspace/job-scoped analysis reads and exact transactional finding mutations;
+- strict case identifiers, contained artifact paths, and autoescaped reports;
+- organization tenancy, audit privacy, atomic rate and queue limits, and administrator invariants;
+- AES-256-GCM chunked artifact encryption with artifact-specific HKDF domains;
+- a deterministic case-locked custody ledger with optional Ed25519 external anchors;
+- a persistent encrypted object cache with LRU eviction and hard capacity gates.
+
+New durable artifacts use immutable generation-specific paths. Legacy Fernet artifacts are decrypt-only and can be migrated only through an explicit, resumable, byte-capped command. Custody records are **tamper-evident**, not tamper-proof; direct database administrator access crosses that trust boundary.
+
+See [security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md), the [remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md), and [production migration blockers](docs/PRODUCTION_MIGRATION_MISSING.md) before treating any environment as production-ready.
+
+## Free-plan safeguards
+
+The default deployment posture is designed for Supabase Free, Railway Hobby, and Vercel Free limits:
+
+- Supabase Realtime and recurring deep Storage checks are disabled.
+- Routine health checks inspect bucket/cache metadata and transfer no object bytes.
+- The encrypted cache is capped at 600 MiB and preserves at least 200 MiB of volume free space.
+- A verified repeat read of an immutable object causes zero Supabase Storage GETs.
+- Migration execution requires an explicit project confirmation, resumable state, and source-byte ceiling.
+- Background refreshes stop on hidden tabs and avoid loading large processing JSON for summary metrics.
+- The future live migration remains capped at 0.75 GB and cannot start before the source egress quota resets.
+
+## Local quick start
+
+### Prerequisites
 
 - Docker Desktop with Docker Compose
 - Node.js and npm
-- PowerShell on Windows for the orchestration commands
-- A configured Supabase project
-- Optional: Wireshark `dumpcap` for bounded native capture
+- PostgreSQL 17 client tools for migration rehearsal
+- Optional analysis tools: TShark and Zeek
 
-## Production Setup
-
-Create the local production environment file:
+Create a local environment file from the sanitized template:
 
 ```powershell
 Copy-Item .env.supabase.production.example .env.supabase.production.local
 ```
 
-Replace every `replace-*` value in `.env.supabase.production.local`. Never commit that local file. In particular, protect the Supabase service-role key, database password, Django secret, evidence key, sensor key, and webhook signing secret.
+Replace every `replace-*` value locally. Never commit that file. Backend secrets belong in Railway or a Git-ignored local file; only `VITE_*` values may enter the public frontend bundle.
 
-Start the current production stack:
+Start the free-plan-safe web stack:
 
 ```powershell
 npm run netra:start
 ```
 
-This builds the frontend and backend against Supabase Auth, Postgres, Storage, Realtime, and Queues. The default `hackathon-core` profile enables `NETRA_FREE_PLAN_GUARD`: evidence uploads are capped at 25 MiB, replay, direct uploads, deep Storage transfer probes, browser Realtime, and Supabase workers are disabled. Set `NETRA_FREE_PLAN_GUARD=0` before explicitly enabling those higher-traffic features on a paid deployment.
-
-Open:
-
-```txt
-Console: http://localhost:8080
-Login:   http://localhost:8080/login
-```
-
-Useful public commands:
+Stop or validate it with:
 
 ```powershell
-npm run netra:start
 npm run netra:stop
 npm run netra:validate
-npm run netra:sensor:install
-npm run netra:sensor:check
-npm run netra:sensor:interfaces
-npm run netra:sensor:start
 ```
 
-Equivalent direct Docker command for the Free-plan-safe web stack:
+The production-like Docker profile keeps direct upload, replay, deep Storage probes, browser Realtime, and Supabase workers disabled until explicitly reviewed.
+
+## Development and tests
+
+Backend:
 
 ```powershell
-docker compose --env-file .env.supabase.production.local -f infra/docker/compose.netra-production.yml up --build -d --remove-orphans frontend backend
+Set-Location backend
+python manage.py test apps.forensics.tests
+python manage.py makemigrations --check --dry-run
+python manage.py check
 ```
 
-Supabase egress is cumulative within a billing cycle. Keep production validation against small fixtures, and do not enable deep Storage health checks for a continuously polled health endpoint.
-
-## Evidence Upload
-
-Packet captures are excluded from Git because they can be large and contain sensitive network data. Upload an authorized PCAP or PCAPNG through the evidence intake screen:
-
-```txt
-http://localhost:8080/app/upload
-```
-
-Investigation records are created from real evidence and investigator actions. The repository does not ship captured traffic, credentials, or seeded operational data.
-
-## Frontend Development
+Frontend:
 
 ```powershell
-cd frontend
+Set-Location frontend
 npm install
-npm run dev -- --host 127.0.0.1
-```
-
-Frontend checks:
-
-```powershell
-npm test
+npm test -- --run
 npm run lint
 npm run build
-npm run test:e2e
 ```
 
-## Sensor Agent
+PostgreSQL-specific locking tests must run against PostgreSQL 17. SQLite is useful for fast functional tests but cannot prove `SELECT FOR UPDATE` concurrency behavior.
 
-The sensor agent supports explicitly authorized bounded capture. On Windows:
+## Repository map
 
-```powershell
-npm run netra:sensor:install
-npm run netra:sensor:check
-npm run netra:sensor:interfaces
-npm run netra:sensor:start
+```text
+backend/              Django API, authorization, workers, crypto and custody
+frontend/             React/Vite investigation console
+infra/docker/         Production-like Compose configuration
+infra/scripts/        Start, stop, validation and migration helpers
+ml-services/          Explainable anomaly-analysis package
+sensor-agent/         Native capture companion and scripts
+docs/                 Security, migration and operational documentation
+storage/              Runtime volume layout; generated content is Git-ignored
 ```
 
-Restrict any listening ports to trusted private networks and collect traffic only with authorization.
+## Current limitations
 
-## Security Notes
+- Phases 4-7 of the security remediation remain incomplete.
+- Parser/worker isolation, integration truthfulness, MFA enrollment/recovery UX, CI scanning, and branch protection are later-phase gates.
+- This branch must not be merged directly into `main`; Railway and Vercel are connected to the repository and could automatically deploy an incomplete intermediate phase.
+- The persistent Railway `/app/storage` volume and production key material still require external verification.
+- No production crypto migration has been executed, and no legacy object has been deleted.
 
-- Real `.env` files and local credentials are Git ignored.
-- Supabase service-role credentials must remain backend-only.
-- Runtime captures, logs, reports, exports, and evidence are Git ignored.
-- The backend is not published directly; nginx proxies API traffic from the frontend service.
-- Create officer accounts manually in Supabase Auth and rotate production secrets before deployment.
-- Review Supabase Row Level Security policies before allowing shared or internet-facing access.
+## Documentation
 
-## Current Limitations
+- [Supabase migration runbook](docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md)
+- [Security remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md)
+- [Security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md)
+- [Production migration missing inputs](docs/PRODUCTION_MIGRATION_MISSING.md)
+- [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 
-- A current Supabase service-role key is required for encrypted evidence storage.
-- The most reliable intake path is stored PCAP upload.
-- The frontend production bundle is sizeable and would benefit from additional code splitting.
-- `ml-services/` is an integrated analysis package rather than an independently deployed service.
+## Responsible use
+
+Netra is for defensive security, authorized investigations, education, and controlled demonstrations. Do not capture, inspect, retain, or disclose network traffic without authorization. Review applicable law, organizational policy, evidence-retention requirements, and chain-of-custody procedures before operational use.
