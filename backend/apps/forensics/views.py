@@ -2624,7 +2624,17 @@ def report_generate(request, case_id: str):
                 id=report_id,
                 defaults={"case": case, "language": language, "generated_by": actor.user, "status": "queued", "stored_path": "", "sha256": ""},
             )
-        publish_event("netra.export.requests", {"type": "report.generate", "caseId": case_id, "language": language, "reportId": report_id, "actor": actor.user})
+        publish_event(
+            "netra.export.requests",
+            {
+                "type": "report.generate",
+                "caseId": case_id,
+                "language": language,
+                "format": report_format,
+                "reportId": report_id,
+                "actor": actor.user,
+            },
+        )
         return JsonResponse({"caseId": case_id, "language": language, "status": "queued", "reportId": report_id}, status=202)
     artifact = generate_pdf_report_artifact(case_id, language, analysis, actor) if report_format == "pdf" else generate_report_artifact(case_id, language, analysis, actor)
     publish_event("netra.export.completed", {"type": "report.generated", "format": report_format, "caseId": case_id, **artifact})

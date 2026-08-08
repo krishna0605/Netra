@@ -14,7 +14,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from common.analysis import _packet_from_row, _read_packets_with_tshark
-from common.artifacts import generate_export_artifact, generate_report_artifact
+from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact
 from common.audit import Actor
 from common.async_pipeline import process_queued_evidence
 from common.detection import classify_detection
@@ -397,11 +397,15 @@ class Command(BaseCommand):
         if message_type == "report.generate":
             case_id = payload.get("caseId", "")
             language = payload.get("language", "en")
+            report_format = str(payload.get("format") or "html").lower()
+            if report_format not in {"html", "pdf"}:
+                raise ValueError(f"Unsupported queued report format: {report_format}")
             analysis = analysis_for_case(case_id)
             if not analysis:
                 raise ValueError(f"No completed analysis found for report case {case_id}")
             actor = Actor(payload.get("actor") or "Netra report worker", "System", authenticated=True)
-            artifact = generate_report_artifact(case_id, language, analysis, actor, filename=payload.get("reportId") or None)
+            generator = generate_pdf_report_artifact if report_format == "pdf" else generate_report_artifact
+            artifact = generator(case_id, language, analysis, actor, report_id=payload.get("reportId") or None)
             publish_event("netra.export.completed", {"type": "report.generated", "caseId": case_id, **artifact})
             emit_operational_event("report.generated", {"worker": "report-export", "caseId": case_id, "filename": artifact["filename"]})
             return

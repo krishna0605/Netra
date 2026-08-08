@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import uuid4
 
 from django.template.loader import render_to_string
@@ -12,11 +13,21 @@ from common.custody import custody_event_dict, verify_case_ledger
 from common.persistence import record_export, record_report
 from common.pdf_report import build_report_pdf
 from common.readiness import legal_review_checklist
-from common.safe_paths import generated_artifact_filename
+from common.safe_paths import generated_artifact_filename, validate_artifact_filename
 from common.storage import write_binary_artifact, write_text_artifact
 
 
 REPORT_BODY_MARKER = "</body>"
+_SERVER_REPORT_ID = re.compile(r"^rpt-[0-9a-f]{32}\.(?:html|pdf)$")
+
+
+def _report_filename(report_id: str | None, suffix: str) -> str:
+    if report_id is None:
+        return generated_artifact_filename("rpt", suffix)
+    filename = validate_artifact_filename(report_id, allowed_extensions=frozenset({suffix}))
+    if not _SERVER_REPORT_ID.fullmatch(filename):
+        raise ValueError("Queued report ID is not a server-generated report identifier.")
+    return filename
 
 
 def _render_report_supplement(custody: dict, legal: dict) -> str:
@@ -122,24 +133,38 @@ def _artifact_analysis(case_id: str, analysis: dict, case: Case | None = None) -
     return enriched
 
 
-def generate_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor) -> dict:
+def generate_report_artifact(
+    case_id: str,
+    language: str,
+    analysis: dict,
+    actor: Actor,
+    *,
+    report_id: str | None = None,
+) -> dict:
     case = Case.objects.filter(id=case_id).first()
     analysis = _artifact_analysis(case_id, analysis, case)
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     html = _insert_report_supplement(build_report_html(analysis, language), _render_report_supplement(custody, legal))
-    artifact = write_text_artifact(html, "report", generated_artifact_filename("rpt", ".html"))
+    artifact = write_text_artifact(html, "report", _report_filename(report_id, ".html"))
     record_report(case_id, artifact, language, actor, case=case)
     return {"id": artifact["filename"], **artifact}
 
 
-def generate_pdf_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor) -> dict:
+def generate_pdf_report_artifact(
+    case_id: str,
+    language: str,
+    analysis: dict,
+    actor: Actor,
+    *,
+    report_id: str | None = None,
+) -> dict:
     case = Case.objects.filter(id=case_id).first()
     enriched = _artifact_analysis(case_id, analysis, case)
     custody = (enriched.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     pdf_bytes = build_report_pdf(enriched, language, legal, custody)
-    artifact = write_binary_artifact(pdf_bytes, "report", generated_artifact_filename("rpt", ".pdf"))
+    artifact = write_binary_artifact(pdf_bytes, "report", _report_filename(report_id, ".pdf"))
     record_report(case_id, artifact, f"{language}-pdf", actor, case=case)
     return {"id": artifact["filename"], "format": "pdf", **artifact}
 

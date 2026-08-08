@@ -32,7 +32,7 @@ import {
   YAxis,
 } from "recharts";
 import { toast, Toaster } from "sonner";
-import { findingStatusPath } from "./lib/analysisApi";
+import { apiErrorMessage, findingStatusPath } from "./lib/analysisApi";
 import {
   Alert,
   Badge,
@@ -4824,7 +4824,7 @@ function DetectionTable({ category }: { category?: string }) {
     const response = await fetch(`${API_BASE}${findingStatusPath(scope, "detections", item.id)}`, { method: "PATCH", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ status }) });
     const payload = await response.json();
     if (!response.ok) {
-      toast.error(payload.error ?? "Status update failed");
+      toast.error(apiErrorMessage(payload, "Status update failed"));
       return;
     }
     toast.success(`Finding marked ${status}`);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findingStatusPath } from "./analysisApi";
+import { apiErrorMessage, findingStatusPath } from "./analysisApi";
 
 
 describe("findingStatusPath", () => {
@@ -14,5 +14,14 @@ describe("findingStatusPath", () => {
     ).toBe(
       "/workspaces/b9d9cd4a-4fea-44fd-849f-bcbe3cf81b8b/analysis/jobs/job%2Fone/detections/finding%20one/status",
     );
+  });
+});
+
+describe("apiErrorMessage", () => {
+  it("reads structured and legacy string errors without leaking objects", () => {
+    expect(apiErrorMessage({ error: { message: "Scoped failure" } }, "fallback")).toBe("Scoped failure");
+    expect(apiErrorMessage({ error: "Legacy failure" }, "fallback")).toBe("Legacy failure");
+    expect(apiErrorMessage({ error: { code: "missing_message" } }, "fallback")).toBe("fallback");
+    expect(apiErrorMessage(null, "fallback")).toBe("fallback");
   });
 });
