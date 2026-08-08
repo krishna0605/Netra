@@ -146,7 +146,13 @@ def generate_report_artifact(
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     html = _insert_report_supplement(build_report_html(analysis, language), _render_report_supplement(custody, legal))
-    artifact = write_text_artifact(html, "report", _report_filename(report_id, ".html"))
+    artifact = write_text_artifact(
+        html,
+        "report",
+        _report_filename(report_id, ".html"),
+        case_id=case_id,
+        artifact_id=report_id,
+    )
     record_report(case_id, artifact, language, actor, case=case)
     return {"id": artifact["filename"], **artifact}
 
@@ -164,7 +170,13 @@ def generate_pdf_report_artifact(
     custody = (enriched.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     pdf_bytes = build_report_pdf(enriched, language, legal, custody)
-    artifact = write_binary_artifact(pdf_bytes, "report", _report_filename(report_id, ".pdf"))
+    artifact = write_binary_artifact(
+        pdf_bytes,
+        "report",
+        _report_filename(report_id, ".pdf"),
+        case_id=case_id,
+        artifact_id=report_id,
+    )
     record_report(case_id, artifact, f"{language}-pdf", actor, case=case)
     return {"id": artifact["filename"], "format": "pdf", **artifact}
 
@@ -180,6 +192,6 @@ def generate_export_artifact(case_id: str, export_type: str, analysis: dict, act
         filename = f"{export_id}-evidence.json"
         bundle = json.loads(build_evidence_bundle(analysis))
         content = json.dumps(bundle, indent=2)
-    artifact = write_text_artifact(content, "export", filename)
+    artifact = write_text_artifact(content, "export", filename, case_id=case_id, artifact_id=export_id)
     record_export(case_id, export_id, normalized_type, artifact, actor)
     return {"id": export_id, "type": normalized_type, **artifact}

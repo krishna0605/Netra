@@ -26,6 +26,28 @@ class StorageStat:
 class LocalFilesystemStorageProvider:
     scheme = "local://"
 
+    def _object_root(self) -> Path:
+        return settings.NETRA_STORAGE_ROOT / ".objects"
+
+    def object_uri(self, bucket: str, object_name: str) -> str:
+        return f"{self.scheme}.objects/{bucket}/{object_name}"
+
+    def parse_object_uri(self, storage_uri: str | Path) -> tuple[str, str]:
+        raw = str(storage_uri)
+        prefix = f"{self.scheme}.objects/"
+        if not raw.startswith(prefix):
+            raise ValueError("Storage URI does not identify an immutable object.")
+        bucket, separator, object_name = raw.removeprefix(prefix).partition("/")
+        if not separator or not bucket or not object_name:
+            raise ValueError("Immutable object URI is invalid.")
+        return bucket, object_name
+
+    def _local_object_path(self, bucket: str, object_name: str) -> Path:
+        root = self._object_root().resolve()
+        target = (root / bucket / Path(object_name)).resolve()
+        target.relative_to(root)
+        return target
+
     def uri_for(self, path: str | Path) -> str:
         target = Path(path).resolve()
         root = settings.NETRA_STORAGE_ROOT.resolve()
@@ -76,16 +98,29 @@ class LocalFilesystemStorageProvider:
         return {"status": "ok", "provider": "local-filesystem"}
 
     def upload_bucket_object(self, bucket: str, object_name: str, path: str | Path, *, upsert: bool = False) -> str:
-        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+        source = Path(path)
+        target = self._local_object_path(bucket, object_name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and not upsert:
+            raise FileExistsError(f"Immutable object already exists: {bucket}/{object_name}")
+        with tempfile.NamedTemporaryFile(delete=False, dir=target.parent) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            shutil.copyfile(source, temporary_path)
+            os.chmod(temporary_path, 0o600)
+            os.replace(temporary_path, target)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return self.object_uri(bucket, object_name)
 
     def download_bucket_object(self, bucket: str, object_name: str, target_path: str | Path, *, max_bytes: int) -> StorageStat:
         raise RuntimeError("Direct bucket operations require Supabase Storage.")
 
     def read_bucket_object(self, bucket: str, object_name: str) -> bytes:
-        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+        return self._local_object_path(bucket, object_name).read_bytes()
 
     def delete_bucket_object(self, bucket: str, object_name: str) -> None:
-        raise RuntimeError("Direct bucket operations require Supabase Storage.")
+        self._local_object_path(bucket, object_name).unlink(missing_ok=True)
 
 
 class SupabaseStorageProvider(LocalFilesystemStorageProvider):
@@ -132,6 +167,12 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         if not bucket or not object_name:
             raise ValueError(f"Invalid Supabase storage URI: {raw}")
         return bucket, object_name
+
+    def object_uri(self, bucket: str, object_name: str) -> str:
+        return f"{self.scheme}{bucket}/{object_name}"
+
+    def parse_object_uri(self, storage_uri: str | Path) -> tuple[str, str]:
+        return self._parse_uri(storage_uri)
 
     def _object_url(self, bucket: str, object_name: str) -> str:
         quoted_bucket = urllib.parse.quote(bucket, safe="")
@@ -222,7 +263,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
 
     def upload_bucket_object(self, bucket: str, object_name: str, path: str | Path, *, upsert: bool = False) -> str:
         self._upload_file(bucket, object_name, Path(path), upsert=upsert)
-        return f"{self.scheme}{bucket}/{object_name}"
+        return self.object_uri(bucket, object_name)
 
     def download_bucket_object(self, bucket: str, object_name: str, target_path: str | Path, *, max_bytes: int) -> StorageStat:
         target = Path(target_path)
@@ -256,10 +297,13 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
 
     def _upload_file(self, bucket: str, object_name: str, path: Path, *, upsert: bool = True) -> None:
         url = self._object_url(bucket, object_name)
-        request = urllib.request.Request(url, data=path.read_bytes(), method="POST", headers=self._headers())
-        if upsert:
-            request.add_header("x-upsert", "true")
-        self._request(request, expected={200, 201})
+        headers = self._headers()
+        headers["Content-Length"] = str(path.stat().st_size)
+        with path.open("rb") as body:
+            request = urllib.request.Request(url, data=body, method="POST", headers=headers)
+            if upsert:
+                request.add_header("x-upsert", "true")
+            self._request(request, expected={200, 201})
         # Workers share NETRA_STORAGE_ROOT in production. Caching the encrypted
         # upload prevents validation and analysis from downloading it again.
         self._cache_uploaded_file(bucket, object_name, path)

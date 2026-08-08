@@ -165,6 +165,7 @@ NETRA_EVIDENCE_ENCRYPTION = os.getenv("NETRA_EVIDENCE_ENCRYPTION", "on")
 NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-evidence-key")
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
 NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
+NETRA_EVIDENCE_WRITE_FORMAT = os.getenv("NETRA_EVIDENCE_WRITE_FORMAT", "v2").lower()
 NETRA_MAX_UPLOAD_MB = max(
     1,
     min(
@@ -182,7 +183,10 @@ NETRA_DIRECT_UPLOAD_MAX_MB = max(
 )
 NETRA_UPLOAD_SESSION_TTL_SECONDS = max(300, min(int(os.getenv("NETRA_UPLOAD_SESSION_TTL_SECONDS", "86400")), 86400))
 NETRA_UPLOAD_TUS_CHUNK_BYTES = 6 * 1024 * 1024
-NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES = 8 * 1024 * 1024
+NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES = max(
+    1024 * 1024,
+    min(int(os.getenv("NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES", str(8 * 1024 * 1024))), 16 * 1024 * 1024),
+)
 NETRA_RATE_LIMITS_ENABLED = os.getenv("NETRA_RATE_LIMITS_ENABLED", "1") == "1"
 NETRA_RATE_LIMIT_READ_PER_MINUTE = max(1, int(os.getenv("NETRA_RATE_LIMIT_READ_PER_MINUTE", "300")))
 NETRA_RATE_LIMIT_MUTATION_PER_MINUTE = max(1, int(os.getenv("NETRA_RATE_LIMIT_MUTATION_PER_MINUTE", "60")))
@@ -257,6 +261,8 @@ if not DEBUG:
         raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY are required for Supabase authentication")
     if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-phase3-development-evidence-key":
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
+    if NETRA_EVIDENCE_ENCRYPTION != "on" or NETRA_EVIDENCE_WRITE_FORMAT != "v2":
+        raise RuntimeError("Hosted deployments require encrypted v2 artifact writes")
     if NETRA_DIRECT_UPLOAD_ENABLED:
         if NETRA_DEPLOYMENT_PROFILE != "full":
             raise RuntimeError("NETRA_DIRECT_UPLOAD_ENABLED requires NETRA_DEPLOYMENT_PROFILE=full")

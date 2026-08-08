@@ -3019,7 +3019,13 @@ def siem_export(request):
         for alert in analysis.get("alerts", [])
     ]
     export_id = f"siem-{uuid4().hex[:8]}"
-    artifact = write_text_artifact("\n".join(lines) or "CEF:0|Netra|Network Forensics|3|baseline|No critical alerts|0|", "export", f"{export_id}.cef")
+    artifact = write_text_artifact(
+        "\n".join(lines) or "CEF:0|Netra|Network Forensics|3|baseline|No critical alerts|0|",
+        "export",
+        f"{export_id}.cef",
+        case_id=case.id,
+        artifact_id=export_id,
+    )
     record_export(case_id, export_id, "cef", artifact, actor)
     record_custody_event(case, actor, "SIEM CEF export generated", {"exportId": export_id, "filename": artifact["filename"], "sha256": artifact["sha256"]}, resource_type="Export", resource_id=export_id)
     return JsonResponse({"id": export_id, "caseId": case_id, "status": "ready", "downloadUrl": f"/api/exports/{export_id}/download", **artifact}, status=201)

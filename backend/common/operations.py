@@ -192,13 +192,14 @@ def ingest_capture_chunk(job: CaptureJob, upload, sequence: int, sensor: Sensor 
     if existing:
         return existing
     mark_capture_running(job)
-    saved = save_uploaded_file(upload, "capture_chunk")
+    chunk_id = f"{job.id}-chunk-{sequence:05d}"
+    saved = save_uploaded_file(upload, "capture_chunk", evidence_id=chunk_id, case_id=job.case_id)
     try:
         packet_count = _count_packets(saved["analysis_path"])
     finally:
         Path(saved["analysis_path"]).unlink(missing_ok=True)
     chunk = CaptureChunk.objects.create(
-        id=f"{job.id}-chunk-{sequence:05d}",
+        id=chunk_id,
         capture_job=job,
         sensor=sensor,
         sequence=sequence,

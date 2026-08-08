@@ -137,14 +137,14 @@ class ArtifactPathContainmentTests(SimpleTestCase):
         ):
             text_result = write_text_artifact("report text", "report", "rpt-abc123.html")
             binary_result = write_binary_artifact(b"%PDF-test", "report", "rpt-def456.pdf")
-            report_folder = (Path(temporary_directory) / "storage" / "reports").resolve()
-            files = [path.resolve() for path in report_folder.iterdir() if path.is_file()]
+            storage_root = (Path(temporary_directory) / "storage").resolve()
+            files = [path.resolve() for path in storage_root.rglob("*") if path.is_file()]
 
             self.assertEqual(text_result["filename"], "rpt-abc123.html")
             self.assertEqual(binary_result["filename"], "rpt-def456.pdf")
-            self.assertEqual({path.name for path in files}, {"rpt-abc123.html.enc", "rpt-def456.pdf.enc"})
-            self.assertTrue(all(path.parent == report_folder for path in files))
-            self.assertFalse(any(path.suffix == ".tmp" for path in files))
+            self.assertEqual(sum(path.name == "manifest.v2.json" for path in files), 2)
+            self.assertTrue(all(path.is_relative_to(storage_root / ".objects") for path in files))
+            self.assertFalse(any(path.suffix in {".tmp", ".work"} for path in files))
 
 
 class _ActiveMarkupCollector(HTMLParser):

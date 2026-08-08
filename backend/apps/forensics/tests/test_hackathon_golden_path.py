@@ -302,7 +302,7 @@ class HackathonGoldenPathTests(TestCase):
                 NETRA_STORAGE_PROVIDER="supabase",
                 NETRA_PROCESSING_MODE="postgres-worker",
                 NETRA_TEMP_ROOT=Path(temporary_root),
-            ), patch("common.storage.encrypt_evidence_v2", return_value=encrypted) as encrypt_v2:
+            ), patch("common.storage.encrypt_artifact_v2", return_value=encrypted) as encrypt_v2:
                 response = self.client.post(
                     "/api/evidence/upload",
                     data={

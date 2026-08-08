@@ -349,7 +349,8 @@ def _prepare_large_analysis_chunks(job: ProcessingJob, plaintext_path: Path) -> 
         )
         for sequence, split_path in enumerate(sorted(Path(folder).glob("analysis*.pcap")), start=1):
             upload = SimpleUploadedFile(split_path.name, split_path.read_bytes(), content_type="application/vnd.tcpdump.pcap")
-            saved = save_uploaded_file(upload, "capture_chunk")
+            chunk_id = f"{job.id}-analysis-chunk-{sequence:05d}"
+            saved = save_uploaded_file(upload, "capture_chunk", evidence_id=chunk_id, case_id=job.case_id)
             Path(saved["analysis_path"]).unlink(missing_ok=True)
             chunk = AnalysisChunk.objects.create(
                 processing_job=job,
