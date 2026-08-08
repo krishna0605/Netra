@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.utils import timezone
 
-from apps.forensics.models import Case, CaseMembership, EvidenceFile, EvidenceUploadSession, ProcessingJob, UserProfile
+from apps.forensics.models import Case, CaseMembership, EvidenceFile, EvidenceUploadSession, Organization, ProcessingJob, UserProfile
 from common.case_workspace import bump_case_list_cache_version
 from common.audit import Actor, can_actor_access_case
 from common.case_metadata import InvalidCaseFlags, server_case_identity, validated_case_flags
@@ -21,6 +21,7 @@ from common.identifiers import InvalidCaseId, generate_case_id, validate_case_id
 from common.jobs import initial_steps
 from common.storage_provider import storage_provider
 from common.tenancy import netra_organization
+from common.queue_limits import OrganizationQueueLimit, lock_and_check_queue_capacity
 
 
 PRE_FINAL_STATUSES = {
@@ -180,7 +181,7 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
     try:
         with transaction.atomic():
             now = timezone.now()
-            tenant = netra_organization()
+            tenant = netra_organization() if not actor.organization_id else Organization.objects.get(pk=actor.organization_id)
             EvidenceUploadSession.objects.select_for_update().filter(
                 user=user,
                 status__in=PRE_FINAL_STATUSES,
@@ -321,19 +322,17 @@ def finalize_upload_session(actor: Actor, session_id) -> EvidenceUploadSession:
         raise UploadSessionProblem("quarantine_size_mismatch", "The uploaded object size does not match the authorized session.", 422)
 
     with transaction.atomic():
-        session = EvidenceUploadSession.objects.select_for_update().select_related("case").get(pk=session.pk)
-        if session.processing_job_id:
-            return session
-        active_jobs = ProcessingJob.objects.filter(
-            case__department=session.organization,
-            status__in=[ProcessingJob.Status.QUEUED, ProcessingJob.Status.RUNNING],
-        ).count()
-        if active_jobs >= settings.NETRA_MAX_QUEUED_ANALYSES_PER_ORG:
+        try:
+            lock_and_check_queue_capacity(session.organization_id, job_id=session.processing_job_id)
+        except OrganizationQueueLimit as exc:
             raise UploadSessionProblem(
                 "organization_queue_limit",
                 "This organization has reached its active analysis limit. Retry finalization after an existing job completes.",
                 429,
-            )
+            ) from exc
+        session = EvidenceUploadSession.objects.select_for_update().select_related("case").get(pk=session.pk)
+        if session.processing_job_id:
+            return session
         now = timezone.now()
         job_id = f"job-{uuid4().hex[:12]}"
         evidence_id = f"ev-{uuid4().hex[:12]}"

@@ -8,10 +8,11 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from uuid import uuid4
 
 from django.conf import settings
+from django.db import transaction
 from django.core.files import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from apps.forensics.models import AnalysisChunk, Case, CaseMembership, EvidenceFile, EvidenceManifest, EvidenceUploadSession, ProcessingJob, WorkerStageReceipt
+from apps.forensics.models import AnalysisChunk, Case, CaseMembership, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Organization, ProcessingJob, WorkerStageReceipt
 from common.analysis import analyze_pcap
 from common.audit import Actor, add_history, log_access
 from common.custody import record_custody_event
@@ -25,10 +26,12 @@ from common.storage import save_uploaded_file
 from common.storage_provider import storage_provider
 from common.structured_analysis import analyze_structured_evidence
 from common.tenancy import netra_organization
+from common.queue_limits import OrganizationQueueLimit, lock_and_check_queue_capacity
 from common.vault import build_manifest_payload, temporary_decrypted_copy
 from common.vault_v2 import encrypt_evidence_v2
 
 
+@transaction.atomic
 def queue_uploaded_evidence(
     saved: dict,
     case_id: str,
@@ -39,11 +42,13 @@ def queue_uploaded_evidence(
     idempotency_key: str | None = None,
 ) -> ProcessingJob:
     case_id = validate_case_id(case_id)
+    organization = netra_organization() if not actor.organization_id else Organization.objects.get(pk=actor.organization_id)
+    lock_and_check_queue_capacity(organization.id, job_id=job_id)
     intake = saved.get("intake", {})
     case, _ = Case.objects.update_or_create(
         id=case_id,
         defaults={
-            "organization": netra_organization(),
+            "organization": organization,
             "display_reference": case_id,
             "title": f"Queued PCAP analysis: {saved['filename']}",
             "investigator": intake.get("investigator") or actor.user,

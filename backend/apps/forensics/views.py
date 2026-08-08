@@ -36,6 +36,9 @@ from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize
 from common.indexing import search_index
 from common.jobs import job_status_payload
 from common.kafka import probe_supabase_queue, publish_event
+from common.queue_limits import OrganizationQueueLimit
+from common.rate_limit_middleware import rate_limit_response
+from common.rate_limits import RateLimitSpec, consume_rate_limits, request_byte_count
 from common.pcap import available_packet_tools
 from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export
 from common.postgres_jobs import request_job_cancellation, retry_job
@@ -61,6 +64,17 @@ def _json_body(request) -> dict:
     if not request.body:
         return {}
     return json.loads(request.body.decode("utf-8"))
+
+
+def _specialized_rate_limit(request, route_key: str, user_limit: int, *, organization_limit: int | None = None):
+    if not settings.NETRA_RATE_LIMITS_ENABLED:
+        return None
+    actor = actor_from_request(request)
+    specs = [RateLimitSpec(route_key, user_limit, 3600)]
+    if organization_limit:
+        specs.append(RateLimitSpec(route_key, organization_limit, 3600, scope="organization"))
+    result = consume_rate_limits(actor, specs, byte_count=request_byte_count(request))
+    return None if result.allowed else rate_limit_response(result)
 
 
 def _filter_rows(rows: list[dict], params, field_map: dict[str, str]) -> list[dict]:
@@ -1085,6 +1099,14 @@ def evidence_upload_sessions(request):
     denied = require_permission(request, "upload", resource_type="EvidenceUploadSession")
     if denied:
         return denied
+    limited = _specialized_rate_limit(
+        request,
+        "upload-session",
+        settings.NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR,
+        organization_limit=settings.NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR,
+    )
+    if limited:
+        return limited
     if len(request.body) > 64 * 1024:
         return JsonResponse({"error": "Upload session metadata is too large.", "code": "upload_metadata_too_large"}, status=413)
     try:
@@ -1244,7 +1266,15 @@ def evidence_upload(request):
         if key in public_saved
     } | {"keyId": settings.NETRA_EVIDENCE_KEY_ID}
     if settings.NETRA_PROCESSING_MODE in {"postgres-worker", "async-primary"}:
-        job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
+        try:
+            job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
+        except OrganizationQueueLimit:
+            response = JsonResponse(
+                {"error": "The organization analysis queue is full.", "code": "organization_queue_limit"},
+                status=429,
+            )
+            response["Retry-After"] = "60"
+            return response
         if settings.NETRA_PROCESSING_MODE == "postgres-worker":
             Path(saved["analysis_path"]).unlink(missing_ok=True)
             return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
@@ -2637,6 +2667,9 @@ def report_generate(request, case_id: str):
     denied = require_permission(request, "report", case=case, resource_type="Report", resource_id=case_id)
     if denied:
         return denied
+    limited = _specialized_rate_limit(request, "report-generate", settings.NETRA_RATE_LIMIT_REPORT_USER_PER_HOUR)
+    if limited:
+        return limited
     analysis_status = analysis_status_for_case(case)
     if not analysis_status["reportEligible"]:
         return JsonResponse(
@@ -2699,6 +2732,9 @@ def exports(request):
         denied = require_permission(request, "export", resource_type="Export")
         if denied:
             return denied
+        limited = _specialized_rate_limit(request, "export-generate", settings.NETRA_RATE_LIMIT_EXPORT_USER_PER_HOUR)
+        if limited:
+            return limited
         actor = actor_from_request(request)
         payload = _json_body(request)
         case_id = str(payload.get("caseId") or request.GET.get("caseId") or "").strip()
@@ -2834,6 +2870,9 @@ def integration_test(request, integration_id: str):
     denied = require_permission(request, "integrations", resource_type="IntegrationConnection", resource_id=integration_id)
     if denied:
         return denied
+    limited = _specialized_rate_limit(request, "webhook-test", settings.NETRA_RATE_LIMIT_WEBHOOK_TEST_ADMIN_PER_HOUR)
+    if limited:
+        return limited
     connection = IntegrationConnection.objects.filter(id=integration_id).first()
     if not connection:
         raise Http404("Integration not found")

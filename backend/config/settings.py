@@ -39,6 +39,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "common.api_auth.NetraApiAuthMiddleware",
+    "common.rate_limit_middleware.NetraRateLimitMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -182,7 +183,14 @@ NETRA_DIRECT_UPLOAD_MAX_MB = max(
 NETRA_UPLOAD_SESSION_TTL_SECONDS = max(300, min(int(os.getenv("NETRA_UPLOAD_SESSION_TTL_SECONDS", "86400")), 86400))
 NETRA_UPLOAD_TUS_CHUNK_BYTES = 6 * 1024 * 1024
 NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES = 8 * 1024 * 1024
-NETRA_MAX_QUEUED_ANALYSES_PER_ORG = max(1, int(os.getenv("NETRA_MAX_QUEUED_ANALYSES_PER_ORG", "5")))
+NETRA_RATE_LIMITS_ENABLED = os.getenv("NETRA_RATE_LIMITS_ENABLED", "1") == "1"
+NETRA_RATE_LIMIT_READ_PER_MINUTE = max(1, int(os.getenv("NETRA_RATE_LIMIT_READ_PER_MINUTE", "300")))
+NETRA_RATE_LIMIT_MUTATION_PER_MINUTE = max(1, int(os.getenv("NETRA_RATE_LIMIT_MUTATION_PER_MINUTE", "60")))
+NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR = max(1, int(os.getenv("NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR", "10")))
+NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR = max(1, int(os.getenv("NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR", "25")))
+NETRA_RATE_LIMIT_REPORT_USER_PER_HOUR = max(1, int(os.getenv("NETRA_RATE_LIMIT_REPORT_USER_PER_HOUR", "10")))
+NETRA_RATE_LIMIT_EXPORT_USER_PER_HOUR = max(1, int(os.getenv("NETRA_RATE_LIMIT_EXPORT_USER_PER_HOUR", "10")))
+NETRA_RATE_LIMIT_WEBHOOK_TEST_ADMIN_PER_HOUR = max(1, int(os.getenv("NETRA_RATE_LIMIT_WEBHOOK_TEST_ADMIN_PER_HOUR", "5")))
 NETRA_BPF_FILTER_ENABLED = os.getenv("NETRA_BPF_FILTER_ENABLED", "0") == "1"
 NETRA_ENABLE_HOST_CAPTURE = os.getenv("NETRA_ENABLE_HOST_CAPTURE", "0") == "1"
 NETRA_WORKER_MAX_RETRIES = max(1, int(os.getenv("NETRA_WORKER_MAX_RETRIES", "3")))
