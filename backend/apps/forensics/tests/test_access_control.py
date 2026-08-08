@@ -246,7 +246,7 @@ class ApiAccessControlTests(TestCase):
 
 @SECURE_TEST_SETTINGS
 class IdentityProvisioningTests(TestCase):
-    def test_verified_supabase_identity_starts_as_viewer_even_with_admin_claim(self):
+    def test_verified_supabase_identity_requires_preprovisioned_profile(self):
         actor = sync_supabase_actor(
             SimpleNamespace(
                 id="supabase-user-1",
@@ -256,7 +256,9 @@ class IdentityProvisioningTests(TestCase):
             )
         )
         self.assertEqual(actor.role, "Viewer")
-        self.assertEqual(UserProfile.objects.get(user__username="new@example.test").role, "Viewer")
+        self.assertTrue(actor.authenticated)
+        self.assertIsNone(actor.organization_id)
+        self.assertFalse(UserProfile.objects.filter(user__username="new@example.test").exists())
 
     def test_evidence_key_rotation_retains_decrypt_only_previous_key(self):
         with override_settings(NETRA_EVIDENCE_KEY="old-evidence-key", NETRA_EVIDENCE_PREVIOUS_KEYS=[]):

@@ -38,6 +38,13 @@ def _permission_error() -> JsonResponse:
     return JsonResponse({"error": "Permission denied", "code": "permission_denied"}, status=403)
 
 
+def _profile_not_provisioned() -> JsonResponse:
+    return JsonResponse(
+        {"error": "A Netra profile has not been provisioned for this identity.", "code": "profile_not_provisioned"},
+        status=403,
+    )
+
+
 def _feature_disabled(feature: str) -> JsonResponse:
     return JsonResponse(
         {
@@ -124,6 +131,8 @@ class NetraApiAuthMiddleware:
         actor = actor_from_request(request)
         if not actor.authenticated:
             return _authentication_error()
+        if not actor.organization_id:
+            return _profile_not_provisioned()
         request.netra_actor = actor
         return self.get_response(request)
 

@@ -109,11 +109,14 @@ def legal_review_checklist(case: Case) -> dict[str, Any]:
     }
 
 
-def audit_export_payload(case: Case | None = None) -> dict[str, Any]:
-    access_logs = AccessLog.objects.order_by("-created_at")
-    custody_events = CustodyLedgerEvent.objects.order_by("created_at", "id")
-    operational_events = OperationalEvent.objects.order_by("-created_at")
-    dead_letters = DeadLetterEvent.objects.order_by("-created_at")
+def audit_export_payload(case: Case | None = None, *, organization_id=None) -> dict[str, Any]:
+    if case:
+        organization_id = case.organization_id
+    access_logs = AccessLog.objects.filter(organization_id=organization_id).order_by("-created_at")
+    custody_events = CustodyLedgerEvent.objects.filter(case__organization_id=organization_id).order_by("created_at", "id")
+    operational_events = OperationalEvent.objects.filter(organization_id=organization_id).order_by("-created_at")
+    organization_case_ids = Case.objects.filter(organization_id=organization_id).values_list("id", flat=True)
+    dead_letters = DeadLetterEvent.objects.filter(case_id__in=organization_case_ids).order_by("-created_at")
     if case:
         access_logs = access_logs.filter(case=case)
         custody_events = custody_events.filter(case=case)
@@ -130,8 +133,8 @@ def audit_export_payload(case: Case | None = None) -> dict[str, Any]:
         },
         "operationalEvents": [_operational_event(row) for row in operational_events[:500]],
         "deadLetters": [_dead_letter(row) for row in dead_letters[:100]],
-        "reports": [_artifact(row) for row in (case.reports.order_by("-created_at")[:100] if case else Report.objects.order_by("-created_at")[:100])],
-        "exports": [_artifact(row) for row in (case.exports.order_by("-created_at")[:100] if case else Export.objects.order_by("-created_at")[:100])],
+        "reports": [_artifact(row) for row in (case.reports.order_by("-created_at")[:100] if case else Report.objects.filter(case__organization_id=organization_id).order_by("-created_at")[:100])],
+        "exports": [_artifact(row) for row in (case.exports.order_by("-created_at")[:100] if case else Export.objects.filter(case__organization_id=organization_id).order_by("-created_at")[:100])],
         "redaction": "Secrets, tokens, service-role keys, and raw PCAP payload bytes are not included.",
     }
 

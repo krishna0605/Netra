@@ -176,6 +176,8 @@ def _case_dict(case: Case) -> dict:
     analysis_status = analysis_status_for_case(case)
     return {
         "id": case.id,
+        "displayReference": case.display_reference,
+        "organizationId": str(case.organization_id),
         "routeRef": str(case.route_ref),
         "title": case.title,
         "investigator": case.investigator,
@@ -233,6 +235,8 @@ def _case_list_dict(case: Case) -> dict:
     analysis_status = analysis_status_for_case(case)
     return {
         "id": case.id,
+        "displayReference": case.display_reference,
+        "organizationId": str(case.organization_id),
         "routeRef": str(case.route_ref),
         "title": case.title,
         "investigator": case.investigator,
@@ -330,6 +334,11 @@ def auth_login(request):
             return JsonResponse({"error": "Invalid Supabase credentials"}, status=401)
         supabase_user = verify_supabase_token(session["access_token"])
         actor = sync_supabase_actor(supabase_user) if supabase_user else None
+        if actor and not actor.organization_id:
+            return JsonResponse(
+                {"error": "A Netra profile has not been provisioned for this identity.", "code": "profile_not_provisioned"},
+                status=403,
+            )
         return JsonResponse(
             {
                 "access": session["access_token"],
@@ -431,6 +440,13 @@ def auth_me(request):
             "department": department,
             "role": actor.role,
             "authenticated": True,
+            "organization": {
+                "id": str(actor.organization_id),
+                "name": "Netra" if actor.organization_slug == "netra" else actor.organization_slug,
+                "slug": actor.organization_slug,
+            },
+            "aal": actor.aal,
+            "privilegedAdminReady": actor.role == "Admin" and actor.aal == "aal2",
             "deployment": {
                 "profile": settings.NETRA_DEPLOYMENT_PROFILE,
                 "hostCaptureEnabled": settings.NETRA_ENABLE_HOST_CAPTURE,
@@ -453,23 +469,24 @@ def users(request):
         payload = _json_body(request)
         email = payload.get("email")
         role = payload.get("role", "Viewer")
-        if not email or role not in {"Admin", "Investigator", "Analyst", "Viewer"}:
-            return JsonResponse({"error": "email and valid role are required"}, status=400)
+        if not email or role not in {"Investigator", "Analyst", "Viewer"}:
+            return JsonResponse({"error": "email and a valid non-administrator role are required"}, status=400)
+        if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" and payload.get("password"):
+            return JsonResponse({"error": "Passwords are managed by Supabase Auth.", "code": "password_not_accepted"}, status=400)
         user, created = User.objects.get_or_create(username=email, defaults={"email": email, "first_name": payload.get("name", email)})
         if payload.get("password"):
             user.set_password(payload["password"])
             user.save()
         profile, _ = UserProfile.objects.update_or_create(
             user=user,
-            defaults={"organization": netra_organization(), "role": role, "display_name": payload.get("name", email)},
+            defaults={"organization_id": actor_from_request(request).organization_id, "role": role, "display_name": payload.get("name", email)},
         )
         return JsonResponse({"id": user.id, "email": user.username, "name": profile.display_name, "role": profile.role, "created": created}, status=201)
     rows = []
-    for user in User.objects.order_by("username"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"organization": netra_organization(), "role": "Viewer", "display_name": user.get_full_name() or user.username},
-        )
+    actor = actor_from_request(request)
+    profiles = UserProfile.objects.filter(organization_id=actor.organization_id).select_related("user").order_by("user__username")
+    for profile in profiles:
+        user = profile.user
         rows.append({"id": user.id, "email": user.username, "name": profile.display_name, "role": profile.role, "active": user.is_active})
     return JsonResponse({"results": rows})
 
@@ -482,14 +499,12 @@ def user_detail(request, user_id: str):
         return denied
     payload = _json_body(request)
     User = get_user_model()
-    user = User.objects.filter(id=user_id).first()
-    if not user:
+    actor = actor_from_request(request)
+    profile = UserProfile.objects.select_related("user").filter(user_id=user_id, organization_id=actor.organization_id).first()
+    if not profile:
         raise Http404("User not found")
-    profile, _ = UserProfile.objects.get_or_create(
-        user=user,
-        defaults={"organization": netra_organization()},
-    )
-    if payload.get("role") in {"Admin", "Investigator", "Analyst", "Viewer"}:
+    user = profile.user
+    if payload.get("role") in {"Investigator", "Analyst", "Viewer"} and profile.role != "Admin":
         profile.role = payload["role"]
     if "active" in payload:
         user.is_active = bool(payload["active"])
@@ -522,7 +537,7 @@ def cases(request):
         with transaction.atomic():
             case = Case.objects.create(
                 id=case_id,
-                organization=netra_organization(),
+                organization_id=actor.organization_id,
                 display_reference=case_id,
                 title=payload.get("title") or f"Investigation {case_id}",
                 investigator=investigator,
@@ -550,7 +565,7 @@ def cases(request):
         )
         return JsonResponse(_case_dict(case), status=201)
     actor_scope = actor.django_user_id or hashlib.sha256(f"{actor.role}:{actor.user}".encode("utf-8")).hexdigest()[:16]
-    cache_key = f"netra:cases:list:{case_list_cache_version()}:{actor.role}:{actor_scope}:{request.GET.urlencode() or 'default'}"
+    cache_key = f"netra:cases:list:{case_list_cache_version()}:{actor.organization_id}:{actor.role}:{actor_scope}:{request.GET.urlencode() or 'default'}"
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
         return JsonResponse(cached)
@@ -916,6 +931,9 @@ def case_members(request, case_id: str):
         user = User.objects.filter(username=payload.get("email")).first()
         if not user:
             return JsonResponse({"error": "User not found"}, status=404)
+        target_profile = UserProfile.objects.filter(user=user, organization_id=case.organization_id).first()
+        if not target_profile:
+            return JsonResponse({"error": "User not found", "code": "resource_not_found"}, status=404)
         role = payload.get("role", "Viewer")
         membership, _ = CaseMembership.objects.update_or_create(case=case, user=user, defaults={"role": role, "added_by": actor_from_request(request).user})
         return JsonResponse({"id": membership.id, "caseId": case.id, "email": user.username, "role": membership.role}, status=201)
@@ -1848,7 +1866,8 @@ def case_legal_review_checklist(request, case_id: str):
 
 
 def operational_events(request):
-    rows = OperationalEvent.objects.order_by("-id")
+    actor = actor_from_request(request)
+    rows = OperationalEvent.objects.filter(organization_id=actor.organization_id).order_by("-id")
     if request.GET.get("caseId"):
         rows = rows.filter(case_id=request.GET["caseId"])
     if request.GET.get("captureJobId"):
@@ -1862,6 +1881,8 @@ def operational_events(request):
 
 
 def operational_event_stream(request):
+    actor = actor_from_request(request)
+    organization_id = actor.organization_id
     case_id = request.GET.get("caseId")
     capture_job_id = request.GET.get("captureJobId")
     try:
@@ -1873,7 +1894,7 @@ def operational_event_stream(request):
         nonlocal cursor
         last_heartbeat = time.monotonic()
         while True:
-            rows = OperationalEvent.objects.filter(id__gt=cursor).order_by("id")
+            rows = OperationalEvent.objects.filter(organization_id=organization_id, id__gt=cursor).order_by("id")
             if case_id:
                 rows = rows.filter(case_id=case_id)
             if capture_job_id:
@@ -2987,8 +3008,13 @@ def security_posture(_request):
     )
 
 
-def access_logs(_request):
-    rows = AccessLog.objects.order_by("-created_at")[:100]
+def access_logs(request):
+    actor = actor_from_request(request)
+    rows = AccessLog.objects.filter(organization_id=actor.organization_id)
+    if actor.role != "Admin":
+        visible_case_ids = visible_cases_for_actor(actor).values_list("id", flat=True)
+        rows = rows.filter(Q(case_id__in=visible_case_ids) | Q(case__isnull=True, user_id=actor.django_user_id))
+    rows = rows.order_by("-created_at")[:100]
     if rows:
         return JsonResponse({"results": [access_log_dict(row) for row in rows]})
     return JsonResponse({"results": []})
@@ -2996,12 +3022,16 @@ def access_logs(_request):
 
 def audit_export(request):
     case_id = request.GET.get("caseId", "")
-    case = Case.objects.filter(id=case_id).first() if case_id else None
+    actor = actor_from_request(request)
+    case = visible_cases_for_actor(actor).filter(id=case_id).first() if case_id else None
+    if case_id and not case:
+        raise Http404("Resource not found")
+    if not case_id and actor.role != "Admin":
+        return JsonResponse({"error": "A visible case is required.", "code": "case_scope_required"}, status=400)
     denied = require_permission(request, "compliance", case=case, resource_type="AuditExport", resource_id=case_id or "system")
     if denied:
         return denied
-    actor = actor_from_request(request)
     if case:
         record_custody_event(case, actor, "Audit export generated", {"scope": "case", "caseId": case.id}, resource_type="AuditExport", resource_id=case.id)
     log_access(actor, "audit.export", case=case, resource_type="AuditExport", resource_id=case_id or "system")
-    return JsonResponse(audit_export_payload(case))
+    return JsonResponse(audit_export_payload(case, organization_id=actor.organization_id))

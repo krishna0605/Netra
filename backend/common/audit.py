@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -9,7 +10,7 @@ from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, CaseMembership, UserProfile
-from common.tenancy import netra_organization
+from common.tenancy import NETRA_ORGANIZATION_ID, netra_organization
 
 
 ROLE_PERMISSIONS = {
@@ -29,6 +30,9 @@ class Actor:
     django_user_id: int | None = None
     email: str = ""
     external_id: str = ""
+    organization_id: UUID | None = None
+    organization_slug: str = ""
+    aal: str = "aal1"
 
 
 VALID_ROLES = {"Admin", "Investigator", "Analyst", "Viewer"}
@@ -50,13 +54,27 @@ def sync_supabase_actor(supabase_user) -> Actor:
     username = (getattr(supabase_user, "email", "") or getattr(supabase_user, "id", "")).strip().lower()
     if not username:
         return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
-    user, _ = User.objects.get_or_create(username=username, defaults={"email": username})
-    profile, _created = UserProfile.objects.get_or_create(
-        user=user,
-        # Supabase user_metadata is user-editable. New identities therefore use
-        # the verified login identifier until an administrator assigns a name.
-        defaults={"organization": netra_organization(), "role": UserProfile.Role.VIEWER, "display_name": username},
-    )
+    user = User.objects.filter(username__iexact=username).first()
+    if user is None:
+        return Actor(
+            user=username,
+            role=UserProfile.Role.VIEWER,
+            authenticated=True,
+            email=username,
+            external_id=getattr(supabase_user, "id", ""),
+            aal=getattr(supabase_user, "aal", "aal1"),
+        )
+    profile = UserProfile.objects.select_related("organization").filter(user=user).first()
+    if profile is None or not user.is_active:
+        return Actor(
+            user=username,
+            role=UserProfile.Role.VIEWER,
+            authenticated=True,
+            django_user_id=user.id,
+            email=user.email or username,
+            external_id=getattr(supabase_user, "id", ""),
+            aal=getattr(supabase_user, "aal", "aal1"),
+        )
     return Actor(
         user=profile.display_name or user.username,
         role=profile.role,
@@ -64,6 +82,9 @@ def sync_supabase_actor(supabase_user) -> Actor:
         django_user_id=user.id,
         email=user.email or user.username,
         external_id=getattr(supabase_user, "id", ""),
+        organization_id=profile.organization_id,
+        organization_slug=profile.organization.slug,
+        aal=getattr(supabase_user, "aal", "aal1"),
     )
 
 
@@ -72,7 +93,13 @@ def actor_from_request(request) -> Actor:
     if isinstance(cached_actor, Actor):
         return cached_actor
     if getattr(settings, "NETRA_ACCESS_MODE", "") == "trusted-lan":
-        return Actor(user=settings.NETRA_TRUSTED_LAN_ACTOR, role=settings.NETRA_TRUSTED_LAN_ROLE, authenticated=True)
+        return Actor(
+            user=settings.NETRA_TRUSTED_LAN_ACTOR,
+            role=settings.NETRA_TRUSTED_LAN_ROLE,
+            authenticated=True,
+            organization_id=NETRA_ORGANIZATION_ID,
+            organization_slug="netra",
+        )
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
@@ -87,22 +114,32 @@ def actor_from_request(request) -> Actor:
             auth = JWTAuthentication()
             validated = auth.get_validated_token(token)
             user = auth.get_user(validated)
-            profile, _ = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    "organization": netra_organization(),
-                    "role": UserProfile.Role.VIEWER,
-                    "display_name": user.get_full_name() or user.get_username(),
-                },
+            profile = UserProfile.objects.select_related("organization").filter(user=user).first()
+            if profile is None or not user.is_active:
+                return Actor(user=user.get_username(), role="Viewer", authenticated=True, django_user_id=user.id, aal=str(validated.get("aal", "aal1")))
+            return Actor(
+                user=profile.display_name or user.get_username(),
+                role=profile.role,
+                authenticated=True,
+                django_user_id=user.id,
+                email=user.email or user.get_username(),
+                organization_id=profile.organization_id,
+                organization_slug=profile.organization.slug,
+                aal=str(validated.get("aal", "aal1")),
             )
-            return Actor(user=profile.display_name or user.get_username(), role=profile.role, authenticated=True, django_user_id=user.id)
         except Exception:
             return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
     if settings.NETRA_DEV_ROLE_HEADERS:
         role = request.headers.get("X-Netra-Role", "Investigator")
         if role not in ROLE_PERMISSIONS:
             role = "Investigator"
-        return Actor(user=request.headers.get("X-Netra-User", "Inspector A. Patel"), role=role, authenticated=True)
+        return Actor(
+            user=request.headers.get("X-Netra-User", "Inspector A. Patel"),
+            role=role,
+            authenticated=True,
+            organization_id=NETRA_ORGANIZATION_ID,
+            organization_slug="netra",
+        )
     return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
 
 
@@ -111,7 +148,9 @@ def can(actor: Actor, permission: str) -> bool:
 
 
 def visible_cases_for_actor(actor: Actor):
-    rows = Case.objects.all()
+    if not actor.organization_id:
+        return Case.objects.none()
+    rows = Case.objects.filter(organization_id=actor.organization_id)
     if actor.role == "Admin":
         return rows
     if actor.django_user_id:
@@ -146,7 +185,7 @@ def require_permission(request, permission: str, case: Case | None = None, resou
 def log_access(actor: Actor, action: str, case: Case | None = None, resource_type: str = "", resource_id: str = "", result: str = "allowed") -> None:
     try:
         AccessLog.objects.create(
-            organization=case.organization if case else netra_organization(),
+            organization_id=case.organization_id if case else actor.organization_id,
             user_id=actor.django_user_id,
             user_label=actor.user,
             role=actor.role,
