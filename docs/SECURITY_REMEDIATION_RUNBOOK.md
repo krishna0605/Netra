@@ -119,3 +119,66 @@ These variables belong on Railway only. They must not use `VITE_`, must not be a
 Before a future push, run the rate/queue concurrency suite against an approved disposable PostgreSQL 17 database. Do not use either Supabase project for that rehearsal. A missing local PostgreSQL credential is a no-go for the push gate, not authorization to consume free-plan cloud egress.
 
 Phase 2 rollback remains commit-by-commit locally. Migration reversal is for a disposable rehearsal database only; it is not the production rollback strategy after new tenant-owned writes exist.
+
+## Phase 3 local verification
+
+Phase 3 changes artifact cryptography, custody serialization, encrypted Storage caching, and public documentation without changing models or applying cloud migrations.
+
+```mermaid
+flowchart LR
+    SOURCE["Authorized plaintext"] --> V2["Chunked v2.1 encryption"]
+    V2 --> OBJECTS["Immutable encrypted generation"]
+    OBJECTS --> CACHE["Verified bounded cache"]
+    CACHE --> READER["Authorized parser/download"]
+    V2 --> POINTER["Transactional database pointer"]
+    POINTER --> CUSTODY["Case-locked custody append"]
+    CUSTODY --> ANCHOR["Signed external anchor"]
+```
+
+Run focused tests from `backend` with no cloud credentials loaded:
+
+```powershell
+$env:NETRA_TEST_SQLITE = '1'
+$env:PYTHONPATH = 'C:\Users\ADMIN\Desktop\hackthon\ml-services\anomaly-engine'
+python manage.py test apps.forensics.tests.test_crypto_v2 apps.forensics.tests.test_crypto_migration apps.forensics.tests.test_custody_concurrency apps.forensics.tests.test_storage_provider apps.forensics.tests.test_artifact_security
+```
+
+The custody concurrency module skips its fifty-writer test on SQLite. Run that test against an approved disposable PostgreSQL 17 database before any push; do not use a Supabase free-plan project as the rehearsal database.
+
+On this Windows workstation, the canonical complete Django runner currently stalls before assertions while importing the pre-existing monolithic analysis/Scapy URL stack. Do not reinterpret that as a passing full suite. The focused Phase 3 suite can run against a disposable database through Django's migration executor, but completing the canonical full run remains a no-push gate and a Phase 4 isolation concern.
+
+Safe operational commands:
+
+```powershell
+python manage.py migrate_evidence_crypto --plan --state C:\approved-encrypted-workspace\crypto-state.json
+python manage.py maintain_storage_cache --startup
+python manage.py maintain_storage_cache --status --json
+python manage.py maintain_storage_cache --prune
+python manage.py export_custody_anchors --case-id CASE_REFERENCE --output-directory C:\approved-anchor-output
+python manage.py verify_custody_anchor C:\approved-anchor-output\ANCHOR_FILE.json
+```
+
+Do not run `migrate_evidence_crypto --execute` or `export_custody_anchors --upload` during local remediation. The first requires the separately approved quota-reset window; the second mutates private Storage.
+
+Backend-only configuration names:
+
+```text
+NETRA_EVIDENCE_KEY
+NETRA_EVIDENCE_KEY_ID
+NETRA_EVIDENCE_PREVIOUS_KEYS
+NETRA_EVIDENCE_WRITE_FORMAT
+NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES
+NETRA_CUSTODY_ANCHORS_ENABLED
+NETRA_CUSTODY_SIGNING_PRIVATE_KEY
+NETRA_CUSTODY_SIGNING_KEY_ID
+NETRA_STORAGE_CACHE_ENABLED
+NETRA_STORAGE_CACHE_MAX_BYTES
+NETRA_STORAGE_CACHE_MIN_FREE_BYTES
+NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS
+NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS
+NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS
+```
+
+These variables belong on Railway/backend services only. None may use a `VITE_` prefix. Startup performs bounded stale-partial cleanup and never downloads an object. Routine health checks remain metadata-only.
+
+See `KEY_ROTATION_AND_RECOVERY.md` for the future key rollout, retention, restore drill, and explicit retirement approval process.

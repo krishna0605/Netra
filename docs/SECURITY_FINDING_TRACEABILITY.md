@@ -75,3 +75,41 @@ Phase 2 is repository-only. Migration `0014_security_tenancy_and_rate_limits` is
 ### Phase 2 deployment status
 
 Do not push or merge this branch. Phase 3 through Phase 7, PostgreSQL 17 concurrency rehearsal, CI/security scanning, branch protection, preview validation, MFA enrollment UX, and the reviewed migration window remain mandatory gates.
+
+## Phase 3 verification record
+
+Phase 3 is repository-only. No crypto migration was executed against Supabase, no Storage object was downloaded, no cloud configuration changed, and no deployment or push occurred. Public tables remain 51 and Django forensics migrations remain 14.
+
+| Finding | Status | Phase 3 control | Regression evidence |
+|---|---|---|---|
+| NTR-005 | Verified locally | Legacy Fernet derivation is isolated behind a decrypt-only reader. All durable producers use authenticated `netra-artifact-v2.1` manifests, artifact-specific HKDF domains, random data keys, AES-256-GCM chunks, and immutable object paths. | `test_crypto_v2.py`, `test_crypto_migration.py`, artifact security and worker tests |
+| NTR-017 | Verified locally; PostgreSQL stress gate pending | Custody append locks the parent Case, resolves the previous event by `-created_at,-id`, and verification uses `created_at,id` with one canonical payload. External anchors use privacy-minimal Ed25519 signatures. | `test_custody_concurrency.py`; 50-writer test is PostgreSQL-only |
+| NTR-027 | Verified locally | v2.1 encryption and legacy migration use bounded chunk processing; temporary plaintext is permission-restricted and removed in `finally`. | Empty, boundary, multi-chunk, no-`read_bytes`, authentication-failure, and resume safety tests |
+| NTR-029 | Verified locally | The persistent encrypted cache verifies local size/hash, collapses parallel misses, holds entry leases, performs LRU eviction, preserves a hard free-space reserve, and prohibits uncached fallback. | `test_storage_provider.py` zero-second-GET, concurrency, corruption, capacity, lease, and stale-partial tests |
+| Public documentation | Verified locally | Root README uses Netra-only branding, synthetic content, five locally decoded direct QR assets, explicit controlled-demo limitations, and no committed source reports/decks. | `docs/assets/readme/ASSET_PROVENANCE.md` and staged-asset audit |
+
+### Phase 3 local commits
+
+| Commit | Purpose |
+|---|---|
+| `fa1bd2d` | Make authenticated v2.1 the only durable artifact write format |
+| `a0569ee` | Add explicit, resumable, egress-capped legacy crypto migration |
+| `307c457` | Serialize custody appends and add signed external anchors |
+| `f870fc1` | Add bounded persistent encrypted object cache |
+| `6cdc87c` | Publish the sanitized README and direct QR assets |
+| Phase 3 verification commit | Record recovery, key, egress, verification, and handoff gates |
+
+### Phase 3 acceptance evidence
+
+- Focused crypto, migration, anchor, and cache unit tests pass locally.
+- The canonical complete Django runner remains blocked before assertions by the pre-existing monolithic Windows analysis/Scapy import path; an isolated migrated-database run verifies 23 focused tests with the PostgreSQL-only stress test skipped. Full-run completion remains a no-push gate and aligns with Phase 4 parser/worker isolation work.
+- New v2.1 writes never call Fernet; legacy fixtures remain decryptable through the explicit legacy reader.
+- Plan-only crypto migration makes zero Storage calls and creates no state file.
+- Five parallel cache misses produce one mocked GET; a verified repeat read produces zero GETs.
+- QR codes decode locally to the five approved direct destinations; image EXIF is empty and all README local links resolve.
+- The PostgreSQL 17 fifty-writer custody test is committed but remains an external pre-push gate because no approved disposable PostgreSQL credential is available.
+- No Supabase, Railway, Vercel, or GitHub mutation occurred.
+
+### Phase 3 deployment status
+
+Do not push or merge this branch. The real crypto migration, Railway volume persistence drill, production key provisioning, PostgreSQL locking rehearsal, Phases 4-7, CI/security scanning, and protected-main workflow remain mandatory gates.

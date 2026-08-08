@@ -184,6 +184,7 @@ storage/              Runtime volume layout; generated content is Git-ignored
 - [Supabase migration runbook](docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md)
 - [Security remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md)
 - [Security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md)
+- [Key rotation and recovery](docs/KEY_ROTATION_AND_RECOVERY.md)
 - [Production migration missing inputs](docs/PRODUCTION_MIGRATION_MISSING.md)
 - [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 

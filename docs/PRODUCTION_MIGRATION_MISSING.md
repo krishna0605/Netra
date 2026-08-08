@@ -19,7 +19,11 @@ This file records names and status only. Never add credential values here.
 | Operational | Source retirement decision | This execution used the new project as a fresh start and did not read legacy Storage or export legacy rows. | Keep the legacy project untouched until you explicitly approve archival/deletion. Rotate or revoke legacy deployment credentials after the rollback window. |
 | Phase 2 activation | Administrator TOTP/AAL2 enrollment | Phase 2 blocks user and administrator mutations unless the verified Supabase token has `aal2`. | Enroll and verify a TOTP factor for the permanent Admin before any future Phase 2 deployment. Do not place factor secrets in this file. |
 | Local test environment | Disposable PostgreSQL 17 test credential | PostgreSQL 17 is installed locally on port 5434, but no approved credential is available for the row-lock concurrency rehearsal. | Supply an approved disposable local database credential or create a disposable local test database before the future push gate. Do not use Supabase free-plan egress for this test. |
-| Release governance | Phase 7 CI and branch protection | Phase 2 is locally green, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 3–7 before pushing this branch or opening the production PR. |
+| Release governance | Phase 7 CI and branch protection | Phase 3 is locally implemented, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 4–7 before pushing this branch or opening the production PR. |
+| Phase 3 activation | Evidence encryption key material | v2.1 writers require high-entropy active key material and a stable non-secret key ID; legacy artifacts require decrypt-only prior keys during rollback. | Provision `NETRA_EVIDENCE_KEY`, `NETRA_EVIDENCE_KEY_ID`, and reviewed previous keys through Railway secrets. Never place values in this file or Vercel. |
+| Phase 3 activation | Custody signing material | External anchors cannot be signed without a 32-byte raw Ed25519 private key and stable key ID. | Provision the base64 private key and key ID through Railway secrets, enable anchors only afterward, and preserve public keys with exported anchors. |
+| Phase 3 activation | Crypto migration rehearsal | The resumable command is locally implemented but has not been exercised against the target sequence or any Supabase object. | Rehearse with fake/local Storage, approve the 0.75 GB window after quota reset, then run plan-only inventory before any execution. |
+| Phase 3 activation | Railway volume persistence drill | Cache logic is bounded and tested locally, but the external `/app/storage` mount contract is not proven across restarts. | Attach/verify the volume, create the sentinel, restart API and workers, and confirm cache persistence without performing a deep object probe. |
 
 ## Completed cutover work
 
@@ -62,6 +66,12 @@ This file records names and status only. Never add credential values here.
 | `NETRA_STORAGE_DEEP_HEALTHCHECK` | `0`. |
 | `NETRA_DIRECT_UPLOAD_ENABLED` | `0`. |
 | `NETRA_STORAGE_ROOT` | `/app/storage`; requires the owner volume action above. |
+| `NETRA_STORAGE_CACHE_ENABLED` | Future Phase 3 value `1`; startup must fail closed when disabled in production. |
+| `NETRA_STORAGE_CACHE_MAX_BYTES` / `NETRA_STORAGE_CACHE_MIN_FREE_BYTES` | Future defaults `629145600` / `209715200`; Railway backend only. |
+| `NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS` / `NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS` / `NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS` | Future cache-maintenance values `3600` / `60` / `30`; Railway backend only. |
+| `NETRA_EVIDENCE_WRITE_FORMAT` / `NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES` | Future Phase 3 values `v2` / `8388608`; Railway backend only. |
+| `NETRA_CUSTODY_ANCHORS_ENABLED` | Future value `1` only after signing material is provisioned and verified. |
+| `NETRA_CUSTODY_SIGNING_PRIVATE_KEY` / `NETRA_CUSTODY_SIGNING_KEY_ID` | Future Phase 3 signing material; Railway secret/backend scope only. |
 | `NETRA_DEPLOYMENT_PROFILE` | `hackathon-core`. |
 | `NETRA_DEPLOYMENT_ENV` | `production`. |
 | `NETRA_DEV_ROLE_HEADERS` | `0`. |
