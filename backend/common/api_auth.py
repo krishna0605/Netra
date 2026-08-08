@@ -152,6 +152,12 @@ class NetraApiAuthMiddleware:
             if not can_actor_access_case(actor, case_id) and not self._may_create_case(request, case_id):
                 return _not_found()
 
+        # Canonical analysis routes perform a single case+job lookup in their
+        # AnalysisScope service so authorization failures use the same
+        # non-disclosing API contract as missing analysis resources.
+        if "/analysis/jobs/" in request.path:
+            return None
+
         resource_case_id = self._resource_case_id(view_kwargs)
         if resource_case_id and not can_actor_access_case(actor, resource_case_id):
             return _not_found()
