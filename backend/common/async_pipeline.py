@@ -24,6 +24,7 @@ from common.postgres_jobs import JobCancellationRequested
 from common.storage import save_uploaded_file
 from common.storage_provider import storage_provider
 from common.structured_analysis import analyze_structured_evidence
+from common.tenancy import netra_organization
 from common.vault import build_manifest_payload, temporary_decrypted_copy
 from common.vault_v2 import encrypt_evidence_v2
 
@@ -42,6 +43,8 @@ def queue_uploaded_evidence(
     case, _ = Case.objects.update_or_create(
         id=case_id,
         defaults={
+            "organization": netra_organization(),
+            "display_reference": case_id,
             "title": f"Queued PCAP analysis: {saved['filename']}",
             "investigator": intake.get("investigator") or actor.user,
             "department": intake.get("department") or "Gujarat Cyber Crime Cell",

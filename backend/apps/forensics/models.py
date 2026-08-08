@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from uuid import uuid4
@@ -10,6 +11,21 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class Organization(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=80, unique=True)
+    max_queued_analyses = models.PositiveIntegerField(default=5, validators=[MinValueValidator(1)])
+
+    def __str__(self) -> str:
+        return self.name
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(max_queued_analyses__gte=1), name="netra_org_queue_min_one"),
+        ]
 
 
 class Case(TimeStampedModel):
@@ -31,6 +47,8 @@ class Case(TimeStampedModel):
         SYSTEM_TEST = "system_test", "System test"
 
     id = models.CharField(max_length=64, primary_key=True)
+    organization = models.ForeignKey(Organization, related_name="cases", on_delete=models.PROTECT)
+    display_reference = models.CharField(max_length=64)
     route_ref = models.UUIDField(default=uuid4, unique=True, editable=False, db_index=True)
     title = models.CharField(max_length=255)
     investigator = models.CharField(max_length=160)
@@ -53,9 +71,13 @@ class Case(TimeStampedModel):
 
     class Meta:
         indexes = [
+            models.Index(fields=["organization", "status", "updated_at"], name="netra_case_org_status_idx"),
             models.Index(fields=["status", "updated_at"], name="netra_case_status_upd_idx"),
             models.Index(fields=["is_test", "updated_at"], name="netra_case_test_upd_idx"),
             models.Index(fields=["origin", "updated_at"], name="netra_case_origin_upd_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "display_reference"], name="netra_case_org_display_uniq"),
         ]
 
 
@@ -82,12 +104,23 @@ class UserProfile(TimeStampedModel):
         VIEWER = "Viewer", "Viewer"
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="netra_profile", on_delete=models.CASCADE)
+    organization = models.ForeignKey(Organization, related_name="user_profiles", on_delete=models.PROTECT)
     role = models.CharField(max_length=32, choices=Role.choices, default=Role.VIEWER)
     display_name = models.CharField(max_length=160, blank=True)
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")
 
     def __str__(self) -> str:
         return f"{self.display_name or self.user.get_username()} ({self.role})"
+
+    class Meta:
+        indexes = [models.Index(fields=["organization", "role"], name="netra_profile_org_role_idx")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(role="Admin"),
+                name="netra_one_admin_per_org",
+            ),
+        ]
 
 
 class CaseMembership(TimeStampedModel):
@@ -116,7 +149,7 @@ class EvidenceUploadSession(TimeStampedModel):
     id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="netra_upload_sessions", on_delete=models.CASCADE)
     external_user_id = models.CharField(max_length=128, db_index=True)
-    organization = models.CharField(max_length=160)
+    organization = models.ForeignKey(Organization, related_name="upload_sessions", on_delete=models.PROTECT)
     case = models.ForeignKey(Case, related_name="upload_sessions", on_delete=models.CASCADE)
     expected_filename = models.CharField(max_length=255)
     expected_size_bytes = models.BigIntegerField()
@@ -152,7 +185,7 @@ class EvidenceUploadSession(TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=["user", "status"], name="netra_upload_user_status_idx"),
-            models.Index(fields=["organization", "status"], name="netra_upload_org_status_idx"),
+            models.Index(fields=["organization", "user", "status", "expires_at"], name="netra_upload_org_usr_idx"),
             models.Index(fields=["expires_at", "status"], name="netra_upload_expiry_idx"),
             models.Index(fields=["case", "created_at"], name="netra_upload_case_created_idx"),
         ]
@@ -377,6 +410,7 @@ class CaptureSchedule(TimeStampedModel):
 
 
 class OperationalEvent(TimeStampedModel):
+    organization = models.ForeignKey(Organization, related_name="operational_events", on_delete=models.PROTECT)
     case = models.ForeignKey(Case, null=True, blank=True, related_name="operational_events", on_delete=models.CASCADE)
     capture_job = models.ForeignKey(CaptureJob, null=True, blank=True, related_name="operational_events", on_delete=models.CASCADE)
     event_type = models.CharField(max_length=120)
@@ -384,6 +418,8 @@ class OperationalEvent(TimeStampedModel):
 
     class Meta:
         indexes = [
+            models.Index(fields=["organization", "created_at"], name="netra_ops_org_created_idx"),
+            models.Index(fields=["organization", "id"], name="netra_ops_org_id_idx"),
             models.Index(fields=["capture_job", "id"], name="netra_ops_job_id_idx"),
             models.Index(fields=["created_at"], name="netra_ops_created_idx"),
         ]
@@ -680,6 +716,7 @@ class AccessLog(TimeStampedModel):
         VIEWER = "Viewer", "Viewer"
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    organization = models.ForeignKey(Organization, related_name="access_logs", on_delete=models.PROTECT)
     user_label = models.CharField(max_length=160)
     role = models.CharField(max_length=32, choices=Role.choices)
     action = models.CharField(max_length=160)
@@ -690,7 +727,51 @@ class AccessLog(TimeStampedModel):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
 
     class Meta:
-        indexes = [models.Index(fields=["created_at"], name="netra_access_created_idx")]
+        indexes = [
+            models.Index(fields=["organization", "created_at"], name="netra_access_org_created_idx"),
+            models.Index(fields=["organization", "case", "created_at"], name="netra_access_org_case_idx"),
+            models.Index(fields=["created_at"], name="netra_access_created_idx"),
+        ]
+
+
+class ApiRateLimitBucket(TimeStampedModel):
+    organization = models.ForeignKey(Organization, related_name="rate_limit_buckets", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        related_name="netra_rate_limit_buckets",
+        on_delete=models.SET_NULL,
+    )
+    scope_key = models.CharField(max_length=160)
+    route_key = models.CharField(max_length=80)
+    window_start = models.DateTimeField()
+    window_seconds = models.PositiveIntegerField()
+    request_count = models.PositiveIntegerField(default=0)
+    byte_count = models.PositiveBigIntegerField(default=0)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "scope_key", "route_key"],
+                name="netra_rate_bucket_uniq",
+            ),
+            models.CheckConstraint(condition=models.Q(window_seconds__gte=1), name="netra_rate_window_positive"),
+            models.CheckConstraint(condition=models.Q(request_count__gte=0), name="netra_rate_count_nonnegative"),
+            models.CheckConstraint(condition=models.Q(byte_count__gte=0), name="netra_rate_bytes_nonnegative"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope_key__startswith="user:", user__isnull=False)
+                    | models.Q(scope_key__startswith="org:", user__isnull=True)
+                ),
+                name="netra_rate_scope_user_match",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "route_key", "window_start"], name="netra_rate_org_route_idx"),
+            models.Index(fields=["expires_at"], name="netra_rate_expiry_idx"),
+        ]
 
 
 class ComplianceControl(TimeStampedModel):

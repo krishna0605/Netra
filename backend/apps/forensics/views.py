@@ -48,6 +48,7 @@ from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
 from common.safe_paths import generated_artifact_filename
 from common.structured_analysis import analyze_structured_evidence
+from common.tenancy import netra_organization
 from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
 from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
 from common.vault_v2 import verify_evidence_v2
@@ -302,7 +303,7 @@ def setup_admin(request):
         return JsonResponse({"error": "Password must be at least 8 characters."}, status=400)
     User = get_user_model()
     user = User.objects.create_user(username=email, email=email, password=password, first_name=name, is_staff=True, is_superuser=True)
-    profile = UserProfile.objects.create(user=user, role="Admin", display_name=name)
+    profile = UserProfile.objects.create(user=user, organization=netra_organization(), role="Admin", display_name=name)
     refresh = RefreshToken.for_user(user)
     return JsonResponse(
         {
@@ -345,7 +346,10 @@ def auth_login(request):
     user = authenticate(request, username=email, password=password)
     if not user:
         return JsonResponse({"error": "Invalid credentials"}, status=401)
-    profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "Viewer", "display_name": user.get_full_name() or user.username})
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={"organization": netra_organization(), "role": "Viewer", "display_name": user.get_full_name() or user.username},
+    )
     refresh = RefreshToken.for_user(user)
     return JsonResponse(
         {
@@ -455,11 +459,17 @@ def users(request):
         if payload.get("password"):
             user.set_password(payload["password"])
             user.save()
-        profile, _ = UserProfile.objects.update_or_create(user=user, defaults={"role": role, "display_name": payload.get("name", email)})
+        profile, _ = UserProfile.objects.update_or_create(
+            user=user,
+            defaults={"organization": netra_organization(), "role": role, "display_name": payload.get("name", email)},
+        )
         return JsonResponse({"id": user.id, "email": user.username, "name": profile.display_name, "role": profile.role, "created": created}, status=201)
     rows = []
     for user in User.objects.order_by("username"):
-        profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "Viewer", "display_name": user.get_full_name() or user.username})
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user,
+            defaults={"organization": netra_organization(), "role": "Viewer", "display_name": user.get_full_name() or user.username},
+        )
         rows.append({"id": user.id, "email": user.username, "name": profile.display_name, "role": profile.role, "active": user.is_active})
     return JsonResponse({"results": rows})
 
@@ -475,7 +485,10 @@ def user_detail(request, user_id: str):
     user = User.objects.filter(id=user_id).first()
     if not user:
         raise Http404("User not found")
-    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={"organization": netra_organization()},
+    )
     if payload.get("role") in {"Admin", "Investigator", "Analyst", "Viewer"}:
         profile.role = payload["role"]
     if "active" in payload:
@@ -509,6 +522,8 @@ def cases(request):
         with transaction.atomic():
             case = Case.objects.create(
                 id=case_id,
+                organization=netra_organization(),
+                display_reference=case_id,
                 title=payload.get("title") or f"Investigation {case_id}",
                 investigator=investigator,
                 department=department,

@@ -12,6 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from scapy.all import DNS, DNSQR, Ether, IP, TCP, UDP, PcapNgWriter, PcapWriter
 
 from apps.forensics.models import Case, ProcessingJob, UserProfile
+from apps.forensics.tests.factories import netra_organization
 from common.postgres_jobs import JobCancellationRequested, claim_next_job, mark_job_failure, request_job_cancellation
 
 
@@ -41,7 +42,12 @@ class HackathonGoldenPathTests(TestCase):
             email="golden-investigator@example.test",
             password="unused-test-password",
         )
-        UserProfile.objects.create(user=user, role="Investigator", display_name="Golden Investigator")
+        UserProfile.objects.create(
+            user=user,
+            organization=netra_organization(),
+            role="Investigator",
+            display_name="Golden Investigator",
+        )
         token = str(RefreshToken.for_user(user).access_token)
         self.headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 

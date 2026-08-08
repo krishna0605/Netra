@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from apps.forensics.models import AccessLog, Case, EvidenceFile, EvidenceManifest, Export, OperationalEvent, Report
 from common.custody import record_custody_event
 from common.readiness import audit_export_payload, incident_readiness_payload, legal_review_checklist
+from common.tenancy import netra_organization
 
 
 class Command(BaseCommand):
@@ -75,8 +76,11 @@ class Command(BaseCommand):
 
     def _ensure_case(self) -> Case:
         suffix = uuid4().hex[:8]
+        organization = netra_organization()
         case = Case.objects.create(
             id=f"CYB-GJ-READY-{suffix}",
+            organization=organization,
+            display_reference=f"CYB-GJ-READY-{suffix}",
             title="Phase 9/10 readiness validation case",
             investigator="Netra readiness validator",
             department="Gujarat Cyber Crime Cell",
@@ -112,8 +116,8 @@ class Command(BaseCommand):
         record_custody_event(case, "Netra readiness validator", "Analysis completed", {"summary": {"packets": 0, "alerts": 0}}, evidence, "ProcessingJob", f"job-ready-{suffix}")
         Report.objects.create(id=f"report-ready-{suffix}.html", case=case, language="en", generated_by="Netra readiness validator", stored_path="supabase://netra-reports/report-ready.enc", sha256="d" * 64, status="ready")
         Export.objects.create(id=f"export-ready-{suffix}", case=case, export_type="json", requested_by="Netra readiness validator", stored_path="supabase://netra-exports/export-ready.enc", sha256="e" * 64, status="ready")
-        AccessLog.objects.create(user_label="Netra readiness validator", role="Admin", action="readiness.validation", case=case, resource_type="Case", resource_id=case.id, result="allowed")
-        OperationalEvent.objects.create(case=case, event_type="readiness.validation", payload_json={"caseId": case.id})
+        AccessLog.objects.create(organization=organization, user_label="Netra readiness validator", role="Admin", action="readiness.validation", case=case, resource_type="Case", resource_id=case.id, result="allowed")
+        OperationalEvent.objects.create(organization=organization, case=case, event_type="readiness.validation", payload_json={"caseId": case.id})
         return case
 
     def _markdown(self, results: dict) -> str:

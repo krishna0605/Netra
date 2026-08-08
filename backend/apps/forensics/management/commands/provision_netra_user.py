@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.forensics.models import UserProfile
+from common.tenancy import netra_organization
 
 
 class Command(BaseCommand):
@@ -31,7 +32,7 @@ class Command(BaseCommand):
             user.save(update_fields=["email"])
         profile, _ = UserProfile.objects.update_or_create(
             user=user,
-            defaults={"role": options["role"], "display_name": display_name},
+            defaults={"organization": netra_organization(), "role": options["role"], "display_name": display_name},
         )
         action = "created" if created else "updated"
         self.stdout.write(self.style.SUCCESS(f"Netra profile {action}: {email} ({profile.role})"))

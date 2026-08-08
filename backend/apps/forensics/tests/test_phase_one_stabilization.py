@@ -8,6 +8,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from apps.forensics.api.errors import api_error
 from apps.forensics.management.commands.run_netra_worker import Command
 from apps.forensics.models import Case, Report
+from apps.forensics.tests.factories import netra_organization
 from common.artifacts import generate_pdf_report_artifact, generate_report_artifact
 from common.audit import Actor
 
@@ -33,7 +34,13 @@ class RequestIdSafetyTests(TestCase):
 
 class QueuedReportIdentityTests(TestCase):
     def setUp(self):
-        self.case = Case.objects.create(id="CASE-QUEUED-REPORT", title="Queued report", investigator="Worker")
+        self.case = Case.objects.create(
+            id="CASE-QUEUED-REPORT",
+            organization=netra_organization(),
+            display_reference="CASE-QUEUED-REPORT",
+            title="Queued report",
+            investigator="Worker",
+        )
         self.actor = Actor("Netra report worker", "System", authenticated=True)
         self.analysis = {
             "caseId": self.case.id,

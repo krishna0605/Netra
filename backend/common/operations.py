@@ -26,6 +26,7 @@ from common.identifiers import validate_case_id
 from common.kafka import publish_event
 from common.persistence import persist_analysis
 from common.storage import save_uploaded_file
+from common.tenancy import netra_organization
 from common.vault import decrypt_file
 
 
@@ -38,7 +39,8 @@ MIN_CHUNK_INTERVAL_SECONDS = 2
 def emit_operational_event(event_type: str, payload: dict[str, Any], capture_job: CaptureJob | None = None, case: Case | None = None) -> OperationalEvent:
     if capture_job and case is None:
         case = capture_job.case
-    event = OperationalEvent.objects.create(case=case, capture_job=capture_job, event_type=event_type, payload_json=payload)
+    organization = case.organization if case else netra_organization()
+    event = OperationalEvent.objects.create(organization=organization, case=case, capture_job=capture_job, event_type=event_type, payload_json=payload)
     publish_event("netra.operational.events", {"id": event.id, "type": event_type, **payload})
     return event
 
@@ -66,6 +68,8 @@ def ensure_capture_case(case_id: str, investigator: str = "Local Investigator") 
     case, _ = Case.objects.update_or_create(
         id=case_id,
         defaults={
+            "organization": netra_organization(),
+            "display_reference": case_id,
             "title": f"Live evidence capture: {case_id}",
             "investigator": investigator,
             "status": Case.Status.OPEN,

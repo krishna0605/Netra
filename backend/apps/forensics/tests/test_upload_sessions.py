@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from apps.forensics.models import UserProfile
+from apps.forensics.tests.factories import netra_organization
 from common.audit import Actor
 from common.upload_sessions import UploadSessionProblem, create_upload_session, upload_session_payload
 
@@ -23,7 +24,12 @@ class EvidenceUploadSessionTests(TestCase):
     def test_session_is_owner_scoped_idempotent_and_single_active(self):
         external_id = str(uuid4())
         user = get_user_model().objects.create_user(username="investigator@example.invalid")
-        UserProfile.objects.create(user=user, role=UserProfile.Role.INVESTIGATOR, department="Test Cyber Unit")
+        UserProfile.objects.create(
+            user=user,
+            organization=netra_organization(),
+            role=UserProfile.Role.INVESTIGATOR,
+            department="Test Cyber Unit",
+        )
         actor = Actor(
             user="Test Investigator",
             role=UserProfile.Role.INVESTIGATOR,

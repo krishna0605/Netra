@@ -9,6 +9,7 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import Case, UserProfile
+from apps.forensics.tests.factories import netra_organization
 from common.identifiers import InvalidCaseId, validate_case_id
 from common.artifacts import generate_pdf_report_artifact, generate_report_artifact
 from common.audit import Actor
@@ -63,7 +64,12 @@ class CaseIdentifierRequestTests(TestCase):
             email="artifact-security@example.test",
             password="unused-test-password",
         )
-        UserProfile.objects.create(user=self.user, role="Investigator", display_name="Artifact Security")
+        UserProfile.objects.create(
+            user=self.user,
+            organization=netra_organization(),
+            role="Investigator",
+            display_name="Artifact Security",
+        )
         token = str(RefreshToken.for_user(self.user).access_token)
         self.headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
@@ -156,6 +162,8 @@ class GeneratedReportInjectionTests(TestCase):
     def setUp(self):
         self.case = Case.objects.create(
             id="CASE-REPORT-SAFE",
+            organization=netra_organization(),
+            display_reference="CASE-REPORT-SAFE",
             title="Report safety",
             investigator="Investigator",
             legal_hold=True,

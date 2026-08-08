@@ -15,6 +15,7 @@ from common.indexing import index_analysis
 from common.identifiers import validate_case_id
 from common.jobs import completed_steps
 from common.kafka import publish_event
+from common.tenancy import netra_organization
 from common.vault import build_manifest_payload
 
 
@@ -83,6 +84,8 @@ def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Act
     case, _ = Case.objects.update_or_create(
         id=analysis["caseId"],
         defaults={
+            "organization": netra_organization(),
+            "display_reference": analysis["caseId"],
             "title": case_data.get("title", f"Real PCAP analysis: {saved['filename']}"),
             "investigator": intake.get("investigator") or case_data.get("investigator", actor.user),
             "department": intake.get("department") or "Gujarat Cyber Crime Cell",

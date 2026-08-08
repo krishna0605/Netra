@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import Case, CaseMembership, Export, ProcessingJob, Report, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
+from apps.forensics.tests.factories import netra_organization
 from common.audit import sync_supabase_actor
 from common.vault import fernet
 
@@ -30,12 +31,18 @@ class ApiAccessControlTests(TestCase):
 
     def _user(self, email: str, role: str):
         user = get_user_model().objects.create_user(username=email, email=email, password="unused-test-password")
-        UserProfile.objects.create(user=user, role=role, display_name=email)
+        UserProfile.objects.create(user=user, organization=netra_organization(), role=role, display_name=email)
         token = str(RefreshToken.for_user(user).access_token)
         return user, {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
     def _case(self, case_id: str):
-        return Case.objects.create(id=case_id, title=case_id, investigator="Test Investigator")
+        return Case.objects.create(
+            id=case_id,
+            organization=netra_organization(),
+            display_reference=case_id,
+            title=case_id,
+            investigator="Test Investigator",
+        )
 
     def test_health_is_the_only_minimal_public_operational_response(self):
         response = self.client.get("/api/health")

@@ -20,6 +20,7 @@ from common.hashing import sha256_text
 from common.identifiers import InvalidCaseId, generate_case_id, validate_case_id
 from common.jobs import initial_steps
 from common.storage_provider import storage_provider
+from common.tenancy import netra_organization
 
 
 PRE_FINAL_STATUSES = {
@@ -179,6 +180,7 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
     try:
         with transaction.atomic():
             now = timezone.now()
+            tenant = netra_organization()
             EvidenceUploadSession.objects.select_for_update().filter(
                 user=user,
                 status__in=PRE_FINAL_STATUSES,
@@ -198,6 +200,8 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
             if case is None:
                 case = Case.objects.create(
                     id=case_id,
+                    organization=tenant,
+                    display_reference=case_id,
                     title=_text(payload.get("caseTitle"), maximum=255, default=f"Evidence intake: {filename}") or f"Evidence intake: {filename}",
                     investigator=investigator,
                     department=organization,
@@ -223,7 +227,7 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
                 id=session_id,
                 user=user,
                 external_user_id=external_user_id,
-                organization=organization,
+                organization=tenant,
                 case=case,
                 expected_filename=filename,
                 expected_size_bytes=size_bytes,

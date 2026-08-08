@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import Alert, Case, CaseHistoryEvent, CaseMembership, CustodyLedgerEvent, DetectionMatch, ProcessingJob, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
+from apps.forensics.tests.factories import netra_organization
 
 
 SECURE_TEST_SETTINGS = override_settings(
@@ -56,12 +57,18 @@ class AnalysisCaseBoundaryTests(TestCase):
 
     def _user(self, email: str, role: str):
         user = get_user_model().objects.create_user(username=email, email=email, password="unused-test-password")
-        UserProfile.objects.create(user=user, role=role, display_name=email)
+        UserProfile.objects.create(user=user, organization=netra_organization(), role=role, display_name=email)
         token = str(RefreshToken.for_user(user).access_token)
         return user, {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
     def _case(self, case_id: str, user):
-        case = Case.objects.create(id=case_id, title=case_id, investigator=user.email)
+        case = Case.objects.create(
+            id=case_id,
+            organization=netra_organization(),
+            display_reference=case_id,
+            title=case_id,
+            investigator=user.email,
+        )
         CaseMembership.objects.create(case=case, user=user, role="Investigator")
         return case
 

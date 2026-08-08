@@ -9,6 +9,7 @@ from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, CaseMembership, UserProfile
+from common.tenancy import netra_organization
 
 
 ROLE_PERMISSIONS = {
@@ -54,7 +55,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
         user=user,
         # Supabase user_metadata is user-editable. New identities therefore use
         # the verified login identifier until an administrator assigns a name.
-        defaults={"role": UserProfile.Role.VIEWER, "display_name": username},
+        defaults={"organization": netra_organization(), "role": UserProfile.Role.VIEWER, "display_name": username},
     )
     return Actor(
         user=profile.display_name or user.username,
@@ -88,7 +89,11 @@ def actor_from_request(request) -> Actor:
             user = auth.get_user(validated)
             profile, _ = UserProfile.objects.get_or_create(
                 user=user,
-                defaults={"role": UserProfile.Role.VIEWER, "display_name": user.get_full_name() or user.get_username()},
+                defaults={
+                    "organization": netra_organization(),
+                    "role": UserProfile.Role.VIEWER,
+                    "display_name": user.get_full_name() or user.get_username(),
+                },
             )
             return Actor(user=profile.display_name or user.get_username(), role=profile.role, authenticated=True, django_user_id=user.id)
         except Exception:
@@ -140,7 +145,17 @@ def require_permission(request, permission: str, case: Case | None = None, resou
 
 def log_access(actor: Actor, action: str, case: Case | None = None, resource_type: str = "", resource_id: str = "", result: str = "allowed") -> None:
     try:
-        AccessLog.objects.create(user_id=actor.django_user_id, user_label=actor.user, role=actor.role, action=action, case=case, resource_type=resource_type, resource_id=resource_id, result=result)
+        AccessLog.objects.create(
+            organization=case.organization if case else netra_organization(),
+            user_id=actor.django_user_id,
+            user_label=actor.user,
+            role=actor.role,
+            action=action,
+            case=case,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            result=result,
+        )
     except Exception:
         pass
 

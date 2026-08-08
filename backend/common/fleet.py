@@ -26,6 +26,7 @@ from common.kafka import supabase_queue_depths
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, heartbeat_state
 from common.identifiers import validate_case_id
 from common.storage_provider import storage_provider
+from common.tenancy import netra_organization
 
 
 def sensor_group_payload(group: SensorGroup) -> dict[str, Any]:
@@ -93,7 +94,13 @@ def queue_schedule_run(schedule: CaptureSchedule) -> CaptureJob | None:
     case_id = validate_case_id(f"{schedule.case_id_prefix}-{stamp}")
     case, _ = Case.objects.get_or_create(
         id=case_id,
-        defaults={"title": schedule.name, "investigator": "Local Investigator", "source_location": sensor.location or sensor.name},
+        defaults={
+            "organization": netra_organization(),
+            "display_reference": case_id,
+            "title": schedule.name,
+            "investigator": "Local Investigator",
+            "source_location": sensor.location or sensor.name,
+        },
     )
     job = create_capture_job(
         case=case,
