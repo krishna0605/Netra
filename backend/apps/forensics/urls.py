@@ -14,6 +14,7 @@ urlpatterns = [
     path("auth/me", views.auth_me),
     path("users", views.users),
     path("users/<str:user_id>", views.user_detail),
+    path("admin/organizations/<uuid:organization_id>/admin-transfer", views.admin_transfer),
     path("cases", views.cases),
     path("cases/<str:case_id>", views.case_detail),
     path("cases/<str:case_id>/workspace", views.case_workspace),

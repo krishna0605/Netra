@@ -79,6 +79,7 @@ def _required_permission(method: str, path: str) -> str | None:
     if path.rstrip("/") == "/api/auth/logout":
         return None
     privileged_prefixes = (
+        ("/api/admin", "manage_users"),
         ("/api/users", "manage_users"),
         ("/api/setup", "manage_users"),
         ("/api/system", "operations"),

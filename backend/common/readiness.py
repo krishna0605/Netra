@@ -20,10 +20,12 @@ from apps.forensics.models import (
     EvidenceFile,
     Export,
     OperationalEvent,
+    Organization,
     ProcessingJob,
     Report,
     RetentionRun,
     WorkerHeartbeat,
+    UserProfile,
 )
 from common.custody import custody_event_dict, verify_case_ledger
 
@@ -140,6 +142,17 @@ def audit_export_payload(case: Case | None = None, *, organization_id=None) -> d
 
 
 def deployment_readiness_payload() -> dict[str, Any]:
+    organizations = list(Organization.objects.values_list("id", flat=True))
+    invalid_admin_organizations = [
+        str(organization_id)
+        for organization_id in organizations
+        if UserProfile.objects.filter(
+            organization_id=organization_id,
+            role=UserProfile.Role.ADMIN,
+            user__is_active=True,
+        ).count()
+        != 1
+    ]
     checks = [
         _deployment_check("debug-disabled", not settings.DEBUG, "Django debug mode is disabled.", "Set DJANGO_DEBUG=0 before shared deployment.", required=True),
         _deployment_check("secret-key-set", bool(getattr(settings, "SECRET_KEY", "")) and settings.SECRET_KEY != "netra-development-only-secret", "Django secret key is non-default.", "Set a strong DJANGO_SECRET_KEY.", required=True),
@@ -158,6 +171,20 @@ def deployment_readiness_payload() -> dict[str, Any]:
             bool(getattr(settings, "NETRA_FREE_PLAN_GUARD", False)),
             "Free-plan egress safeguards are active.",
             "Set NETRA_FREE_PLAN_GUARD=1 for the 5 GB Supabase deployment.",
+            required=True,
+        ),
+        _deployment_check(
+            "organization-administrator-invariant",
+            bool(organizations) and not invalid_admin_organizations,
+            "Every organization has exactly one active administrator.",
+            "Provision or atomically transfer the sole active administrator for each organization.",
+            required=True,
+        ),
+        _deployment_check(
+            "database-rate-limits-enabled",
+            bool(getattr(settings, "NETRA_RATE_LIMITS_ENABLED", False)),
+            "Atomic database-backed API limits are active.",
+            "Set NETRA_RATE_LIMITS_ENABLED=1 on the Railway backend.",
             required=True,
         ),
         _deployment_check(

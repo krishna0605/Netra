@@ -24,6 +24,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
+from apps.forensics.services.administration import AdministrationProblem, ensure_admin_mutation_allowed, transfer_administrator
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
@@ -64,6 +65,10 @@ def _json_body(request) -> dict:
     if not request.body:
         return {}
     return json.loads(request.body.decode("utf-8"))
+
+
+def _administration_problem_response(problem: AdministrationProblem) -> JsonResponse:
+    return JsonResponse({"error": {"code": problem.code, "message": problem.message}}, status=problem.status)
 
 
 def _specialized_rate_limit(request, route_key: str, user_limit: int, *, organization_limit: int | None = None):
@@ -480,6 +485,10 @@ def users(request):
         return denied
     User = get_user_model()
     if request.method == "POST":
+        try:
+            ensure_admin_mutation_allowed(actor_from_request(request))
+        except AdministrationProblem as problem:
+            return _administration_problem_response(problem)
         payload = _json_body(request)
         email = payload.get("email")
         role = payload.get("role", "Viewer")
@@ -517,6 +526,10 @@ def user_detail(request, user_id: str):
     profile = UserProfile.objects.select_related("user").filter(user_id=user_id, organization_id=actor.organization_id).first()
     if not profile:
         raise Http404("User not found")
+    try:
+        ensure_admin_mutation_allowed(actor, profile)
+    except AdministrationProblem as problem:
+        return _administration_problem_response(problem)
     user = profile.user
     if payload.get("role") in {"Investigator", "Analyst", "Viewer"} and profile.role != "Admin":
         profile.role = payload["role"]
@@ -526,6 +539,26 @@ def user_detail(request, user_id: str):
     profile.save()
     user.save()
     return JsonResponse({"id": user.id, "email": user.username, "name": profile.display_name, "role": profile.role, "active": user.is_active})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_transfer(request, organization_id):
+    payload = _json_body(request)
+    try:
+        target_user_id = int(payload.get("targetUserId"))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": {"code": "invalid_target_user", "message": "targetUserId is required."}}, status=400)
+    try:
+        result = transfer_administrator(
+            actor=actor_from_request(request),
+            organization_id=organization_id,
+            target_user_id=target_user_id,
+            reason=str(payload.get("reason") or ""),
+        )
+    except AdministrationProblem as problem:
+        return _administration_problem_response(problem)
+    return JsonResponse(result)
 
 
 @csrf_exempt
