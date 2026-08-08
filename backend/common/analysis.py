@@ -1114,7 +1114,9 @@ def build_report_html(analysis: dict[str, Any], language: str = "en") -> str:
     zeek_summary = ", ".join(f"{key}: {value}" for key, value in (zeek.get("summary") or {}).items())
     return f"""<!doctype html>
 <html lang="{html.escape(language)}">
-<head><meta charset="utf-8"><title>Netra forensic report {html.escape(analysis.get('caseId', ''))}</title>
+<head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Netra forensic report {html.escape(analysis.get('caseId', ''))}</title>
 <style>body{{font-family:Arial,sans-serif;line-height:1.5;margin:32px;color:#17202a}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccd;padding:8px;text-align:left}}section{{margin:24px 0}}code{{word-break:break-all}}</style></head>
 <body>
 <h1>Forensic Network Investigation Report</h1>

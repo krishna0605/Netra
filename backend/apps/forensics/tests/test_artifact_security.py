@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from html.parser import HTMLParser
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -9,8 +10,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import Case, UserProfile
 from common.identifiers import InvalidCaseId, validate_case_id
+from common.artifacts import generate_pdf_report_artifact, generate_report_artifact
+from common.audit import Actor
 from common.safe_paths import UnsafeArtifactPath
 from common.storage import write_binary_artifact, write_text_artifact
+from common.vault import read_encrypted_or_plain
 
 
 SECURE_TEST_SETTINGS = override_settings(
@@ -135,3 +139,63 @@ class ArtifactPathContainmentTests(SimpleTestCase):
             self.assertEqual({path.name for path in files}, {"rpt-abc123.html.enc", "rpt-def456.pdf.enc"})
             self.assertTrue(all(path.parent == report_folder for path in files))
             self.assertFalse(any(path.suffix == ".tmp" for path in files))
+
+
+class _ActiveMarkupCollector(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags: list[str] = []
+        self.attributes: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append(tag.lower())
+        self.attributes.extend(name.lower() for name, _value in attrs)
+
+
+class GeneratedReportInjectionTests(TestCase):
+    def setUp(self):
+        self.case = Case.objects.create(
+            id="CASE-REPORT-SAFE",
+            title="Report safety",
+            investigator="Investigator",
+            legal_hold=True,
+            legal_hold_reason="<script>alert(1)</script><img src=x onerror=alert(1)></section><script>alert(2)</script>",
+        )
+        self.actor = Actor(user="investigator@example.test", role="Investigator", authenticated=True)
+        self.analysis = {
+            "caseId": self.case.id,
+            "summary": {"packets": 0, "sessions": 0, "alerts": 0, "anomalies": 0},
+            "alerts": [],
+            "anomalies": [],
+            "evidence": {},
+        }
+
+    def test_html_report_autoescapes_supplement_and_blocks_active_content(self):
+        with TemporaryDirectory() as temporary_directory, override_settings(
+            NETRA_STORAGE_ROOT=Path(temporary_directory) / "storage"
+        ):
+            artifact = generate_report_artifact(self.case.id, "en", self.analysis, self.actor)
+            report_html = read_encrypted_or_plain(artifact["stored_path"]).decode("utf-8")
+
+        self.assertNotIn("<script>alert(1)</script>", report_html)
+        self.assertNotIn("<img src=x onerror=alert(1)>", report_html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", report_html)
+        self.assertIn("Legal Review Checklist", report_html)
+        self.assertEqual(report_html.count("</body>"), 1)
+        self.assertIn('http-equiv="Content-Security-Policy"', report_html)
+        self.assertIn("default-src 'none'", report_html)
+
+        parser = _ActiveMarkupCollector()
+        parser.feed(report_html)
+        self.assertFalse({"script", "iframe", "object", "form"}.intersection(parser.tags))
+        self.assertFalse(any(attribute.startswith("on") for attribute in parser.attributes))
+
+    def test_pdf_report_treats_hostile_legal_text_as_text(self):
+        with TemporaryDirectory() as temporary_directory, override_settings(
+            NETRA_STORAGE_ROOT=Path(temporary_directory) / "storage"
+        ):
+            artifact = generate_pdf_report_artifact(self.case.id, "en", self.analysis, self.actor)
+            pdf_bytes = read_encrypted_or_plain(artifact["stored_path"])
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 1000)

@@ -1,0 +1,20 @@
+<!-- NETRA_REPORT_SUPPLEMENT -->
+<section id="custody-ledger-supplement">
+  <h2>Custody Ledger</h2>
+  <p>
+    Verified: {{ custody.verified }} |
+    Events: {{ custody.event_count }} |
+    Latest hash: <code>{{ custody.latest_hash }}</code>
+  </p>
+</section>
+<section id="legal-review-supplement">
+  <h2>Legal Review Checklist</h2>
+  <p>Status: {{ legal.status }}</p>
+  <ul>
+    {% for item in legal.items %}
+      <li><strong>{{ item.name }}</strong>: {{ item.status }} - {{ item.detail }}</li>
+    {% empty %}
+      <li>No legal-review items were available.</li>
+    {% endfor %}
+  </ul>
+</section>

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+from django.template.loader import render_to_string
+
 from apps.forensics.models import Case, CustodyLedgerEvent
 from common.analysis import build_alert_csv, build_evidence_bundle, build_report_html, empty_analysis
 from common.audit import Actor
@@ -12,6 +14,40 @@ from common.pdf_report import build_report_pdf
 from common.readiness import legal_review_checklist
 from common.safe_paths import generated_artifact_filename
 from common.storage import write_binary_artifact, write_text_artifact
+
+
+REPORT_BODY_MARKER = "</body>"
+
+
+def _render_report_supplement(custody: dict, legal: dict) -> str:
+    return render_to_string(
+        "forensics/report_supplement.html",
+        {
+            "custody": {
+                "verified": bool(custody.get("verified")),
+                "event_count": int(custody.get("eventCount") or 0),
+                "latest_hash": str(custody.get("latestHash") or ""),
+            },
+            "legal": {
+                "status": str(legal.get("status") or "unavailable"),
+                "items": [
+                    {
+                        "name": str(item.get("name") or ""),
+                        "status": str(item.get("status") or ""),
+                        "detail": str(item.get("detail") or ""),
+                    }
+                    for item in (legal.get("items") or [])
+                    if isinstance(item, dict)
+                ],
+            },
+        },
+    )
+
+
+def _insert_report_supplement(report_html: str, supplement: str) -> str:
+    if report_html.count(REPORT_BODY_MARKER) != 1:
+        raise ValueError("Generated report must contain exactly one closing body tag.")
+    return report_html.replace(REPORT_BODY_MARKER, f"{supplement}\n{REPORT_BODY_MARKER}", 1)
 
 
 def report_analysis_from_snapshot(case: Case) -> dict:
@@ -91,15 +127,7 @@ def generate_report_artifact(case_id: str, language: str, analysis: dict, actor:
     analysis = _artifact_analysis(case_id, analysis, case)
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
-    legal_items = "".join(
-        f"<li><strong>{item['name']}</strong>: {item['status']} - {item['detail']}</li>"
-        for item in legal.get("items", [])
-    )
-    html = build_report_html(analysis, language).replace(
-        "</body>",
-        f"<section><h2>Custody Ledger</h2><p>Verified: {custody.get('verified')} | Events: {custody.get('eventCount')} | Latest hash: {custody.get('latestHash','')}</p></section>"
-        f"<section><h2>Legal Review Checklist</h2><p>Status: {legal.get('status')}</p><ul>{legal_items}</ul></section></body>",
-    )
+    html = _insert_report_supplement(build_report_html(analysis, language), _render_report_supplement(custody, legal))
     artifact = write_text_artifact(html, "report", generated_artifact_filename("rpt", ".html"))
     record_report(case_id, artifact, language, actor, case=case)
     return {"id": artifact["filename"], **artifact}
