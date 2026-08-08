@@ -6,6 +6,7 @@ from uuid import uuid4
 from django.conf import settings
 
 from common.hashing import sha256_file
+from common.safe_paths import resolve_artifact_paths
 from common.storage_provider import storage_uri
 from common.vault import encrypt_file, save_encrypted_upload, validate_pcap_upload
 from common.vault_v2 import encrypt_evidence_v2
@@ -19,6 +20,11 @@ STORAGE_FOLDERS = {
     "log": "logs",
     "structured": "structured",
     "filtered_pcap": "filtered_pcaps",
+}
+
+ARTIFACT_EXTENSIONS = {
+    "report": frozenset({".html", ".pdf"}),
+    "export": frozenset({".csv", ".json", ".cef"}),
 }
 
 
@@ -98,18 +104,33 @@ def save_uploaded_file(
 
 def write_text_artifact(content: str, folder_key: str, filename: str) -> dict:
     ensure_storage_tree()
-    folder = settings.NETRA_STORAGE_ROOT / STORAGE_FOLDERS[folder_key]
-    plain_target = folder / filename
-    encrypted_target = folder / f"{filename}.enc"
-    plain_target.write_text(content, encoding="utf-8")
-    plaintext_sha = sha256_file(plain_target)
-    encrypt_file(plain_target, encrypted_target)
-    plain_target.unlink(missing_ok=True)
-    encrypted_size = encrypted_target.stat().st_size
-    encrypted_sha = sha256_file(encrypted_target)
+    if folder_key not in ARTIFACT_EXTENSIONS:
+        raise ValueError("Text artifacts may only be written to an approved artifact folder.")
+    paths = resolve_artifact_paths(
+        settings.NETRA_STORAGE_ROOT,
+        STORAGE_FOLDERS[folder_key],
+        filename,
+        allowed_extensions=ARTIFACT_EXTENSIONS[folder_key],
+    )
+    plain_target: Path | None = None
+    try:
+        with NamedTemporaryFile(delete=False, dir=paths.folder, suffix=".tmp") as temporary:
+            plain_target = Path(temporary.name)
+            temporary.write(content.encode("utf-8"))
+        os.chmod(plain_target, 0o600)
+        plaintext_sha = sha256_file(plain_target)
+        encrypt_file(plain_target, paths.encrypted_target)
+        encrypted_size = paths.encrypted_target.stat().st_size
+        encrypted_sha = sha256_file(paths.encrypted_target)
+    except Exception:
+        paths.encrypted_target.unlink(missing_ok=True)
+        raise
+    finally:
+        if plain_target is not None:
+            plain_target.unlink(missing_ok=True)
     return {
         "filename": filename,
-        "stored_path": storage_uri(encrypted_target),
+        "stored_path": storage_uri(paths.encrypted_target),
         "size_bytes": encrypted_size,
         "sha256": plaintext_sha,
         "encrypted_sha256": encrypted_sha,
@@ -118,18 +139,33 @@ def write_text_artifact(content: str, folder_key: str, filename: str) -> dict:
 
 def write_binary_artifact(content: bytes, folder_key: str, filename: str) -> dict:
     ensure_storage_tree()
-    folder = settings.NETRA_STORAGE_ROOT / STORAGE_FOLDERS[folder_key]
-    plain_target = folder / filename
-    encrypted_target = folder / f"{filename}.enc"
-    plain_target.write_bytes(content)
-    plaintext_sha = sha256_file(plain_target)
-    encrypt_file(plain_target, encrypted_target)
-    plain_target.unlink(missing_ok=True)
-    encrypted_size = encrypted_target.stat().st_size
-    encrypted_sha = sha256_file(encrypted_target)
+    if folder_key not in ARTIFACT_EXTENSIONS:
+        raise ValueError("Binary artifacts may only be written to an approved artifact folder.")
+    paths = resolve_artifact_paths(
+        settings.NETRA_STORAGE_ROOT,
+        STORAGE_FOLDERS[folder_key],
+        filename,
+        allowed_extensions=ARTIFACT_EXTENSIONS[folder_key],
+    )
+    plain_target: Path | None = None
+    try:
+        with NamedTemporaryFile(delete=False, dir=paths.folder, suffix=".tmp") as temporary:
+            plain_target = Path(temporary.name)
+            temporary.write(content)
+        os.chmod(plain_target, 0o600)
+        plaintext_sha = sha256_file(plain_target)
+        encrypt_file(plain_target, paths.encrypted_target)
+        encrypted_size = paths.encrypted_target.stat().st_size
+        encrypted_sha = sha256_file(paths.encrypted_target)
+    except Exception:
+        paths.encrypted_target.unlink(missing_ok=True)
+        raise
+    finally:
+        if plain_target is not None:
+            plain_target.unlink(missing_ok=True)
     return {
         "filename": filename,
-        "stored_path": storage_uri(encrypted_target),
+        "stored_path": storage_uri(paths.encrypted_target),
         "size_bytes": encrypted_size,
         "sha256": plaintext_sha,
         "encrypted_sha256": encrypted_sha,

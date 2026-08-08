@@ -12,6 +12,7 @@ from common.audit import Actor, add_history, log_access
 from common.case_workspace import refresh_case_workspace_artifacts, refresh_case_workspace_snapshot
 from common.custody import record_custody_event
 from common.indexing import index_analysis
+from common.identifiers import validate_case_id
 from common.jobs import completed_steps
 from common.kafka import publish_event
 from common.vault import build_manifest_payload
@@ -67,6 +68,7 @@ def latest_job_for_case(case_id: str | None = None) -> ProcessingJob | None:
 
 @transaction.atomic
 def persist_analysis(analysis: dict[str, Any], saved: dict[str, Any], actor: Actor) -> ProcessingJob:
+    analysis["caseId"] = validate_case_id(analysis["caseId"])
     case_data = analysis["case"]
     evidence_data = analysis["evidence"]
     intake = saved.get("intake", {})

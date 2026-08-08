@@ -10,6 +10,7 @@ from common.custody import custody_event_dict, verify_case_ledger
 from common.persistence import record_export, record_report
 from common.pdf_report import build_report_pdf
 from common.readiness import legal_review_checklist
+from common.safe_paths import generated_artifact_filename
 from common.storage import write_binary_artifact, write_text_artifact
 
 
@@ -85,7 +86,7 @@ def _artifact_analysis(case_id: str, analysis: dict, case: Case | None = None) -
     return enriched
 
 
-def generate_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor, filename: str | None = None) -> dict:
+def generate_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor) -> dict:
     case = Case.objects.filter(id=case_id).first()
     analysis = _artifact_analysis(case_id, analysis, case)
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
@@ -99,18 +100,18 @@ def generate_report_artifact(case_id: str, language: str, analysis: dict, actor:
         f"<section><h2>Custody Ledger</h2><p>Verified: {custody.get('verified')} | Events: {custody.get('eventCount')} | Latest hash: {custody.get('latestHash','')}</p></section>"
         f"<section><h2>Legal Review Checklist</h2><p>Status: {legal.get('status')}</p><ul>{legal_items}</ul></section></body>",
     )
-    artifact = write_text_artifact(html, "report", filename or f"{case_id}-{language}.html")
+    artifact = write_text_artifact(html, "report", generated_artifact_filename("rpt", ".html"))
     record_report(case_id, artifact, language, actor, case=case)
     return {"id": artifact["filename"], **artifact}
 
 
-def generate_pdf_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor, filename: str | None = None) -> dict:
+def generate_pdf_report_artifact(case_id: str, language: str, analysis: dict, actor: Actor) -> dict:
     case = Case.objects.filter(id=case_id).first()
     enriched = _artifact_analysis(case_id, analysis, case)
     custody = (enriched.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
     pdf_bytes = build_report_pdf(enriched, language, legal, custody)
-    artifact = write_binary_artifact(pdf_bytes, "report", filename or f"{case_id}-{language}.pdf")
+    artifact = write_binary_artifact(pdf_bytes, "report", generated_artifact_filename("rpt", ".pdf"))
     record_report(case_id, artifact, f"{language}-pdf", actor, case=case)
     return {"id": artifact["filename"], "format": "pdf", **artifact}
 

@@ -17,6 +17,7 @@ from common.audit import Actor, add_history, log_access
 from common.custody import record_custody_event
 from common.evidence_normalization import normalize_evidence_upload
 from common.jobs import append_job_event, initial_steps
+from common.identifiers import validate_case_id
 from common.kafka import publish_event
 from common.persistence import case_origin, is_validator_case, persist_analysis
 from common.postgres_jobs import JobCancellationRequested
@@ -36,6 +37,7 @@ def queue_uploaded_evidence(
     *,
     idempotency_key: str | None = None,
 ) -> ProcessingJob:
+    case_id = validate_case_id(case_id)
     intake = saved.get("intake", {})
     case, _ = Case.objects.update_or_create(
         id=case_id,

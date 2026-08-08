@@ -24,6 +24,7 @@ from apps.forensics.models import (
 )
 from common.kafka import supabase_queue_depths
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, heartbeat_state
+from common.identifiers import validate_case_id
 from common.storage_provider import storage_provider
 
 
@@ -89,8 +90,9 @@ def queue_schedule_run(schedule: CaptureSchedule) -> CaptureJob | None:
         schedule.save(update_fields=["last_run_at", "next_run_at", "updated_at"])
         return None
     stamp = timezone.localtime().strftime("%Y%m%d-%H%M%S")
+    case_id = validate_case_id(f"{schedule.case_id_prefix}-{stamp}")
     case, _ = Case.objects.get_or_create(
-        id=f"{schedule.case_id_prefix}-{stamp}"[:64],
+        id=case_id,
         defaults={"title": schedule.name, "investigator": "Local Investigator", "source_location": sensor.location or sensor.name},
     )
     job = create_capture_job(

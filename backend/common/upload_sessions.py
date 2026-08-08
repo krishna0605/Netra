@@ -17,6 +17,7 @@ from common.case_workspace import bump_case_list_cache_version
 from common.audit import Actor, can_actor_access_case
 from common.case_metadata import InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.hashing import sha256_text
+from common.identifiers import InvalidCaseId, generate_case_id, validate_case_id
 from common.jobs import initial_steps
 from common.storage_provider import storage_provider
 
@@ -36,7 +37,6 @@ EXPECTED_EVIDENCE_TYPES = {
     "Auto-detect",
     *(value for value, _label in EvidenceFile.EvidenceType.choices),
 }
-CASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 SAFE_OBJECT_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -154,9 +154,10 @@ def create_upload_session(actor: Actor, payload: dict, raw_idempotency_key: str 
     if "\r" in content_type or "\n" in content_type:
         raise UploadSessionProblem("invalid_content_type", "Evidence content type is invalid.")
     requested_case_id = _text(payload.get("caseId"), maximum=64)
-    case_id = requested_case_id or f"CYB-GJ-{timezone.now().year}-{uuid4().hex[:8].upper()}"
-    if not CASE_ID_PATTERN.fullmatch(case_id):
-        raise UploadSessionProblem("invalid_case_id", "Case ID contains unsupported characters.")
+    try:
+        case_id = validate_case_id(requested_case_id) if requested_case_id else generate_case_id(now=timezone.now())
+    except InvalidCaseId as exc:
+        raise UploadSessionProblem("invalid_case_id", str(exc)) from exc
     if len(raw_idempotency_key) > 128:
         raise UploadSessionProblem("invalid_idempotency_key", "Idempotency key is too long.")
     idempotency_key = sha256_text(f"{external_user_id}:{raw_idempotency_key}") if raw_idempotency_key else None

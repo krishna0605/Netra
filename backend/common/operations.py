@@ -22,6 +22,7 @@ from apps.forensics.models import CaptureChunk, CaptureJob, Case, OperationalEve
 from common.analysis import analyze_pcap
 from common.audit import Actor
 from common.hashing import sha256_file
+from common.identifiers import validate_case_id
 from common.kafka import publish_event
 from common.persistence import persist_analysis
 from common.storage import save_uploaded_file
@@ -60,6 +61,7 @@ def validate_capture_bounds(duration_seconds: int, packet_limit: int, chunk_inte
 
 
 def ensure_capture_case(case_id: str, investigator: str = "Local Investigator") -> Case:
+    case_id = validate_case_id(case_id)
     origin = Case.Origin.REPLAY if "REPLAY" in case_id.upper() else Case.Origin.SENSOR_CAPTURE
     case, _ = Case.objects.update_or_create(
         id=case_id,

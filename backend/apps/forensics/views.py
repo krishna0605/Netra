@@ -41,10 +41,12 @@ from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, lates
 from common.postgres_jobs import request_job_cancellation, retry_job
 from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload
 from common.hashing import sha256_file, sha256_text
+from common.identifiers import InvalidCaseId, generate_case_id, validate_case_id
 from common.fleet import backpressure_allows_new_capture, capacity_payload, ensure_default_retention_policy, execute_safe_retention, kafka_lag_payload, queue_schedule_run, retention_policy_payload, retention_preview, retention_run_payload, schedule_payload, sensor_group_payload
 from common.operations import capture_job_payload, create_capture_job, emit_operational_event, ensure_capture_case, expire_stale_replay, finalize_capture, heartbeat_state, ingest_capture_chunk, mark_capture_running, sensor_key_valid, sensor_payload, start_replay, stop_capture, validate_capture_bounds, worker_payload
 from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
+from common.safe_paths import generated_artifact_filename
 from common.structured_analysis import analyze_structured_evidence
 from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
 from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
@@ -498,9 +500,10 @@ def cases(request):
         if denied:
             return denied
         payload = _json_body(request)
-        case_id = str(payload.get("caseNumber") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:8].upper()}").strip()[:64]
-        if not case_id:
-            return JsonResponse({"error": "caseNumber cannot be empty"}, status=400)
+        try:
+            case_id = validate_case_id(payload["caseNumber"]) if payload.get("caseNumber") is not None else generate_case_id()
+        except InvalidCaseId as exc:
+            return JsonResponse({"error": str(exc), "code": "invalid_case_id"}, status=400)
         if Case.objects.filter(id=case_id).exists():
             return JsonResponse({"error": "A case with that identifier already exists."}, status=409)
         investigator, department = server_case_identity(actor)
@@ -1105,9 +1108,12 @@ def evidence_upload(request):
         return denied
     actor = actor_from_request(request)
     upload = request.FILES.get("file")
-    case_id = request.POST.get("caseId") or f"CYB-GJ-{datetime.now().year}-{uuid4().hex[:4].upper()}"
     if not upload:
         return JsonResponse({"error": "file is required"}, status=400)
+    try:
+        case_id = validate_case_id(request.POST["caseId"]) if request.POST.get("caseId") is not None else generate_case_id()
+    except InvalidCaseId as exc:
+        return JsonResponse({"error": str(exc), "code": "invalid_case_id"}, status=400)
     raw_idempotency_key = (request.headers.get("Idempotency-Key") or request.POST.get("idempotencyKey") or "").strip()
     if len(raw_idempotency_key) > 128:
         return JsonResponse({"error": "Idempotency key is too long.", "code": "invalid_idempotency_key"}, status=400)
@@ -1339,7 +1345,11 @@ def capture_live_start(request):
         validate_capture_bounds(duration, packet_limit, chunk_interval, payload.get("bpfFilter", ""))
     except (TypeError, ValueError) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    case = ensure_capture_case(payload.get("caseId") or f"CYB-GJ-LIVE-{datetime.now().strftime('%Y%m%d%H%M%S')}")
+    try:
+        case_id = validate_case_id(payload["caseId"]) if payload.get("caseId") is not None else validate_case_id(f"CYB-GJ-LIVE-{datetime.now().strftime('%Y%m%d%H%M%S')}")
+    except InvalidCaseId as exc:
+        return JsonResponse({"error": str(exc), "code": "invalid_case_id"}, status=400)
+    case = ensure_capture_case(case_id)
     job = create_capture_job(case=case, mode=CaptureJob.Mode.LIVE_CAPTURE, sensor=sensor, interface_name=payload.get("interfaceName", ""), duration_seconds=duration, packet_limit=packet_limit, chunk_interval_seconds=chunk_interval, bpf_filter=payload.get("bpfFilter", ""), source_label=sensor.name)
     SensorCommand.objects.create(sensor=sensor, capture_job=job, command_type="capture.start", payload_json=capture_job_payload(job))
     return JsonResponse(capture_job_payload(job), status=201)
@@ -1398,6 +1408,7 @@ def capture_replay_start(request):
         chunk_interval = int(request.POST.get("chunkIntervalSeconds", "5"))
         duration = int(request.POST.get("durationSeconds", "900"))
         validate_capture_bounds(duration, packet_limit, chunk_interval)
+        case_id = validate_case_id(request.POST["caseId"]) if request.POST.get("caseId") is not None else validate_case_id(f"CYB-GJ-REPLAY-{datetime.now().strftime('%Y%m%d%H%M%S')}")
         saved = save_uploaded_file(upload, "capture_chunk")
         Path(saved["analysis_path"]).unlink(missing_ok=True)
     except (OverflowError, TypeError, ValueError) as exc:
@@ -1406,7 +1417,6 @@ def capture_replay_start(request):
         if "Evidence storage is not configured" in str(exc) or "Supabase Storage" in str(exc):
             return _storage_configuration_response()
         return _storage_failure_response()
-    case_id = request.POST.get("caseId") or f"CYB-GJ-REPLAY-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     case = ensure_capture_case(case_id)
     job = create_capture_job(case=case, mode=CaptureJob.Mode.REPLAY, duration_seconds=duration, packet_limit=packet_limit, chunk_interval_seconds=chunk_interval, source_label=f"Replay: {upload.name}")
     start_replay(job, saved["stored_path"], request.POST.get("speed", "max"))
@@ -1690,6 +1700,8 @@ def _schedule_values(payload: dict, schedule: CaptureSchedule | None = None) -> 
     schedule_type = payload.get("scheduleType", schedule.schedule_type if schedule else "one-time")
     if schedule_type not in CaptureSchedule.ScheduleType.values:
         raise ValueError("scheduleType must be one-time, daily, or weekly.")
+    case_id_prefix = payload.get("caseIdPrefix", schedule.case_id_prefix if schedule else "CYB-GJ-SCHEDULED")
+    validate_case_id(f"{case_id_prefix}-20000101-000000")
     return {
         "name": payload.get("name", schedule.name if schedule else "Bounded capture schedule"),
         "sensor": sensor,
@@ -1703,7 +1715,7 @@ def _schedule_values(payload: dict, schedule: CaptureSchedule | None = None) -> 
         "chunk_interval_seconds": chunk_interval,
         "interface_name": payload.get("interfaceName", schedule.interface_name if schedule else ""),
         "bpf_filter": bpf_filter,
-        "case_id_prefix": payload.get("caseIdPrefix", schedule.case_id_prefix if schedule else "CYB-GJ-SCHEDULED"),
+        "case_id_prefix": case_id_prefix,
     }
 
 
@@ -2611,7 +2623,7 @@ def report_generate(request, case_id: str):
     analysis = report_analysis_from_snapshot(case) or _analysis(case_id=case_id)
     if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
         extension = "pdf" if report_format == "pdf" else "html"
-        report_id = f"{case_id}-{language}-{uuid4().hex[:6]}.{extension}"
+        report_id = generated_artifact_filename("rpt", f".{extension}")
         if case:
             Report.objects.update_or_create(
                 id=report_id,
