@@ -30,14 +30,19 @@ from apps.forensics.models import (
 from common.custody import custody_event_dict, verify_case_ledger
 
 
-def incident_readiness_payload() -> dict[str, Any]:
+def incident_readiness_payload(organization_id=None) -> dict[str, Any]:
     now = timezone.now()
     window_start = now - timedelta(hours=24)
-    dead_letters = DeadLetterEvent.objects.exclude(status=DeadLetterEvent.Status.RESOLVED)
-    failed_jobs = ProcessingJob.objects.filter(status=ProcessingJob.Status.FAILED)
-    denied_access = AccessLog.objects.filter(result="denied", created_at__gte=window_start)
-    reports_ready = Report.objects.filter(status="ready")
-    exports_ready = Export.objects.filter(status="ready")
+    cases = Case.objects.filter()
+    if organization_id:
+        cases = cases.filter(organization_id=organization_id)
+    case_ids = cases.values_list("id", flat=True)
+    dead_letters = DeadLetterEvent.objects.filter(case_id__in=case_ids).exclude(status=DeadLetterEvent.Status.RESOLVED)
+    failed_jobs = ProcessingJob.objects.filter(case_id__in=case_ids, status=ProcessingJob.Status.FAILED)
+    access_logs = AccessLog.objects.filter(organization_id=organization_id) if organization_id else AccessLog.objects.all()
+    denied_access = access_logs.filter(result="denied", created_at__gte=window_start)
+    reports_ready = Report.objects.filter(case_id__in=case_ids, status="ready")
+    exports_ready = Export.objects.filter(case_id__in=case_ids, status="ready")
     latest_retention = RetentionRun.objects.order_by("-started_at").first()
     worker_rows = list(WorkerHeartbeat.objects.order_by("worker_name", "-last_seen_at"))
     stale_workers = [
@@ -47,9 +52,9 @@ def incident_readiness_payload() -> dict[str, Any]:
     ]
     readiness_items = [
         _item("database", "ready", f"{len(connection.introspection.table_names())} tables visible."),
-        _item("audit-logging", "ready" if AccessLog.objects.exists() else "partial", f"{AccessLog.objects.count()} access log row(s)."),
-        _item("custody-ledger", "ready" if CustodyLedgerEvent.objects.exists() else "partial", f"{CustodyLedgerEvent.objects.count()} custody event(s)."),
-        _item("evidence-storage", "ready" if EvidenceFile.objects.exists() else "partial", f"{EvidenceFile.objects.count()} evidence file row(s)."),
+        _item("audit-logging", "ready" if access_logs.exists() else "partial", f"{access_logs.count()} access log row(s)."),
+        _item("custody-ledger", "ready" if CustodyLedgerEvent.objects.filter(case_id__in=case_ids).exists() else "partial", f"{CustodyLedgerEvent.objects.filter(case_id__in=case_ids).count()} custody event(s)."),
+        _item("evidence-storage", "ready" if EvidenceFile.objects.filter(case_id__in=case_ids).exists() else "partial", f"{EvidenceFile.objects.filter(case_id__in=case_ids).count()} evidence file row(s)."),
         _item("reporting", "ready" if reports_ready.exists() else "partial", f"{reports_ready.count()} ready report(s)."),
         _item("exports", "ready" if exports_ready.exists() else "partial", f"{exports_ready.count()} ready export(s)."),
         _item("dead-letter-operations", "ready" if not dead_letters.exists() else "attention", f"{dead_letters.count()} unresolved dead-letter event(s)."),
@@ -63,14 +68,14 @@ def incident_readiness_payload() -> dict[str, Any]:
         "checkedAt": now.isoformat(),
         "windowHours": 24,
         "summary": {
-            "cases": Case.objects.count(),
-            "openCases": Case.objects.filter(status=Case.Status.OPEN).count(),
-            "evidenceFiles": EvidenceFile.objects.count(),
-            "alerts": Alert.objects.count(),
+            "cases": cases.count(),
+            "openCases": cases.filter(status=Case.Status.OPEN).count(),
+            "evidenceFiles": EvidenceFile.objects.filter(case_id__in=case_ids).count(),
+            "alerts": Alert.objects.filter(case_id__in=case_ids).count(),
             "failedJobs": failed_jobs.count(),
             "unresolvedDeadLetters": dead_letters.count(),
             "deniedAccessLast24h": denied_access.count(),
-            "operationalEventsLast24h": OperationalEvent.objects.filter(created_at__gte=window_start).count(),
+            "operationalEventsLast24h": OperationalEvent.objects.filter(organization_id=organization_id, created_at__gte=window_start).count() if organization_id else OperationalEvent.objects.filter(created_at__gte=window_start).count(),
             "readyReports": reports_ready.count(),
             "readyExports": exports_ready.count(),
         },

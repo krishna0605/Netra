@@ -69,3 +69,53 @@ The static search should return no results. Repository status should show only t
 - If a cloud credential, URL, or object operation appears in logs, stop and investigate; Phase 1 is local-only.
 
 Rollback uses ordinary `git revert` in reverse commit order. Do not use destructive reset commands and do not alter the baseline commit.
+
+## Phase 2 local verification
+
+Phase 2 adds one Django migration and changes the expected application schema to 51 public tables and 14 forensics migrations. Do not run this migration against Supabase during local remediation.
+
+```mermaid
+flowchart LR
+    TOKEN["Verified token + AAL"] --> ACTOR["Provisioned organization Actor"]
+    ACTOR --> TENANT["Organization-scoped authorization"]
+    TENANT --> LIMIT["Atomic request buckets"]
+    TENANT --> QUEUE["Locked organization queue quota"]
+    TENANT --> AUDIT["Tenant-safe logs and events"]
+    ACTOR --> ADMIN["AAL2 sole-admin transfer"]
+```
+
+Run from `backend` with no cloud database URL loaded:
+
+```powershell
+$env:NETRA_TEST_SQLITE = '1'
+$env:Path = 'C:\Program Files\Wireshark;' + $env:Path
+$env:PYTHONPATH = 'C:\Users\ADMIN\Desktop\hackthon\ml-services\anomaly-engine'
+python manage.py test apps.forensics.tests
+python manage.py makemigrations --check --dry-run
+python manage.py check
+```
+
+Run focused Phase 2 suites:
+
+```powershell
+python manage.py test apps.forensics.tests.test_tenancy_migration apps.forensics.tests.test_organization_boundaries apps.forensics.tests.test_rate_limits apps.forensics.tests.test_admin_invariants apps.forensics.tests.test_access_control
+```
+
+The backend-only environment names are:
+
+```text
+NETRA_RATE_LIMITS_ENABLED
+NETRA_RATE_LIMIT_READ_PER_MINUTE
+NETRA_RATE_LIMIT_MUTATION_PER_MINUTE
+NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR
+NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR
+NETRA_RATE_LIMIT_REPORT_USER_PER_HOUR
+NETRA_RATE_LIMIT_EXPORT_USER_PER_HOUR
+NETRA_RATE_LIMIT_WEBHOOK_TEST_ADMIN_PER_HOUR
+```
+
+These variables belong on Railway only. They must not use `VITE_`, must not be added to Vercel, and must not contain credentials. Queue capacity is database configuration on `Organization.max_queued_analyses`, not an environment variable.
+
+Before a future push, run the rate/queue concurrency suite against an approved disposable PostgreSQL 17 database. Do not use either Supabase project for that rehearsal. A missing local PostgreSQL credential is a no-go for the push gate, not authorization to consume free-plan cloud egress.
+
+Phase 2 rollback remains commit-by-commit locally. Migration reversal is for a disposable rehearsal database only; it is not the production rollback strategy after new tenant-owned writes exist.

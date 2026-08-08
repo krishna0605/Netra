@@ -1,9 +1,9 @@
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from common.readiness import deployment_readiness_payload, status_matrix_payload
 
 
-class FreePlanMigrationReadinessTests(SimpleTestCase):
+class FreePlanMigrationReadinessTests(TestCase):
     @override_settings(
         NETRA_FREE_PLAN_GUARD=True,
         NETRA_REALTIME_PROVIDER="sse",

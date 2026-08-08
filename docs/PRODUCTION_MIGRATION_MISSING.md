@@ -2,6 +2,8 @@
 
 Audit date: 7 August 2026 (Asia/Kolkata)
 
+Phase 2 local update: 8 August 2026. The Phase 2 tenancy migration and code are local only. Production remains on the previously deployed 49-table schema; migration `0014`, its two new tables, and the new environment names have not been applied to Supabase or Railway.
+
 Current decision: **the application stack is switched to the new Supabase
 project, but production evidence writes remain NO-GO until the two owner
 actions below are complete.**
@@ -15,7 +17,9 @@ This file records names and status only. Never add credential values here.
 | Blocking | Permanent Netra administrator | The migration smoke-test identity is temporary and will be removed. A public signup must never silently become Admin. | Create or identify the permanent user in target Supabase Auth, then assign its matching `forensics_userprofile.role` to `Admin` through a reviewed server-side operation. |
 | Blocking for evidence processing | Railway persistent cache volume | `NETRA_STORAGE_ROOT=/app/storage` is configured, but no Railway volume is visibly attached. Without it, an instance restart loses the immutable-object cache and can repeat Storage downloads. | Attach at least 1 GB to `/app/storage` on every service that reads evidence, then restart and verify persistence. Confirm any Railway cost before creating it. |
 | Operational | Source retirement decision | This execution used the new project as a fresh start and did not read legacy Storage or export legacy rows. | Keep the legacy project untouched until you explicitly approve archival/deletion. Rotate or revoke legacy deployment credentials after the rollback window. |
-| Local test environment | `tshark` is absent on this Windows workstation | Two PCAP golden-path tests cannot run locally. Railway reports `tshark` present in the deployed container. | Use CI/Railway or install Wireshark CLI locally when a fully green local PCAP suite is required. |
+| Phase 2 activation | Administrator TOTP/AAL2 enrollment | Phase 2 blocks user and administrator mutations unless the verified Supabase token has `aal2`. | Enroll and verify a TOTP factor for the permanent Admin before any future Phase 2 deployment. Do not place factor secrets in this file. |
+| Local test environment | Disposable PostgreSQL 17 test credential | PostgreSQL 17 is installed locally on port 5434, but no approved credential is available for the row-lock concurrency rehearsal. | Supply an approved disposable local database credential or create a disposable local test database before the future push gate. Do not use Supabase free-plan egress for this test. |
+| Release governance | Phase 7 CI and branch protection | Phase 2 is locally green, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 3–7 before pushing this branch or opening the production PR. |
 
 ## Completed cutover work
 
@@ -64,6 +68,11 @@ This file records names and status only. Never add credential values here.
 | `NETRA_AUTH_PROXY_ENABLED` | `0`. |
 | `NETRA_PUBLIC_API_AUTH_REQUIRED` | `1`. |
 | `NETRA_SUPABASE_START_WORKERS` | `0`; the existing Railway worker service owns processing. |
+| `NETRA_RATE_LIMITS_ENABLED` | Future Phase 2 value `1`; Railway backend only. Not deployed yet. |
+| `NETRA_RATE_LIMIT_READ_PER_MINUTE` / `NETRA_RATE_LIMIT_MUTATION_PER_MINUTE` | Future defaults `300` / `60`; Railway backend only. |
+| `NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR` / `NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR` | Future defaults `10` / `25`; Railway backend only. |
+| `NETRA_RATE_LIMIT_REPORT_USER_PER_HOUR` / `NETRA_RATE_LIMIT_EXPORT_USER_PER_HOUR` | Future defaults `10` / `10`; Railway backend only. |
+| `NETRA_RATE_LIMIT_WEBHOOK_TEST_ADMIN_PER_HOUR` | Future default `5`; Railway backend only. |
 
 The following remain secret-manager-only and were rotated for the fresh target:
 
@@ -119,6 +128,8 @@ compiled browser bundle.
 - Targeted backend migration/security tests: 28/28 passed.
 - Full backend suite: 35/37 passed locally; only the two `tshark`-dependent
   PCAP tests failed because this workstation lacks the executable.
+
+Phase 2 local verification supersedes the old workstation result above: Wireshark 4.6.6 is now available and the complete backend suite passes 90/90. PostgreSQL concurrency rehearsal remains outstanding for the separate credential reason listed above.
 
 Production evidence writes may open only after the permanent Admin and
 persistent Railway volume are verified. No source-data migration is implied by

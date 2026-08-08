@@ -1,8 +1,10 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.recorder import MigrationRecorder
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -18,6 +20,12 @@ class TenancySchemaTests(TestCase):
         self.assertEqual(self.netra.slug, "netra")
         self.assertEqual(self.netra.name, "Netra")
         self.assertEqual(self.netra.max_queued_analyses, 5)
+
+    def test_phase_two_schema_has_41_domain_and_10_framework_tables(self):
+        domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
+        self.assertEqual(len(domain_tables), 41)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 14)
+        self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
 
     def test_case_display_reference_is_unique_within_organization(self):
         Case.objects.create(
@@ -126,3 +134,11 @@ class TenancyMigrationBackfillTests(TransactionTestCase):
         self.assertEqual(session.intake_json["legacyOrganizationLabel"], "Legacy Gujarat Unit")
         self.assertFalse(AccessLog.objects.exclude(organization_id=organization.pk).exists())
         self.assertFalse(OperationalEvent.objects.exclude(organization_id=organization.pk).exists())
+
+    def test_scratch_reversal_restores_the_legacy_upload_organization_field(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        EvidenceUploadSession = old_apps.get_model("forensics", "EvidenceUploadSession")
+        self.assertEqual(EvidenceUploadSession.objects.get().organization, "Netra")
+        MigrationExecutor(connection).migrate(self.migrate_to)

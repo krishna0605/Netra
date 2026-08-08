@@ -374,10 +374,12 @@ def auth_login(request):
     user = authenticate(request, username=email, password=password)
     if not user:
         return JsonResponse({"error": "Invalid credentials"}, status=401)
-    profile, _ = UserProfile.objects.get_or_create(
-        user=user,
-        defaults={"organization": netra_organization(), "role": "Viewer", "display_name": user.get_full_name() or user.username},
-    )
+    profile = UserProfile.objects.filter(user=user).first()
+    if profile is None:
+        return JsonResponse(
+            {"error": "A Netra profile has not been provisioned for this identity.", "code": "profile_not_provisioned"},
+            status=403,
+        )
     refresh = RefreshToken.for_user(user)
     return JsonResponse(
         {
@@ -2053,7 +2055,7 @@ def system_workers(_request):
     return JsonResponse({"processingMode": settings.NETRA_PROCESSING_MODE, "queueProvider": getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka"), "workerMode": worker_mode, "results": results})
 
 
-def system_health_deep(_request):
+def system_health_deep(request):
     checks = {
         "postgres": _probe_postgres(),
         "elasticsearch": _probe_elasticsearch(),
@@ -2084,13 +2086,13 @@ def system_health_deep(_request):
         "actor": getattr(settings, "NETRA_TRUSTED_LAN_ACTOR", "Local Investigator"),
         "role": getattr(settings, "NETRA_TRUSTED_LAN_ROLE", "LAN Operator"),
     }
-    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access, "incidentReadiness": incident_readiness_payload()})
+    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access, "incidentReadiness": incident_readiness_payload(actor_from_request(request).organization_id)})
 
 
 def system_incident_readiness(request):
     actor = actor_from_request(request)
     log_access(actor, "system.incident_readiness", resource_type="System", resource_id="incident-readiness")
-    return JsonResponse(incident_readiness_payload())
+    return JsonResponse(incident_readiness_payload(actor.organization_id))
 
 
 def system_deployment_readiness(request):
@@ -2207,9 +2209,10 @@ def system_kafka_lag(_request):
     return JsonResponse(kafka_lag_payload())
 
 
-def system_throughput(_request):
+def system_throughput(request):
     cutoff = datetime.now(timezone.utc).timestamp() - 60
-    recent_chunks = [row for row in OperationalEvent.objects.filter(event_type="capture.chunk_received").order_by("-created_at")[:500] if row.created_at.timestamp() >= cutoff]
+    actor = actor_from_request(request)
+    recent_chunks = [row for row in OperationalEvent.objects.filter(organization_id=actor.organization_id, event_type="capture.chunk_received").order_by("-created_at")[:500] if row.created_at.timestamp() >= cutoff]
     packets = sum(int(row.payload_json.get("chunkPackets", 0)) for row in recent_chunks)
     return JsonResponse({"windowSeconds": 60, "chunksPerMinute": len(recent_chunks), "packetsIndexedPerMinute": packets})
 
