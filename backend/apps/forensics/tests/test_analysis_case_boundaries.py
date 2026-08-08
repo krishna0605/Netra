@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import Case, CaseMembership, ProcessingJob, UserProfile
+from apps.forensics.models import Alert, Case, CaseHistoryEvent, CaseMembership, CustodyLedgerEvent, DetectionMatch, ProcessingJob, UserProfile
 
 
 SECURE_TEST_SETTINGS = override_settings(
@@ -48,6 +48,8 @@ class AnalysisCaseBoundaryTests(TestCase):
         self.bob_case = self._case("CASE-BOB-SCOPE", self.bob)
         self.alice_job = self._job("job-alice-scope", self.alice_case, "alice")
         self.bob_job = self._job("job-bob-scope", self.bob_case, "bob")
+        self._findings(self.alice_case, self.alice_job)
+        self._findings(self.bob_case, self.bob_job)
 
     def _user(self, email: str, role: str):
         user = get_user_model().objects.create_user(username=email, email=email, password="unused-test-password")
@@ -66,6 +68,28 @@ class AnalysisCaseBoundaryTests(TestCase):
             case=case,
             status=status,
             stats={"analysis": analysis_document(case.id, marker)},
+        )
+
+    def _findings(self, case: Case, job: ProcessingJob):
+        Alert.objects.create(
+            id=f"{job.id}-shared-alert",
+            case=case,
+            severity="high",
+            attack_class="Test",
+            alert_type="Test alert",
+            source_ip="10.0.0.1",
+            destination="10.0.0.2",
+            protocol="TCP",
+            status="new",
+        )
+        DetectionMatch.objects.create(
+            id=f"{job.id}-shared-detection",
+            case=case,
+            rule_id="shared-rule",
+            rule_name="Shared rule",
+            category="Test",
+            matched_entity="10.0.0.1",
+            status="new",
         )
 
     def _prefix(self, case: Case, job: ProcessingJob) -> str:
@@ -132,3 +156,54 @@ class AnalysisCaseBoundaryTests(TestCase):
         response = self.client.get("/api/dashboard/summary", **admin_headers)
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "analysis_scope_required")
+
+    def test_cross_case_alert_mutation_has_no_side_effects(self):
+        before_bob = self.bob_job.stats
+        before_history = CaseHistoryEvent.objects.count()
+        before_custody = CustodyLedgerEvent.objects.count()
+        path = f"{self._prefix(self.bob_case, self.bob_job)}/alerts/shared-alert/status"
+        response = self.client.patch(path, data={"status": "dismissed"}, content_type="application/json", **self.alice_headers)
+        self.assertEqual(response.status_code, 404)
+        self.bob_job.refresh_from_db()
+        self.assertEqual(self.bob_job.stats, before_bob)
+        self.assertEqual(Alert.objects.get(pk=f"{self.bob_job.id}-shared-alert").status, "new")
+        self.assertEqual(CaseHistoryEvent.objects.count(), before_history)
+        self.assertEqual(CustodyLedgerEvent.objects.count(), before_custody)
+
+    def test_scoped_alert_mutation_updates_only_selected_alert(self):
+        path = f"{self._prefix(self.alice_case, self.alice_job)}/alerts/shared-alert/status"
+        response = self.client.patch(path, data={"status": "confirmed"}, content_type="application/json", **self.alice_headers)
+        self.assertEqual(response.status_code, 200)
+        self.alice_job.refresh_from_db()
+        alert = next(row for row in self.alice_job.stats["analysis"]["alerts"] if row["id"] == "shared-alert")
+        detection = next(row for row in self.alice_job.stats["analysis"]["detectionMatches"] if row["id"] == "shared-detection")
+        self.assertEqual(alert["status"], "confirmed")
+        self.assertEqual(detection["status"], "new")
+        self.assertEqual(Alert.objects.get(pk=f"{self.alice_job.id}-shared-alert").status, "confirmed")
+        self.assertEqual(DetectionMatch.objects.get(pk=f"{self.alice_job.id}-shared-detection").status, "new")
+        self.assertEqual(CaseHistoryEvent.objects.filter(case=self.alice_case).count(), 1)
+        self.assertEqual(CustodyLedgerEvent.objects.filter(case=self.alice_case).count(), 1)
+
+    def test_rule_id_cannot_select_detection_mutation(self):
+        path = f"{self._prefix(self.alice_case, self.alice_job)}/detections/shared-rule/status"
+        response = self.client.patch(path, data={"status": "dismissed"}, content_type="application/json", **self.alice_headers)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(DetectionMatch.objects.get(pk=f"{self.alice_job.id}-shared-detection").status, "new")
+
+    def test_legacy_mutation_ignores_body_case_id_and_requires_query_scope(self):
+        response = self.client.patch(
+            "/api/alerts/shared-alert/status",
+            data={"status": "dismissed", "caseId": self.bob_case.id},
+            content_type="application/json",
+            **self.alice_headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "analysis_scope_required")
+        self.assertEqual(Alert.objects.get(pk=f"{self.bob_job.id}-shared-alert").status, "new")
+
+    def test_invalid_status_is_rejected_without_mutation(self):
+        path = f"{self._prefix(self.alice_case, self.alice_job)}/alerts/shared-alert/status"
+        response = self.client.patch(path, data={"status": "deleted"}, content_type="application/json", **self.alice_headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_finding_status")
+        self.assertEqual(Alert.objects.get(pk=f"{self.alice_job.id}-shared-alert").status, "new")

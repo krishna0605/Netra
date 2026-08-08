@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
@@ -12,6 +13,7 @@ from common.case_workspace import refresh_case_workspace_artifacts, refresh_case
 from common.custody import record_custody_event
 from common.indexing import index_analysis
 from common.jobs import completed_steps
+from common.kafka import publish_event
 from common.vault import build_manifest_payload
 
 
@@ -257,29 +259,89 @@ def _replace_records(case: Case, analysis: dict[str, Any], evidence: EvidenceFil
     )
 
 
-def update_analysis_alert_status(match_or_alert_id: str, status: str, actor: Actor) -> dict[str, Any] | None:
-    for job in ProcessingJob.objects.filter(status=ProcessingJob.Status.COMPLETED).order_by("-updated_at"):
-        analysis = job.stats.get("analysis")
-        if not isinstance(analysis, dict):
-            continue
-        changed = False
-        for key in ("alerts", "detectionMatches"):
-            for row in analysis.get(key, []):
-                if row.get("id") == match_or_alert_id or row.get("ruleId") == match_or_alert_id:
-                    row["status"] = status
-                    changed = True
-        if changed:
-            job.stats["analysis"] = analysis
-            job.save(update_fields=["stats", "updated_at"])
-            case = job.case
-            Alert.objects.filter(case=case, id__endswith=match_or_alert_id).update(status=status)
-            DetectionMatch.objects.filter(case=case, id__endswith=match_or_alert_id).update(status=status)
-            add_history(case, actor, "Finding status changed", f"{match_or_alert_id} marked {status}.")
-            record_custody_event(case, actor, "Finding status changed", {"findingId": match_or_alert_id, "status": status}, resource_type="Finding", resource_id=match_or_alert_id)
-            log_access(actor, "finding.status", case=case, resource_type="Finding", resource_id=match_or_alert_id)
-            refresh_case_workspace_snapshot(case, job=job, analysis=analysis)
-            return {"id": match_or_alert_id, "status": status, "caseId": case.id}
-    return None
+class FindingUpdateProblem(Exception):
+    def __init__(self, code: str, status: int):
+        super().__init__(code)
+        self.code = code
+        self.status = status
+
+
+@transaction.atomic
+def update_scoped_finding_status(
+    *,
+    case: Case,
+    job: ProcessingJob,
+    finding_type: Literal["alert", "detection"],
+    finding_id: str,
+    status: Literal["reviewing", "confirmed", "dismissed"],
+    actor: Actor,
+) -> dict[str, Any]:
+    collection, model, topic, event_type = {
+        "alert": ("alerts", Alert, "netra.alerts.created", "alert.status_changed"),
+        "detection": ("detectionMatches", DetectionMatch, "netra.detection.matches", "detection.status_changed"),
+    }[finding_type]
+
+    locked_job = ProcessingJob.objects.select_for_update().filter(
+        pk=job.pk,
+        case=case,
+        status=ProcessingJob.Status.COMPLETED,
+    ).first()
+    if not locked_job:
+        raise FindingUpdateProblem("analysis_resource_not_found", 404)
+
+    stats = deepcopy(locked_job.stats or {})
+    analysis = stats.get("analysis")
+    if not isinstance(analysis, dict):
+        raise FindingUpdateProblem("analysis_data_unavailable", 409)
+    rows = analysis.get(collection)
+    if not isinstance(rows, list):
+        raise FindingUpdateProblem("analysis_data_unavailable", 409)
+
+    matches = [row for row in rows if isinstance(row, dict) and str(row.get("id")) == str(finding_id)]
+    if not matches:
+        raise FindingUpdateProblem("analysis_resource_not_found", 404)
+    if len(matches) != 1:
+        raise FindingUpdateProblem("analysis_consistency_error", 409)
+
+    normalized_id = f"{locked_job.id}-{finding_id}"[:80]
+    normalized = model.objects.select_for_update().filter(pk=normalized_id, case=case).first()
+    if not normalized:
+        raise FindingUpdateProblem("analysis_consistency_error", 409)
+
+    matches[0]["status"] = status
+    normalized.status = status
+    normalized.save(update_fields=["status", "updated_at"])
+    locked_job.stats = stats
+    locked_job.save(update_fields=["stats", "updated_at"])
+
+    add_history(case, actor, "Finding status changed", f"{finding_id} marked {status}.")
+    record_custody_event(
+        case,
+        actor,
+        "Finding status changed",
+        {"findingId": finding_id, "findingType": finding_type, "jobId": locked_job.id, "status": status},
+        resource_type="Alert" if finding_type == "alert" else "DetectionMatch",
+        resource_id=finding_id,
+    )
+    log_access(
+        actor,
+        "finding.status",
+        case=case,
+        resource_type="Alert" if finding_type == "alert" else "DetectionMatch",
+        resource_id=finding_id,
+    )
+    refresh_case_workspace_snapshot(case, job=locked_job, analysis=analysis)
+
+    payload = {
+        "type": event_type,
+        "caseId": case.id,
+        "routeRef": str(case.route_ref),
+        "jobId": locked_job.id,
+        "findingId": finding_id,
+        "status": status,
+    }
+    transaction.on_commit(lambda: publish_event(topic, payload, key=locked_job.id))
+    return {"id": finding_id, "status": status, "caseId": case.id, "jobId": locked_job.id}
 
 
 def record_report(case_id: str, artifact: dict[str, Any], language: str, actor: Actor, case: Case | None = None) -> None:

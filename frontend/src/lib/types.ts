@@ -373,7 +373,7 @@ export type DetectionRuleMatch = {
   attackClass?: AttackClass;
   matchedEntity: string;
   confidence: number;
-  status: "new" | "reviewing" | "confirmed";
+  status: "new" | "reviewing" | "confirmed" | "dismissed";
   evidencePacketIds?: string[];
   evidenceSessionIds?: string[];
   explanation?: string;

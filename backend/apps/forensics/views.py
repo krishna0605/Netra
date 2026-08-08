@@ -37,7 +37,7 @@ from common.indexing import search_index
 from common.jobs import job_status_payload
 from common.kafka import probe_supabase_queue, publish_event
 from common.pcap import available_packet_tools
-from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export, update_analysis_alert_status
+from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export
 from common.postgres_jobs import request_job_cancellation, retry_job
 from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload
 from common.hashing import sha256_file, sha256_text
@@ -2450,36 +2450,6 @@ def detection_matches(request):
     if category and category != "all":
         rows = [row for row in rows if category.lower() in row["category"].lower() or category.lower() in row["ruleName"].lower()]
     return JsonResponse({"results": rows})
-
-
-@csrf_exempt
-@require_http_methods(["PATCH", "POST"])
-def detection_match_status(request, match_id: str):
-    payload = _json_body(request)
-    case_id = request.GET.get("caseId") or payload.get("caseId")
-    case = Case.objects.filter(id=case_id).first() if case_id else None
-    permission = "confirm" if payload.get("status") in {"confirmed", "dismissed"} else "review"
-    denied = require_permission(request, permission, case=case, resource_type="DetectionMatch", resource_id=match_id)
-    if denied:
-        return denied
-    updated = update_analysis_alert_status(match_id, payload.get("status", "reviewing"), actor_from_request(request))
-    publish_event("netra.detection.matches", {"type": "detection.status_changed", "matchId": match_id, "status": payload.get("status", "reviewing")})
-    return JsonResponse(updated or {"id": match_id, "status": payload.get("status", "reviewing")})
-
-
-@csrf_exempt
-@require_http_methods(["PATCH", "POST"])
-def alert_status(request, alert_id: str):
-    payload = _json_body(request)
-    case_id = request.GET.get("caseId") or payload.get("caseId")
-    case = Case.objects.filter(id=case_id).first() if case_id else None
-    permission = "confirm" if payload.get("status") in {"confirmed", "dismissed"} else "review"
-    denied = require_permission(request, permission, case=case, resource_type="Alert", resource_id=alert_id)
-    if denied:
-        return denied
-    updated = update_analysis_alert_status(alert_id, payload.get("status", "reviewing"), actor_from_request(request))
-    publish_event("netra.alerts.created", {"type": "alert.status_changed", "alertId": alert_id, "status": payload.get("status", "reviewing")})
-    return JsonResponse(updated or {"id": alert_id, "status": payload.get("status", "reviewing")})
 
 
 def anomalies(request):

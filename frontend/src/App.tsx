@@ -32,6 +32,7 @@ import {
   YAxis,
 } from "recharts";
 import { toast, Toaster } from "sonner";
+import { findingStatusPath } from "./lib/analysisApi";
 import {
   Alert,
   Badge,
@@ -4809,10 +4810,18 @@ function CodeBlock({ title, value }: { title: string; value: string }) {
 }
 
 function DetectionTable({ category }: { category?: string }) {
-  const { activeCaseId, detectionMatches, reloadAnalysis } = useNetra();
+  const { activeCaseId, caseRecords, detectionMatches, reloadAnalysis } = useNetra();
   const rows = category ? detectionMatches.filter((item) => item.category === category || item.ruleName.includes(category)) : detectionMatches;
+  const activeCase = caseRecords.find((record) => record.id === activeCaseId);
+  const scope = activeCase?.routeRef && activeCase.analysisStatus.jobId
+    ? { routeRef: activeCase.routeRef, jobId: activeCase.analysisStatus.jobId }
+    : null;
   async function updateStatus(item: DetectionRuleMatch, status: "reviewing" | "confirmed" | "dismissed") {
-    const response = await fetch(`${API_BASE}/detection/matches/${item.id}/status`, { method: "PATCH", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ status, caseId: activeCaseId }) });
+    if (!scope) {
+      toast.error("Analysis is not ready for finding review.");
+      return;
+    }
+    const response = await fetch(`${API_BASE}${findingStatusPath(scope, "detections", item.id)}`, { method: "PATCH", headers: netraHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ status }) });
     const payload = await response.json();
     if (!response.ok) {
       toast.error(payload.error ?? "Status update failed");
@@ -4826,7 +4835,7 @@ function DetectionTable({ category }: { category?: string }) {
       <div className="overflow-x-auto p-4">
         <table className="w-full min-w-[780px] text-left text-sm">
               <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3">Rule ID</th><th>Rule name</th><th>Class</th><th>Matched entity</th><th>Evidence</th><th>Confidence</th><th>Status</th></tr></thead>
-          <tbody>{rows.map((item) => <tr key={item.id} className="border-b border-[var(--border)] align-top"><td className="py-3 font-mono text-xs">{item.ruleId ?? item.id}</td><td className="min-w-60 font-bold text-strong">{item.ruleName}<p className="mt-1 text-xs font-normal leading-5 text-muted">{item.explanation}</p><p className="mt-1 text-xs font-normal leading-5 text-muted">{item.recommendedAction}</p></td><td><Badge>{item.attackClass ?? item.category}</Badge></td><td>{item.matchedEntity}</td><td className="max-w-52 break-words text-xs">{[...(item.evidencePacketIds ?? []), ...(item.evidenceSessionIds ?? [])].slice(0, 4).join(", ") || "-"}</td><td>{item.confidence}%</td><td><div className="flex flex-col gap-2"><Badge variant="secondary">{item.status}</Badge><div className="flex flex-wrap gap-1"><Button size="sm" variant="secondary" onClick={() => updateStatus(item, "reviewing")}>Review</Button><Button size="sm" onClick={() => updateStatus(item, "confirmed")}>Confirm</Button><Button size="sm" variant="secondary" onClick={() => updateStatus(item, "dismissed")}>Dismiss</Button></div></div></td></tr>)}</tbody>
+          <tbody>{rows.map((item) => <tr key={item.id} className="border-b border-[var(--border)] align-top"><td className="py-3 font-mono text-xs">{item.ruleId ?? item.id}</td><td className="min-w-60 font-bold text-strong">{item.ruleName}<p className="mt-1 text-xs font-normal leading-5 text-muted">{item.explanation}</p><p className="mt-1 text-xs font-normal leading-5 text-muted">{item.recommendedAction}</p></td><td><Badge>{item.attackClass ?? item.category}</Badge></td><td>{item.matchedEntity}</td><td className="max-w-52 break-words text-xs">{[...(item.evidencePacketIds ?? []), ...(item.evidenceSessionIds ?? [])].slice(0, 4).join(", ") || "-"}</td><td>{item.confidence}%</td><td><div className="flex flex-col gap-2"><Badge variant="secondary">{item.status}</Badge><div className="flex flex-wrap gap-1"><Button size="sm" variant="secondary" disabled={!scope} onClick={() => updateStatus(item, "reviewing")}>Review</Button><Button size="sm" disabled={!scope} onClick={() => updateStatus(item, "confirmed")}>Confirm</Button><Button size="sm" variant="secondary" disabled={!scope} onClick={() => updateStatus(item, "dismissed")}>Dismiss</Button></div>{!scope ? <span className="text-xs text-muted">Analysis is not ready.</span> : null}</div></td></tr>)}</tbody>
         </table>
       </div>
     </div>

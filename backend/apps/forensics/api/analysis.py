@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 
 from apps.forensics.api.errors import analysis_not_found, api_error
 from apps.forensics.services.analysis_scope import AnalysisScope, AnalysisScopeProblem, find_analysis_row, resolve_analysis_scope
+from common.audit import can, log_access
+from common.persistence import FindingUpdateProblem, update_scoped_finding_status
 
 
 logger = logging.getLogger(__name__)
@@ -250,6 +255,68 @@ def graph_attack_path(request, route_ref, job_id):
     return JsonResponse({"path": path})
 
 
+def _finding_status(request, route_ref, job_id, finding_id: str, finding_type: str):
+    scope = _scope_or_error(request, route_ref, job_id)
+    if isinstance(scope, JsonResponse):
+        return scope
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return api_error(request, "invalid_request_body", "A valid JSON request body is required.", status=400)
+    status_value = str(payload.get("status") or "").strip().lower()
+    if status_value not in {"reviewing", "confirmed", "dismissed"}:
+        return api_error(
+            request,
+            "invalid_finding_status",
+            "Status must be reviewing, confirmed, or dismissed.",
+            status=400,
+        )
+    permission = "confirm" if status_value in {"confirmed", "dismissed"} else "review"
+    if not can(scope.actor, permission):
+        log_access(
+            scope.actor,
+            f"permission:{permission}",
+            case=scope.case,
+            resource_type="Alert" if finding_type == "alert" else "DetectionMatch",
+            resource_id=finding_id,
+            result="denied",
+        )
+        return api_error(request, "permission_denied", "Permission denied.", status=403)
+    try:
+        updated = update_scoped_finding_status(
+            case=scope.case,
+            job=scope.job,
+            finding_type=finding_type,
+            finding_id=finding_id,
+            status=status_value,
+            actor=scope.actor,
+        )
+    except FindingUpdateProblem as exc:
+        messages = {
+            "analysis_data_unavailable": "The selected analysis data is unavailable.",
+            "analysis_consistency_error": "The selected finding is inconsistent and was not changed.",
+        }
+        return api_error(
+            request,
+            exc.code,
+            messages.get(exc.code, "The requested analysis resource was not found."),
+            status=exc.status,
+        )
+    return JsonResponse(updated)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def alert_status(request, route_ref, job_id, alert_id):
+    return _finding_status(request, route_ref, job_id, alert_id, "alert")
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def detection_status(request, route_ref, job_id, match_id):
+    return _finding_status(request, route_ref, job_id, match_id, "detection")
+
+
 def legacy_scope(request):
     route_ref = (request.GET.get("caseRef") or "").strip()
     job_id = (request.GET.get("jobId") or "").strip()
@@ -357,3 +424,15 @@ def legacy_graph_node(request, node_id):
 
 def legacy_graph_attack_path(request):
     return legacy(request, graph_attack_path, "graph.attack_path")
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def legacy_alert_status(request, alert_id):
+    return legacy(request, alert_status, "alerts.status", alert_id=alert_id)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def legacy_detection_status(request, match_id):
+    return legacy(request, detection_status, "detections.status", match_id=match_id)
