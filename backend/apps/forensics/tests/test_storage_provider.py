@@ -1,4 +1,7 @@
 import hashlib
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -6,6 +9,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from common.storage_provider import SupabaseStorageProvider
+from common.storage_cache import EncryptedObjectCache
 
 
 class SupabaseStorageEgressTests(SimpleTestCase):
@@ -63,3 +67,119 @@ class SupabaseStorageEgressTests(SimpleTestCase):
                 cache_path = provider._cache_path("../bucket", "../../secret")
 
         self.assertTrue(cache_path.is_relative_to(root / ".supabase-cache"))
+
+
+class BoundedEncryptedCacheTests(SimpleTestCase):
+    def _settings(self, root: Path, **values):
+        defaults = {
+            "NETRA_STORAGE_ROOT": root, "NETRA_STORAGE_CACHE_ENABLED": True,
+            "NETRA_STORAGE_CACHE_MAX_BYTES": 64, "NETRA_STORAGE_CACHE_MIN_FREE_BYTES": 1,
+            "NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS": 1,
+            "NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS": 0,
+            "NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS": 5,
+        }
+        defaults.update(values)
+        return override_settings(**defaults)
+
+    def test_second_verified_access_causes_zero_downloads(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory)):
+            cache = EncryptedObjectCache()
+            content = b"encrypted-content"
+            digest = hashlib.sha256(content).hexdigest()
+            calls = []
+
+            def download(target):
+                calls.append(target)
+                target.write_bytes(content)
+
+            first = cache.materialize("supabase://bucket/object", expected_sha256=digest, expected_size=len(content), downloader=download)
+            second = cache.materialize("supabase://bucket/object", expected_sha256=digest, expected_size=len(content), downloader=download)
+            self.assertEqual(first, second)
+            self.assertEqual(len(calls), 1)
+
+    def test_parallel_cache_miss_performs_one_download(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory)):
+            cache = EncryptedObjectCache()
+            content = b"parallel-encrypted"
+            digest = hashlib.sha256(content).hexdigest()
+            calls = []
+
+            def download(target):
+                calls.append(1)
+                time.sleep(0.05)
+                target.write_bytes(content)
+
+            def access(_index):
+                return cache.materialize("supabase://bucket/parallel", expected_sha256=digest, expected_size=len(content), downloader=download)
+
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                paths = list(pool.map(access, range(5)))
+            self.assertEqual(len(set(paths)), 1)
+            self.assertEqual(len(calls), 1)
+
+    def test_corruption_is_replaced_once(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory)):
+            cache = EncryptedObjectCache()
+            content = b"authenticated-ciphertext"
+            digest = hashlib.sha256(content).hexdigest()
+            calls = []
+
+            def download(target):
+                calls.append(1)
+                target.write_bytes(content)
+
+            path = cache.materialize("supabase://bucket/corrupt", expected_sha256=digest, expected_size=len(content), downloader=download)
+            path.write_bytes(b"tampered")
+            restored = cache.materialize("supabase://bucket/corrupt", expected_sha256=digest, expected_size=len(content), downloader=download)
+            self.assertEqual(restored.read_bytes(), content)
+            self.assertEqual(len(calls), 2)
+
+    def test_capacity_evicts_least_recently_used_entry(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory), NETRA_STORAGE_CACHE_MAX_BYTES=10):
+            cache = EncryptedObjectCache()
+            for name, content in (("old", b"123456"), ("new", b"abcdef")):
+                digest = hashlib.sha256(content).hexdigest()
+                cache.materialize(
+                    f"supabase://bucket/{name}", expected_sha256=digest, expected_size=len(content),
+                    downloader=lambda target, value=content: target.write_bytes(value),
+                )
+                time.sleep(0.01)
+            status = cache.status()
+            self.assertLessEqual(status.used_bytes, 10)
+            self.assertEqual(status.entry_count, 1)
+
+    def test_in_use_entry_is_not_evicted(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory), NETRA_STORAGE_CACHE_MAX_BYTES=10):
+            cache = EncryptedObjectCache()
+            first = b"123456"
+            first_hash = hashlib.sha256(first).hexdigest()
+            cache.materialize(
+                "supabase://bucket/in-use", expected_sha256=first_hash, expected_size=len(first),
+                downloader=lambda target: target.write_bytes(first),
+            )
+            lease = cache.open_cached(
+                "supabase://bucket/in-use", expected_sha256=first_hash, expected_size=len(first),
+                downloader=lambda _target: self.fail("leased cache hit must not download"),
+            )
+            try:
+                second = b"abcdef"
+                with self.assertRaisesRegex(OSError, "capacity"):
+                    cache.materialize(
+                        "supabase://bucket/new", expected_sha256=hashlib.sha256(second).hexdigest(),
+                        expected_size=len(second), downloader=lambda target: target.write_bytes(second),
+                    )
+            finally:
+                lease.close()
+
+    def test_startup_removes_only_stale_partial_files(self):
+        with TemporaryDirectory() as directory, self._settings(Path(directory)):
+            cache = EncryptedObjectCache()
+            cache._ensure()
+            stale = cache.temporary / "stale.partial"
+            fresh = cache.temporary / "fresh.partial"
+            stale.write_bytes(b"old")
+            fresh.write_bytes(b"new")
+            os.utime(stale, (time.time() - 10, time.time() - 10))
+            cache.prune(startup=True)
+            self.assertFalse(stale.exists())
+            self.assertTrue(fresh.exists())

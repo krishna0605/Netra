@@ -166,9 +166,17 @@ NETRA_TRUSTED_LAN_ROLE = os.getenv("NETRA_TRUSTED_LAN_ROLE", "LAN Operator")
 NETRA_EVIDENCE_ENCRYPTION = os.getenv("NETRA_EVIDENCE_ENCRYPTION", "on")
 NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-evidence-key")
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
+NETRA_STORAGE_CACHE_ENABLED = os.getenv("NETRA_STORAGE_CACHE_ENABLED", "1") == "1"
+NETRA_STORAGE_CACHE_MAX_BYTES = int(os.getenv("NETRA_STORAGE_CACHE_MAX_BYTES", str(600 * 1024 * 1024)))
+NETRA_STORAGE_CACHE_MIN_FREE_BYTES = int(os.getenv("NETRA_STORAGE_CACHE_MIN_FREE_BYTES", str(200 * 1024 * 1024)))
+NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS = int(os.getenv("NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS", "3600"))
+NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS = int(os.getenv("NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS", "60"))
+NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS = int(os.getenv("NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS", "30"))
 NETRA_CUSTODY_ANCHORS_ENABLED = os.getenv("NETRA_CUSTODY_ANCHORS_ENABLED", "0") == "1"
 NETRA_CUSTODY_SIGNING_PRIVATE_KEY = os.getenv("NETRA_CUSTODY_SIGNING_PRIVATE_KEY", "")
 NETRA_CUSTODY_SIGNING_KEY_ID = os.getenv("NETRA_CUSTODY_SIGNING_KEY_ID", "")
+if NETRA_STORAGE_CACHE_MAX_BYTES <= 0 or NETRA_STORAGE_CACHE_MIN_FREE_BYTES <= 0:
+    raise RuntimeError("Storage cache maximum and minimum free-space values must be positive")
 NETRA_EVIDENCE_PREVIOUS_KEYS = [item.strip() for item in os.getenv("NETRA_EVIDENCE_PREVIOUS_KEYS", "").split(",") if item.strip()]
 NETRA_EVIDENCE_WRITE_FORMAT = os.getenv("NETRA_EVIDENCE_WRITE_FORMAT", "v2").lower()
 NETRA_MAX_UPLOAD_MB = max(
@@ -268,6 +276,8 @@ if not DEBUG:
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
     if NETRA_EVIDENCE_ENCRYPTION != "on" or NETRA_EVIDENCE_WRITE_FORMAT != "v2":
         raise RuntimeError("Hosted deployments require encrypted v2 artifact writes")
+    if not NETRA_STORAGE_CACHE_ENABLED:
+        raise RuntimeError("Hosted deployments require the persistent encrypted Storage cache")
     if NETRA_CUSTODY_ANCHORS_ENABLED:
         if not NETRA_CUSTODY_SIGNING_PRIVATE_KEY or not NETRA_CUSTODY_SIGNING_KEY_ID:
             raise RuntimeError("Signed custody anchors require a private key and stable key ID")

@@ -382,7 +382,11 @@ def decrypt_evidence_v2(manifest_uri: str | Path, target_path: str | Path) -> Pa
             for expected_index, chunk in enumerate(manifest.get("chunks") or []):
                 if int(chunk.get("index", -1)) != expected_index:
                     raise ValueError("V2 artifact chunks are out of sequence.")
-                ciphertext = storage_provider.read_bucket_object(bucket, str(chunk["objectName"]))
+                ciphertext = storage_provider.read_bucket_object(
+                    bucket, str(chunk["objectName"]),
+                    expected_sha256=str(chunk.get("ciphertextSha256") or ""),
+                    expected_size=int(chunk.get("ciphertextSize", -1)),
+                )
                 if not hmac.compare_digest(hashlib.sha256(ciphertext).hexdigest(), str(chunk.get("ciphertextSha256"))):
                     raise ValueError("V2 artifact chunk digest verification failed.")
                 aad = aad_for(expected_index)
@@ -411,7 +415,11 @@ def verify_evidence_v2(manifest_uri: str | Path) -> dict:
     for expected_index, chunk in enumerate(manifest.get("chunks") or []):
         if int(chunk.get("index", -1)) != expected_index:
             return {"verified": False, "manifestVerified": True, "chunksVerified": False}
-        ciphertext = storage_provider.read_bucket_object(bucket, str(chunk["objectName"]))
+        ciphertext = storage_provider.read_bucket_object(
+            bucket, str(chunk["objectName"]),
+            expected_sha256=str(chunk.get("ciphertextSha256") or ""),
+            expected_size=int(chunk.get("ciphertextSize", -1)),
+        )
         if not hmac.compare_digest(hashlib.sha256(ciphertext).hexdigest(), str(chunk.get("ciphertextSha256"))):
             return {"verified": False, "manifestVerified": True, "chunksVerified": False}
         digest.update(ciphertext)

@@ -14,6 +14,7 @@ from pathlib import Path
 from django.conf import settings
 
 from common.hashing import sha256_file
+from common.storage_cache import EncryptedObjectCache
 from common.supabase_keys import elevated_api_headers
 
 
@@ -116,7 +117,7 @@ class LocalFilesystemStorageProvider:
     def download_bucket_object(self, bucket: str, object_name: str, target_path: str | Path, *, max_bytes: int) -> StorageStat:
         raise RuntimeError("Direct bucket operations require Supabase Storage.")
 
-    def read_bucket_object(self, bucket: str, object_name: str) -> bytes:
+    def read_bucket_object(self, bucket: str, object_name: str, *, expected_sha256: str = "", expected_size: int | None = None) -> bytes:
         return self._local_object_path(bucket, object_name).read_bytes()
 
     def delete_bucket_object(self, bucket: str, object_name: str) -> None:
@@ -180,33 +181,11 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         return f"{self._base_url()}/storage/v1/object/{quoted_bucket}/{quoted_object}"
 
     def _cache_path(self, bucket: str, object_name: str) -> Path:
-        # Object names are external identifiers. Hash both components so a
-        # malformed name cannot escape the private cache directory.
-        bucket_key = hashlib.sha256(bucket.encode("utf-8")).hexdigest()[:16]
-        object_key = hashlib.sha256(object_name.encode("utf-8")).hexdigest()
-        return settings.NETRA_STORAGE_ROOT / ".supabase-cache" / bucket_key / object_key
-
-    def _write_cache(self, bucket: str, object_name: str, content: bytes) -> Path:
-        cache_path = self._cache_path(bucket, object_name)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(delete=False, dir=cache_path.parent) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(content)
-        os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, cache_path)
-        return cache_path
+        cache = EncryptedObjectCache()
+        return cache.objects / cache.key(self.object_uri(bucket, object_name))
 
     def _cache_uploaded_file(self, bucket: str, object_name: str, source: Path) -> None:
-        cache_path = self._cache_path(bucket, object_name)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(delete=False, dir=cache_path.parent) as temporary:
-            temporary_path = Path(temporary.name)
-        try:
-            shutil.copyfile(source, temporary_path)
-            os.chmod(temporary_path, 0o600)
-            os.replace(temporary_path, cache_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
+        EncryptedObjectCache().store_uploaded(self.object_uri(bucket, object_name), source)
 
     def uri_for(self, path: str | Path) -> str:
         target = Path(path).resolve()
@@ -222,14 +201,24 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         if not raw.startswith(self.scheme):
             return super().resolve(storage_uri)
         bucket, object_name = self._parse_uri(raw)
-        cache_path = self._cache_path(bucket, object_name)
-        if not cache_path.exists():
-            self._write_cache(bucket, object_name, self._download_bytes_uncached(bucket, object_name))
-        return cache_path
+        return self._materialize_cached(bucket, object_name)
+
+    def _materialize_cached(
+        self, bucket: str, object_name: str, *, expected_sha256: str = "", expected_size: int | None = None,
+    ) -> Path:
+        return EncryptedObjectCache().materialize(
+            self.object_uri(bucket, object_name), expected_sha256=expected_sha256,
+            expected_size=expected_size,
+            downloader=lambda target: self._download_to_path_uncached(bucket, object_name, target),
+        )
 
     def open_encrypted(self, storage_uri: str | Path, mode: str = "rb"):
         if str(storage_uri).startswith(self.scheme) and "r" in mode:
-            return self.resolve(storage_uri).open(mode)
+            bucket, object_name = self._parse_uri(storage_uri)
+            return EncryptedObjectCache().open_cached(
+                self.object_uri(bucket, object_name),
+                downloader=lambda target: self._download_to_path_uncached(bucket, object_name, target),
+            )
         return super().open_encrypted(storage_uri, mode)
 
     def stat(self, storage_uri: str | Path) -> StorageStat:
@@ -245,7 +234,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, method="DELETE", headers=self._auth_headers())
         self._request(request, expected={200, 204, 404})
-        self._cache_path(bucket, object_name).unlink(missing_ok=True)
+        EncryptedObjectCache().remove_uri(self.object_uri(bucket, object_name))
 
     def verify_hash(self, storage_uri: str | Path, expected_sha256: str) -> bool:
         try:
@@ -257,7 +246,8 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
         if str(source_uri).startswith(self.scheme):
-            shutil.copyfile(self.resolve(source_uri), target)
+            with self.open_encrypted(source_uri, "rb") as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
             return target
         return super().copy_encrypted(source_uri, destination)
 
@@ -289,8 +279,10 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
             raise
         return StorageStat(size_bytes=written, sha256=digest.hexdigest())
 
-    def read_bucket_object(self, bucket: str, object_name: str) -> bytes:
-        return self._download_bytes(bucket, object_name)
+    def read_bucket_object(self, bucket: str, object_name: str, *, expected_sha256: str = "", expected_size: int | None = None) -> bytes:
+        return self._materialize_cached(
+            bucket, object_name, expected_sha256=expected_sha256, expected_size=expected_size,
+        ).read_bytes()
 
     def delete_bucket_object(self, bucket: str, object_name: str) -> None:
         self.delete(f"{self.scheme}{bucket}/{object_name}")
@@ -309,17 +301,19 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         self._cache_uploaded_file(bucket, object_name, path)
 
     def _download_bytes(self, bucket: str, object_name: str) -> bytes:
-        cache_path = self._cache_path(bucket, object_name)
-        if cache_path.exists():
-            return cache_path.read_bytes()
-        content = self._download_bytes_uncached(bucket, object_name)
-        self._write_cache(bucket, object_name, content)
-        return content
+        return self.read_bucket_object(bucket, object_name)
 
-    def _download_bytes_uncached(self, bucket: str, object_name: str) -> bytes:
+    def _download_to_path_uncached(self, bucket: str, object_name: str, target: Path) -> None:
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, method="GET", headers=self._headers())
-        return self._request(request, expected={200})
+        with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
+            if response.status != 200:
+                raise RuntimeError(f"Supabase Storage returned HTTP {response.status}.")
+            while True:
+                block = response.read(1024 * 1024)
+                if not block:
+                    break
+                output.write(block)
 
     def health_check(self) -> dict:
         request = urllib.request.Request(f"{self._base_url()}/storage/v1/bucket", method="GET", headers=self._headers("application/json"))
@@ -329,6 +323,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
                 "status": "ok",
                 "provider": "supabase-storage",
                 "detail": "bucket access probe succeeded; deep object transfer probe disabled",
+                "cache": EncryptedObjectCache().status().as_dict(),
             }
         bucket = settings.SUPABASE_STORAGE_BUCKET_EVIDENCE
         probe_name = f"health/netra-storage-probe-{uuid4().hex}.txt"

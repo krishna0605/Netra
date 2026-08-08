@@ -15,6 +15,7 @@ from common.crypto_migration import (
 
 class Command(BaseCommand):
     help = "Plan or execute a resumable, egress-capped legacy artifact crypto migration."
+    requires_system_checks = []
 
     def add_arguments(self, parser):
         mode = parser.add_mutually_exclusive_group()
