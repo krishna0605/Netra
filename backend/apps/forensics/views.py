@@ -1432,8 +1432,14 @@ def capture_interfaces(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def capture_live_stop(request, job_id: str | None = None):
-    payload = _json_body(request)
-    job = CaptureJob.objects.filter(id=job_id or payload.get("jobId")).first()
+    if not job_id:
+        return api_error(
+            request,
+            "scope_required",
+            "Use the workspace-scoped capture stop URL.",
+            status=400,
+        )
+    job = CaptureJob.objects.filter(id=job_id).first()
     if not job:
         raise Http404("Capture job not found")
     return JsonResponse(stop_capture(job))
@@ -1487,8 +1493,14 @@ def capture_replay_start(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def capture_replay_stop(request, job_id: str | None = None):
-    payload = _json_body(request)
-    job = CaptureJob.objects.filter(id=job_id or payload.get("jobId")).first()
+    if not job_id:
+        return api_error(
+            request,
+            "scope_required",
+            "Use the workspace-scoped capture stop URL.",
+            status=400,
+        )
+    job = CaptureJob.objects.filter(id=job_id).first()
     if not job:
         raise Http404("Replay job not found")
     return JsonResponse(stop_capture(job))
@@ -2569,14 +2581,18 @@ def graph_attack_path(request):
 
 
 def search(request):
-    kind = request.GET.get("type", "packets")
-    case_id = _selected_case_id(request)
-    query_text = request.GET.get("q", "")
-    fallback_key = {"packets": "packets", "sessions": "sessions", "alerts": "alerts", "zeek": "decodedProtocols"}.get(kind, "packets")
-    rows, backend = search_index(kind if kind in {"packets", "sessions", "alerts", "zeek", "payloads"} else "packets", case_id, query_text, _analysis(case_id).get(fallback_key, []))
-    payload = _paged(rows, request)
-    payload["searchBackend"] = backend
-    return JsonResponse(payload)
+    route_ref = (request.GET.get("caseRef") or "").strip()
+    job_id = (request.GET.get("jobId") or "").strip()
+    if not route_ref or not job_id:
+        return api_error(
+            request,
+            "scope_required",
+            "Both caseRef and jobId are required. Use the workspace-scoped search URL.",
+            status=400,
+        )
+    from apps.forensics.api.features import scoped_search
+
+    return scoped_search(request, route_ref, job_id)
 
 
 def report_preview(request, case_id: str):

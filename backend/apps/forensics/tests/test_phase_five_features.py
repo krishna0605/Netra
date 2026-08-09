@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AnalysisReference, Case, CaseMembership, ProcessingJob, UserProfile
+from apps.forensics.models import AnalysisReference, CaptureJob, Case, CaseMembership, ProcessingJob, UserProfile
 from apps.forensics.tests.factories import netra_organization
 
 
@@ -20,6 +20,8 @@ from apps.forensics.tests.factories import netra_organization
     NETRA_EVIDENCE_KEY="phase-five-feature-test-evidence-key",
     NETRA_EVIDENCE_KEY_ID="phase-five-test-key",
     NETRA_STORAGE_PROVIDER="local",
+    NETRA_ENABLE_SENSOR_CAPTURE=True,
+    NETRA_SEARCH_PROVIDER="postgres",
 )
 class PhaseFiveDurableFeatureTests(TestCase):
     def setUp(self):
@@ -89,3 +91,74 @@ class PhaseFiveDurableFeatureTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ProcessingJob.objects.count(), 1)
 
+    def test_search_is_scoped_to_the_selected_workspace_and_job(self):
+        response = self.client.get(
+            f"/api/workspaces/{self.case.route_ref}/analysis/jobs/{self.job.id}/search",
+            {"type": "packet", "q": "192.0.2.1", "limit": 10},
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["caseId"], self.case.id)
+        self.assertEqual(response.json()["jobId"], self.job.id)
+        self.assertEqual([row["id"] for row in response.json()["results"]], ["packet-1"])
+
+        compatibility = self.client.get("/api/search", {"type": "packet", "q": "192.0.2.1"}, **self.headers)
+        self.assertEqual(compatibility.status_code, 400)
+        self.assertEqual(compatibility.json()["error"]["code"], "scope_required")
+
+    def test_search_rejects_unsafe_or_cross_case_scope(self):
+        unsafe = self.client.get(
+            f"/api/workspaces/{self.case.route_ref}/analysis/jobs/{self.job.id}/search",
+            {"type": "packet", "q": "*"},
+            **self.headers,
+        )
+        self.assertEqual(unsafe.status_code, 400)
+        other = Case.objects.create(
+            id="CASE-PHASE5-OTHER",
+            organization=self.organization,
+            display_reference="CASE-PHASE5-OTHER",
+            title="Other case",
+            investigator="Other investigator",
+        )
+        other_job = ProcessingJob.objects.create(
+            id="job-phase5-other",
+            case=other,
+            status=ProcessingJob.Status.COMPLETED,
+            stats={"analysis": {"packets": [{"id": "other-packet"}]}},
+        )
+        mismatch = self.client.get(
+            f"/api/workspaces/{self.case.route_ref}/analysis/jobs/{other_job.id}/search",
+            {"type": "packet", "q": "other"},
+            **self.headers,
+        )
+        self.assertEqual(mismatch.status_code, 404)
+
+    def test_capture_stop_uses_case_and_job_from_the_url_only(self):
+        profile = UserProfile.objects.get(user=self.user)
+        profile.role = "Admin"
+        profile.save(update_fields=["role", "updated_at"])
+        job = CaptureJob.objects.create(
+            id="capture-phase5",
+            case=self.case,
+            mode=CaptureJob.Mode.LIVE_CAPTURE,
+            status=CaptureJob.Status.RUNNING,
+        )
+        legacy = self.client.post(
+            "/api/capture/live/stop",
+            {"jobId": job.id},
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(legacy.status_code, 400)
+        job.refresh_from_db()
+        self.assertEqual(job.status, CaptureJob.Status.RUNNING)
+
+        response = self.client.post(
+            f"/api/workspaces/{self.case.route_ref}/capture/jobs/{job.id}/stop",
+            {},
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        job.refresh_from_db()
+        self.assertEqual(job.status, CaptureJob.Status.STOPPED)

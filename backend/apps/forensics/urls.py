@@ -49,6 +49,8 @@ urlpatterns = [
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/references/<str:kind>", feature_views.analysis_references),
     path("workspaces/<uuid:route_ref>/imports/capture-log", feature_views.capture_log_import),
     path("workspaces/<uuid:route_ref>/imports/zeek-log", feature_views.zeek_log_import),
+    path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/search", feature_views.scoped_search),
+    path("workspaces/<uuid:route_ref>/capture/jobs/<str:job_id>/stop", feature_views.capture_stop),
     path("workspaces/<uuid:route_ref>/integrations", integration_views.workspace_connections),
     path("workspaces/<uuid:route_ref>/integrations/<str:integration_id>/link", integration_views.link_case),
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/integrations/<str:integration_id>/alerts", integration_views.send_alerts),

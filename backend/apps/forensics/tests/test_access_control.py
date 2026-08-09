@@ -197,7 +197,7 @@ class ApiAccessControlTests(TestCase):
         self.assertNotEqual(replay.json().get("code"), "feature_disabled")
         for path in ("/api/sensors", "/api/capture-schedules", "/api/integrations", "/api/retention/policy"):
             response = self.client.get(path, **headers)
-            self.assertEqual(response.status_code, 404, path)
+            self.assertEqual(response.status_code, 503, path)
             self.assertEqual(response.json()["code"], "feature_disabled")
         self.assertEqual(self.client.get("/api/system/metrics", **headers).status_code, 200)
 

@@ -16,6 +16,7 @@ from apps.forensics.services.analysis_scope import AnalysisScopeProblem, find_an
 from common.async_pipeline import queue_uploaded_evidence
 from common.audit import actor_from_request, can, visible_cases_for_actor
 from common.evidence_normalization import normalize_evidence_upload
+from common.indexing import search_index
 from common.storage import save_uploaded_file
 
 
@@ -209,3 +210,52 @@ def capture_log_import(request, route_ref):
 @require_http_methods(["POST"])
 def zeek_log_import(request, route_ref):
     return _durable_log_import(request, route_ref, ProcessingJob.OperationKind.ZEEK_LOG_IMPORT)
+
+
+@require_http_methods(["GET"])
+def scoped_search(request, route_ref, job_id):
+    scope = _scope(request, route_ref, job_id)
+    if isinstance(scope, JsonResponse):
+        return scope
+    kind = (request.GET.get("type") or "packet").strip().lower()
+    mapping = {
+        "packet": ("packets", "packets"),
+        "session": ("sessions", "sessions"),
+        "alert": ("alerts", "alerts"),
+        "payload": ("payloads", "payloadFindings"),
+        "zeek": ("zeek", "zeek"),
+    }
+    if kind not in mapping:
+        return api_error(request, "invalid_search_type", "The requested search type is not supported.", status=400)
+    query = (request.GET.get("q") or "").strip()
+    if len(query) > 256 or query.startswith(("*", "?")) or any(ord(character) < 32 for character in query):
+        return api_error(request, "invalid_search_query", "The search query is invalid or too long.", status=400)
+    try:
+        limit = max(1, min(int(request.GET.get("limit") or 100), 100))
+    except ValueError:
+        return api_error(request, "invalid_search_limit", "The search limit must be an integer.", status=400)
+    index_kind, collection = mapping[kind]
+    fallback = scope.analysis.get(collection, [])
+    if kind == "zeek" and isinstance(fallback, dict):
+        fallback = [row for rows in (fallback.get("records") or {}).values() for row in rows if isinstance(row, dict)]
+    if not isinstance(fallback, list):
+        fallback = []
+    rows, provider = search_index(index_kind, scope.case.id, query, fallback, job_id=scope.job.id)
+    return JsonResponse({"caseId": scope.case.id, "jobId": scope.job.id, "provider": provider, "results": rows[:limit]})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def capture_stop(request, route_ref, job_id):
+    actor, case = _visible_case(request, route_ref)
+    if not case:
+        return api_error(request, "resource_not_found", "The requested workspace was not found.", status=404)
+    if not can(actor, "operations"):
+        return api_error(request, "permission_denied", "Permission denied.", status=403)
+    from apps.forensics.models import CaptureJob
+    from common.operations import stop_capture
+
+    job = CaptureJob.objects.filter(pk=job_id, case=case).first()
+    if not job:
+        return api_error(request, "resource_not_found", "The requested capture job was not found.", status=404)
+    return JsonResponse(stop_capture(job))

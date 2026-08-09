@@ -53,7 +53,7 @@ def _feature_disabled(feature: str) -> JsonResponse:
             "feature": feature,
             "profile": settings.NETRA_DEPLOYMENT_PROFILE,
         },
-        status=404,
+        status=503,
     )
 
 

@@ -17,6 +17,13 @@ ALIASES = {
 }
 
 HIGH_VOLUME = {"packets", "protocols", "payloads", "zeek", "live-packets"}
+SEARCH_FIELDS = {
+    "packets": ["sourceIp", "destinationIp", "protocol", "decodedSummary"],
+    "sessions": ["source", "destination", "protocol"],
+    "alerts": ["attackClass", "severity", "ruleId", "decodedSummary"],
+    "payloads": ["protocol", "risk", "decodedSummary"],
+    "zeek": ["zeekLogType", "sourceIp", "destinationIp", "decodedSummary"],
+}
 
 MAPPINGS = {
     "properties": {
@@ -124,7 +131,14 @@ def index_live_packets(documents: list[tuple[str, dict[str, Any]]]) -> int:
     return _batch("live-packets", documents)
 
 
-def search_index(kind: str, case_id: str = "", query_text: str = "", fallback: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], str]:
+def search_index(
+    kind: str,
+    case_id: str = "",
+    query_text: str = "",
+    fallback: list[dict[str, Any]] | None = None,
+    *,
+    job_id: str = "",
+) -> tuple[list[dict[str, Any]], str]:
     from django.conf import settings
 
     if getattr(settings, "NETRA_SEARCH_PROVIDER", "elasticsearch") == "postgres" or getattr(settings, "NETRA_DATABASE_PROVIDER", "") == "supabase":
@@ -137,8 +151,24 @@ def search_index(kind: str, case_id: str = "", query_text: str = "", fallback: l
     filters = []
     if case_id:
         filters.append({"term": {"caseId": case_id}})
+    if job_id:
+        filters.append({"term": {"jobId": job_id}})
     if query_text:
-        query = {"bool": {"must": [{"query_string": {"query": f"*{query_text}*", "fields": ["*"], "default_operator": "AND"}}], "filter": filters}}
+        query = {
+            "bool": {
+                "must": [
+                    {
+                        "simple_query_string": {
+                            "query": query_text,
+                            "fields": SEARCH_FIELDS.get(kind, SEARCH_FIELDS["packets"]),
+                            "default_operator": "and",
+                            "flags": "AND|OR|PHRASE",
+                        }
+                    }
+                ],
+                "filter": filters,
+            }
+        }
     else:
         query = {"bool": {"must": [{"match_all": {}}], "filter": filters}}
     rows = search_documents(index, query, fallback or [])
