@@ -120,7 +120,7 @@ def audit_export_payload(case: Case | None = None, *, organization_id=None) -> d
     if case:
         organization_id = case.organization_id
     access_logs = AccessLog.objects.filter(organization_id=organization_id).order_by("-created_at")
-    custody_events = CustodyLedgerEvent.objects.filter(case__organization_id=organization_id).order_by("created_at", "id")
+    custody_events = CustodyLedgerEvent.objects.filter(case__organization_id=organization_id).order_by("case_id", "chain_index")
     operational_events = OperationalEvent.objects.filter(organization_id=organization_id).order_by("-created_at")
     organization_case_ids = Case.objects.filter(organization_id=organization_id).values_list("id", flat=True)
     dead_letters = DeadLetterEvent.objects.filter(case_id__in=organization_case_ids).order_by("-created_at")

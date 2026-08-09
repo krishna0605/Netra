@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from cryptography.exceptions import InvalidSignature
-from django.db import connection, connections, transaction
+from django.db import IntegrityError, connection, connections, transaction
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, skipUnlessDBFeature
 
 from apps.forensics.models import Case, CustodyLedgerEvent, Organization
@@ -66,7 +66,39 @@ class CustodyLedgerTests(TestCase):
         first = record_custody_event(self.case, "system", "created", {"sequence": 1})
         second = record_custody_event(self.case, "system", "verified", {"sequence": 2})
         self.assertEqual(second.previous_hash, first.event_hash)
+        self.assertEqual([first.chain_index, second.chain_index], [1, 2])
         self.assertEqual(verify_case_ledger(self.case)["failures"], [])
+
+    def test_tied_timestamps_do_not_change_chain_order(self):
+        events = [
+            record_custody_event(self.case, "system", "append", {"sequence": sequence})
+            for sequence in range(8)
+        ]
+        frozen = datetime(2026, 8, 9, tzinfo=timezone.utc)
+        CustodyLedgerEvent.objects.filter(pk__in=[event.pk for event in events]).update(created_at=frozen)
+
+        result = verify_case_ledger(self.case)
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(
+            list(CustodyLedgerEvent.objects.filter(case=self.case).order_by("chain_index").values_list("chain_index", flat=True)),
+            list(range(1, 9)),
+        )
+
+    def test_case_chain_index_is_unique(self):
+        first = record_custody_event(self.case, "system", "created", {})
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CustodyLedgerEvent.objects.create(
+                    id="cust-duplicate-index",
+                    case=self.case,
+                    chain_index=first.chain_index,
+                    actor_label="system",
+                    actor_role="System",
+                    action="duplicate",
+                    event_hash="a" * 64,
+                )
 
     def test_outer_rollback_removes_custody_append(self):
         with self.assertRaises(RuntimeError):
@@ -107,3 +139,7 @@ class PostgreSQLCustodyConcurrencyTests(TransactionTestCase):
         result = verify_case_ledger(Case.objects.get(pk=self.case.pk))
         self.assertEqual(result["eventCount"], 50)
         self.assertEqual(result["failures"], [])
+        self.assertEqual(
+            list(CustodyLedgerEvent.objects.filter(case=self.case).order_by("chain_index").values_list("chain_index", flat=True)),
+            list(range(1, 51)),
+        )

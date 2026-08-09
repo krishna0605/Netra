@@ -24,7 +24,7 @@ class TenancySchemaTests(TestCase):
     def test_phase_two_schema_has_41_domain_and_10_framework_tables(self):
         domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
         self.assertEqual(len(domain_tables), 41)
-        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 14)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 15)
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
 
     def test_case_display_reference_is_unique_within_organization(self):

@@ -42,7 +42,7 @@ def build_custody_anchor(case: Case, *, generated_at: datetime | None = None) ->
     verification = verify_case_ledger(case)
     if not verification["verified"]:
         raise ValueError("Custody ledger verification failed; anchor was not created.")
-    latest = CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id").first()
+    latest = CustodyLedgerEvent.objects.filter(case=case).order_by("-chain_index").first()
     generated_at = generated_at or datetime.now(timezone.utc)
     payload = {
         "version": "netra-custody-anchor-v1",

@@ -128,7 +128,7 @@ def _artifact_analysis(case_id: str, analysis: dict, case: Case | None = None) -
                 enriched["evidence"]["normalization"] = manifest.manifest_json["normalization"]
     enriched["custodyLedger"] = {
         "verification": verify_case_ledger(case),
-        "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("created_at", "id")],
+        "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("chain_index")],
     }
     return enriched
 

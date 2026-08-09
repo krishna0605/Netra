@@ -258,7 +258,7 @@ def refresh_case_workspace_artifacts(
     else:
         custody_rows = [
             custody_event_dict(row)
-            for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")[:20]
+            for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-chain_index")[:20]
         ]
         custody_verification = verify_case_ledger(case) if custody_rows else {"verified": False, "eventCount": 0, "latestHash": ""}
     snapshot_json["reports"] = {"latestReport": reports[0] if reports else None, "items": reports}
@@ -296,7 +296,7 @@ def build_case_workspace_snapshot(case: Case, job: ProcessingJob | None, analysi
     payload_clues = _as_list(analysis.get("payloadFindings"))
     graph_data = analysis.get("graph") if isinstance(analysis.get("graph"), dict) else {"nodes": [], "edges": []}
     reports = [_report_payload(report) for report in Report.objects.filter(case=case).order_by("-created_at")[:50]]
-    custody_rows = [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")[:20]]
+    custody_rows = [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-chain_index")[:20]]
     custody_verification = verify_case_ledger(case) if CustodyLedgerEvent.objects.filter(case=case).exists() else {"verified": False, "eventCount": 0, "latestHash": ""}
     timeline = _timeline(analysis, packets, alerts, anomalies, custody_rows)
     protocol_chart = _chart(analysis.get("protocolChartData")) or _count_chart(packets, "protocol") or _count_chart(sessions, "protocol")

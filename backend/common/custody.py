@@ -61,12 +61,13 @@ def record_custody_event(
     # Serialize every append on the parent row. This is effective on PostgreSQL;
     # SQLite remains suitable only for non-concurrency unit tests.
     locked_case = Case.objects.select_for_update().get(pk=case.pk)
-    previous = CustodyLedgerEvent.objects.filter(case=locked_case).order_by("-created_at", "-id").first()
+    previous = CustodyLedgerEvent.objects.filter(case=locked_case).order_by("-chain_index").first()
     actor_label = actor.user if isinstance(actor, Actor) else str(actor)
     actor_role = actor.role if isinstance(actor, Actor) else "System"
     event = CustodyLedgerEvent(
         id=f"cust-{uuid4().hex[:10]}",
         case=locked_case,
+        chain_index=(previous.chain_index + 1) if previous else 1,
         evidence_file=evidence,
         actor_user=actor_label,
         actor_label=actor_label,
@@ -90,7 +91,7 @@ def record_custody_event(
 
 def verify_case_ledger(case: Case) -> dict:
     previous_hash = ""
-    rows = list(CustodyLedgerEvent.objects.filter(case=case).order_by("created_at", "id"))
+    rows = list(CustodyLedgerEvent.objects.filter(case=case).order_by("chain_index"))
     failures = []
     for row in rows:
         payload = _event_payload(

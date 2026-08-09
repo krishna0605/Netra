@@ -693,6 +693,7 @@ class CaseHistoryEvent(TimeStampedModel):
 class CustodyLedgerEvent(TimeStampedModel):
     id = models.CharField(max_length=80, primary_key=True)
     case = models.ForeignKey(Case, related_name="custody_ledger", on_delete=models.CASCADE)
+    chain_index = models.PositiveBigIntegerField()
     evidence_file = models.ForeignKey(EvidenceFile, null=True, blank=True, related_name="custody_ledger", on_delete=models.SET_NULL)
     actor_user = models.CharField(max_length=160, blank=True)
     actor_label = models.CharField(max_length=160)
@@ -705,7 +706,14 @@ class CustodyLedgerEvent(TimeStampedModel):
     event_hash = models.CharField(max_length=64)
 
     class Meta:
-        indexes = [models.Index(fields=["case", "created_at"], name="netra_custody_case_idx")]
+        indexes = [
+            models.Index(fields=["case", "created_at"], name="netra_custody_case_idx"),
+            models.Index(fields=["case", "chain_index"], name="netra_custody_chain_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "chain_index"], name="netra_custody_case_chain_uniq"),
+            models.CheckConstraint(condition=models.Q(chain_index__gte=1), name="netra_custody_chain_positive"),
+        ]
 
 
 class AccessLog(TimeStampedModel):
