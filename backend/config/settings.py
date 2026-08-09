@@ -68,7 +68,10 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_POOLER_DATABASE_URL") or os.getenv("SUPABASE_DIRECT_DATABASE_URL")
 DATABASE_CONN_MAX_AGE = int(os.getenv("DATABASE_CONN_MAX_AGE", "0" if os.getenv("NETRA_DATABASE_PROVIDER", "").lower() == "supabase" else "60"))
-NETRA_TEST_SQLITE = os.getenv("NETRA_TEST_SQLITE", "0") == "1" or ("test" in sys.argv and not DATABASE_URL)
+NETRA_TEST_POSTGRES = os.getenv("NETRA_TEST_POSTGRES", "0") == "1"
+NETRA_TEST_SQLITE = not NETRA_TEST_POSTGRES and (
+    os.getenv("NETRA_TEST_SQLITE", "0") == "1" or ("test" in sys.argv and not DATABASE_URL)
+)
 if NETRA_TEST_SQLITE:
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "test.sqlite3"}}
 elif DATABASE_URL:
