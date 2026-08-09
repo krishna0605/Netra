@@ -11,12 +11,15 @@ import json
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import transaction
 from django.http import Http404, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import UserProfile
+from apps.forensics.models import AccessLog, OperationalEvent, UserProfile
 from apps.forensics.services.administration import (
     AdministrationProblem,
     ensure_admin_mutation_allowed,
@@ -25,6 +28,12 @@ from apps.forensics.services.administration import (
 from common.audit import actor_from_request, can, require_permission, sync_supabase_actor
 from common.capabilities import public_capabilities
 from common.case_metadata import server_case_identity
+from common.supabase_admin import (
+    SupabaseAdminConflict,
+    SupabaseAdminError,
+    find_user_by_email,
+    invite_user,
+)
 
 
 def _json_body(request) -> dict:
@@ -57,6 +66,8 @@ def auth_login(request):
         if not session or not session.get("access_token"):
             return JsonResponse({"error": "Invalid Supabase credentials"}, status=401)
         supabase_user = verify_supabase_token(session["access_token"])
+        if supabase_user is None:
+            return JsonResponse({"error": "Invalid Supabase credentials"}, status=401)
         actor = sync_supabase_actor(supabase_user) if supabase_user else None
         if actor and not actor.organization_id:
             return JsonResponse(
@@ -189,6 +200,8 @@ def auth_me(request):
                 "slug": actor.organization_slug,
             },
             "aal": actor.aal,
+            "mfaPolicy": settings.NETRA_MFA_POLICY,
+            "mfaEnrollmentRequired": is_admin and actor.aal != "aal2",
             "privilegedAdminReady": actor.role == "Admin" and actor.aal == "aal2",
             "capabilities": public_capabilities(),
             "deployment": {
@@ -216,14 +229,116 @@ def users(request):
         except AdministrationProblem as problem:
             return _administration_problem_response(problem)
         payload = _json_body(request)
-        email = payload.get("email")
+        email = str(payload.get("email") or "").strip().lower()
         role = payload.get("role", "Viewer")
-        if not email or role not in {"Investigator", "Analyst", "Viewer"}:
+        try:
+            validate_email(email)
+        except ValidationError:
             return JsonResponse({"error": "email and a valid non-administrator role are required"}, status=400)
-        if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" and payload.get("password"):
+        if role not in {"Investigator", "Analyst", "Viewer"}:
+            return JsonResponse({"error": "email and a valid non-administrator role are required"}, status=400)
+        if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" and "password" in payload:
             return JsonResponse(
                 {"error": "Passwords are managed by Supabase Auth.", "code": "password_not_accepted"},
                 status=400,
+            )
+        if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase":
+            if not settings.NETRA_AUTH_INVITATIONS_ENABLED:
+                return JsonResponse(
+                    {
+                        "error": {
+                            "code": "user_invitations_disabled",
+                            "message": "User invitations are not enabled for this deployment.",
+                        }
+                    },
+                    status=503,
+                )
+            existing_profile = UserProfile.objects.select_related("user").filter(user__username__iexact=email).first()
+            if existing_profile and existing_profile.organization_id != actor.organization_id:
+                return JsonResponse(
+                    {"error": {"code": "user_provisioning_conflict", "message": "The user cannot be provisioned."}},
+                    status=409,
+                )
+            try:
+                try:
+                    auth_user = invite_user(email, redirect_to=settings.NETRA_AUTH_INVITE_REDIRECT_URL)
+                    invitation_state = "sent"
+                except SupabaseAdminConflict:
+                    auth_user = find_user_by_email(email)
+                    if auth_user is None:
+                        raise SupabaseAdminError("Supabase Auth identity reconciliation failed.")
+                    invitation_state = "accepted" if auth_user.email_confirmed_at else "pending"
+            except SupabaseAdminError:
+                return JsonResponse(
+                    {
+                        "error": {
+                            "code": "auth_provider_unavailable",
+                            "message": "The identity provider is temporarily unavailable.",
+                        }
+                    },
+                    status=503,
+                )
+
+            with transaction.atomic():
+                user, created = User.objects.get_or_create(
+                    username=email,
+                    defaults={"email": email, "first_name": payload.get("name", email), "is_active": True},
+                )
+                profile = UserProfile.objects.filter(user=user).first()
+                if profile and profile.organization_id != actor.organization_id:
+                    return JsonResponse(
+                        {"error": {"code": "user_provisioning_conflict", "message": "The user cannot be provisioned."}},
+                        status=409,
+                    )
+                if profile and profile.role == UserProfile.Role.ADMIN:
+                    return JsonResponse(
+                        {"error": {"code": "sole_admin_required", "message": "Use administrator transfer."}},
+                        status=409,
+                    )
+                user.email = email
+                user.first_name = str(payload.get("name") or email).strip()
+                user.is_active = True
+                user.set_unusable_password()
+                user.save()
+                profile, _ = UserProfile.objects.update_or_create(
+                    user=user,
+                    defaults={
+                        "organization_id": actor.organization_id,
+                        "role": role,
+                        "display_name": str(payload.get("name") or email).strip(),
+                    },
+                )
+                AccessLog.objects.create(
+                    organization_id=actor.organization_id,
+                    user_id=actor.django_user_id,
+                    user_label=actor.user,
+                    role=actor.role,
+                    action="organization.user_invited",
+                    resource_type="User",
+                    resource_id=str(user.id),
+                    result="allowed",
+                )
+                OperationalEvent.objects.create(
+                    organization_id=actor.organization_id,
+                    event_type="organization.user_invited",
+                    payload_json={
+                        "targetUserId": user.id,
+                        "targetAuthUserId": auth_user.id,
+                        "role": role,
+                        "invitationState": invitation_state,
+                    },
+                )
+            return JsonResponse(
+                {
+                    "id": user.id,
+                    "email": user.username,
+                    "name": profile.display_name,
+                    "role": profile.role,
+                    "created": created,
+                    "invitationState": invitation_state,
+                    "authState": "active" if auth_user.email_confirmed_at else "invited",
+                },
+                status=201 if created else 200,
             )
         user, created = User.objects.get_or_create(
             username=email,

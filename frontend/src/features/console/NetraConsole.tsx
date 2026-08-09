@@ -95,6 +95,7 @@ import type {
 import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { beginResumableUpload, type DirectUploadSession, type ResumableUploadHandle } from "../../lib/resumableUpload";
 import { cn, formatBytes, formatNumber } from "../../lib/utils";
+import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "../auth/AuthPages";
 import {
   PublicAboutPage,
   PublicContactPage,
@@ -1521,6 +1522,9 @@ function App() {
               <Route path="/terms" element={<PublicTermsPage languageControl={<LanguageControl />} />} />
               <Route path="/demo" element={<Navigate to="/login" replace state={{ from: appViewRoute("upload") }} />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/auth/recovery" element={<RecoveryPage />} />
+              <Route path="/auth/invite" element={<InvitationPage />} />
               <Route path="/app/login" element={<Navigate to="/login" replace />} />
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
               <Route path="*" element={<PublicNotFoundPage languageControl={<LanguageControl />} />} />
@@ -1670,6 +1674,7 @@ function LoginPage() {
           <Button type="submit" disabled={loading || !email || !password}>
             {loading ? "Signing in..." : "Sign in"}
           </Button>
+          <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link>
         </form>}
       </section>
     </main>

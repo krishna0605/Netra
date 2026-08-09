@@ -108,6 +108,14 @@ if NETRA_FREE_PLAN_GUARD and NETRA_REALTIME_PROVIDER == "supabase":
     # Keep stale deployment variables from overriding the guarded profile.
     NETRA_REALTIME_PROVIDER = "sse"
 NETRA_AUTH_PROVIDER = os.getenv("NETRA_AUTH_PROVIDER", "django").lower()
+NETRA_MFA_POLICY = os.getenv("NETRA_MFA_POLICY", "admin_required").strip().lower()
+if NETRA_MFA_POLICY not in {"admin_required", "optional"}:
+    raise RuntimeError("NETRA_MFA_POLICY must be admin_required or optional")
+NETRA_AUTH_INVITATIONS_ENABLED = os.getenv("NETRA_AUTH_INVITATIONS_ENABLED", "0") == "1"
+NETRA_AUTH_INVITE_REDIRECT_URL = os.getenv("NETRA_AUTH_INVITE_REDIRECT_URL", "").strip()
+NETRA_AUTH_ADMIN_TIMEOUT_SECONDS = max(1, min(15, int(os.getenv("NETRA_AUTH_ADMIN_TIMEOUT_SECONDS", "5"))))
+NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES = max(4096, min(1048576, int(os.getenv("NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES", "65536"))))
+NETRA_AUTH_ADMIN_LIST_PAGE_SIZE = max(1, min(100, int(os.getenv("NETRA_AUTH_ADMIN_LIST_PAGE_SIZE", "100"))))
 NETRA_SEARCH_PROVIDER = os.getenv("NETRA_SEARCH_PROVIDER", "postgres").lower()
 NETRA_DATABASE_MODE = os.getenv("NETRA_DATABASE_MODE", "docker-postgres")
 NETRA_KAFKA_BOOTSTRAP = os.getenv("NETRA_KAFKA_BOOTSTRAP", "localhost:9092")
@@ -318,6 +326,11 @@ if not DEBUG:
         raise RuntimeError("Hosted deployments require bearer access mode and disabled development role headers")
     if NETRA_AUTH_PROVIDER == "supabase" and (not SUPABASE_URL or not SUPABASE_ANON_KEY):
         raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY are required for Supabase authentication")
+    if NETRA_AUTH_INVITATIONS_ENABLED:
+        if NETRA_AUTH_PROVIDER != "supabase" or not SUPABASE_SERVICE_ROLE_KEY:
+            raise RuntimeError("Hosted invitations require Supabase Auth and a backend secret key")
+        if not NETRA_AUTH_INVITE_REDIRECT_URL.startswith("https://"):
+            raise RuntimeError("NETRA_AUTH_INVITE_REDIRECT_URL must be an exact HTTPS URL")
     if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-phase3-development-evidence-key":
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
     if NETRA_EVIDENCE_ENCRYPTION != "on" or NETRA_EVIDENCE_WRITE_FORMAT != "v2":

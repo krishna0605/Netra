@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 export const SUPABASE_AUTH_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 type SessionStorageReader = Pick<Storage, "getItem">;
@@ -46,6 +46,13 @@ export function getCurrentAccessToken() {
 
 export function setCurrentAccessToken(token?: string | null) {
   currentAccessToken = token ?? "";
+}
+
+export function clearNetraSessionState() {
+  setCurrentAccessToken();
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("netra-active-case");
+  window.sessionStorage.removeItem("netra-last-event-id");
 }
 
 async function withAuthTimeout<T>(operation: Promise<T>, fallback: T, timeoutMs = 5000): Promise<T> {
