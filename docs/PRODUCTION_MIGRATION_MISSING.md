@@ -93,7 +93,7 @@ The following remain secret-manager-only and were rotated for the fresh target:
 - `NETRA_EVIDENCE_KEY_ID`
 - `NETRA_EVIDENCE_PREVIOUS_KEYS`, when used
 - `NETRA_SENSOR_SHARED_KEY`
-- `NETRA_WEBHOOK_SIGNING_SECRET`
+- per-integration webhook HMAC credentials, provisioned through the AAL2 API after integrations are approved
 
 The stale aliases `SUPABASE_POOLER_DATABASE_URL`,
 `SUPABASE_DIRECT_DATABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` have been
@@ -103,12 +103,12 @@ removed from Railway so they cannot override the target.
 
 | Service | Variable | Value/role |
 |---|---|---|
-| `netra-api` | `NETRA_SERVICE_KIND` | `api` |
+| `netra-api` | `NETRA_RUNTIME_ROLE` | `api` |
 | `netra-api` | `DJANGO_ALLOWED_HOSTS` | Railway API host only. |
 | `netra-api` | `DJANGO_CSRF_TRUSTED_ORIGINS` | Exact production Vercel HTTPS origin. |
 | `netra-api` | `NETRA_FRONTEND_ORIGINS` | Exact production Vercel HTTPS origin. |
 | `netra-api` | `NETRA_PUBLIC_BASE_URL` | Production Vercel URL. |
-| `netra-worker` | `NETRA_SERVICE_KIND` | `worker`. |
+| `netra-worker` | `NETRA_RUNTIME_ROLE` | `worker`. |
 
 ### Vercel public variables
 
@@ -118,8 +118,7 @@ removed from Railway so they cannot override the target.
 | `VITE_DEPLOYMENT_PROFILE` | `hackathon-core` |
 | `VITE_SUPABASE_URL` | New target project API URL. |
 | `VITE_SUPABASE_ANON_KEY` | New target publishable key. |
-| `VITE_SUPABASE_REALTIME_ENABLED` | `0` |
-| `VITE_NETRA_FREE_PLAN_GUARD` | `1` |
+| Supabase database Realtime variable | Not present; Phase 5 removed all browser database-channel code. |
 | `VITE_DIRECT_UPLOAD_ENABLED` | `0` |
 | `VITE_MAX_UPLOAD_MB` | `25` |
 

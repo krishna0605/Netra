@@ -21,6 +21,17 @@ from common.audit import actor_from_request, visible_cases_for_actor
 
 
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SECRET_CONFIG_KEYS = {
+    "secret",
+    "password",
+    "token",
+    "apikey",
+    "authorization",
+    "clientsecret",
+    "accesstoken",
+    "refreshtoken",
+    "bearertoken",
+}
 
 
 def _enabled(request):
@@ -43,6 +54,31 @@ def _payload(request):
         return json.loads(request.body.decode("utf-8")) if request.body else {}
     except (UnicodeDecodeError, ValueError):
         return None
+
+
+def _config_is_safe(config) -> bool:
+    if not isinstance(config, dict):
+        return False
+    try:
+        encoded = json.dumps(config, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError):
+        return False
+    if len(encoded) > 16 * 1024:
+        return False
+
+    def contains_secret(value) -> bool:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if normalized_key in _SECRET_CONFIG_KEYS or contains_secret(nested):
+                    return True
+        elif isinstance(value, list):
+            return any(contains_secret(item) for item in value)
+        return False
+
+    if contains_secret(config):
+        return False
+    return True
 
 
 def _admin_error(request, problem: AdministrationProblem):
@@ -101,6 +137,8 @@ def connections(request):
     if not name or len(name) > 160:
         return api_error(request, "invalid_integration_name", "A bounded system name is required.", status=400)
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    if not _config_is_safe(config):
+        return api_error(request, "secret_not_accepted", "Integration configuration must be bounded and contain no credentials.", status=400)
     url = str(config.get("url") or "").strip()
     if url:
         try:
@@ -131,6 +169,8 @@ def connection_detail(request, integration_id):
     if payload is None or "secret" in payload:
         return api_error(request, "secret_not_accepted", "Use the dedicated credential endpoint.", status=400)
     config = payload.get("config") if isinstance(payload.get("config"), dict) else connection.config
+    if not _config_is_safe(config):
+        return api_error(request, "secret_not_accepted", "Integration configuration must be bounded and contain no credentials.", status=400)
     if config.get("url"):
         try:
             validate_webhook_url(str(config["url"]))

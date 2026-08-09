@@ -2,10 +2,12 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.forensics.models import WorkerHeartbeat
+from common.kafka import publish_event
 from common.worker_capacity import CAPACITY_CACHE_KEY, compatible_analysis_worker_available
 
 
@@ -19,6 +21,9 @@ from common.worker_capacity import CAPACITY_CACHE_KEY, compatible_analysis_worke
     NETRA_DEV_ROLE_HEADERS=True,
 )
 class ProcessingTopologyTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     @staticmethod
     def _details():
         return {
@@ -76,3 +81,8 @@ class ProcessingTopologyTests(TestCase):
         from apps.forensics import views
 
         self.assertFalse(hasattr(views, "analyze_pcap"))
+
+    @patch("common.kafka._get_producer")
+    def test_postgres_row_lock_topology_never_probes_legacy_kafka(self, get_producer):
+        self.assertTrue(publish_event("netra.analysis.finalize", {"jobId": "synthetic-job"}))
+        get_producer.assert_not_called()

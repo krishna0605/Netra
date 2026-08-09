@@ -34,15 +34,23 @@ class ValidatedWebhook:
 
 
 def _normalize_host(hostname: str) -> str:
-    return hostname.rstrip(".").encode("idna").decode("ascii").lower()
+    return hostname.encode("idna").decode("ascii").lower()
 
 
 def _allowed_hosts() -> set[str]:
-    return {
-        _normalize_host(value.strip())
-        for value in getattr(settings, "NETRA_WEBHOOK_ALLOWED_HOSTS", [])
-        if value.strip()
-    }
+    approved: set[str] = set()
+    for value in getattr(settings, "NETRA_WEBHOOK_ALLOWED_HOSTS", []):
+        candidate = value.strip()
+        if not candidate or candidate.endswith("."):
+            continue
+        try:
+            normalized = _normalize_host(candidate)
+            ipaddress.ip_address(normalized)
+        except UnicodeError:
+            continue
+        except ValueError:
+            approved.add(normalized)
+    return approved
 
 
 def _safe_address(value: str) -> bool:
@@ -60,8 +68,11 @@ def _safe_address(value: str) -> bool:
 
 
 def validate_webhook_url(url: str) -> ValidatedWebhook:
+    raw_url = (url or "").strip()
+    if len(raw_url) > 2048 or any(ord(character) < 32 for character in raw_url):
+        raise WebhookDeliveryProblem("webhook_destination_not_allowed", "The webhook destination is invalid.")
     try:
-        parsed = urlsplit((url or "").strip())
+        parsed = urlsplit(raw_url)
         hostname = _normalize_host(parsed.hostname or "")
         port = parsed.port
     except (UnicodeError, ValueError) as exc:
@@ -72,10 +83,17 @@ def validate_webhook_url(url: str) -> ValidatedWebhook:
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment
+        or hostname.endswith(".")
         or port not in (None, 443)
         or hostname not in _allowed_hosts()
     ):
         raise WebhookDeliveryProblem("webhook_destination_not_allowed", "The webhook destination is not approved.")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise WebhookDeliveryProblem("webhook_destination_not_allowed", "IP-literal webhook destinations are not approved.")
     try:
         records = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
     except OSError as exc:
@@ -96,14 +114,18 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
     def connect(self):
         raw = socket.create_connection((self._address, 443), self.timeout)
-        raw.settimeout(settings.NETRA_WEBHOOK_READ_TIMEOUT_SECONDS)
-        self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+        try:
+            raw.settimeout(settings.NETRA_WEBHOOK_READ_TIMEOUT_SECONDS)
+            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+        except Exception:
+            raw.close()
+            raise
 
 
 def queue_delivery(*, integration, case, delivery_type: str, payload: dict, idempotency_key: str) -> tuple[IntegrationDelivery, bool]:
     if len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > settings.NETRA_WEBHOOK_REQUEST_MAX_BYTES:
         raise WebhookDeliveryProblem("webhook_payload_too_large", "The webhook payload exceeds the configured limit.")
-    return IntegrationDelivery.objects.get_or_create(
+    delivery, created = IntegrationDelivery.objects.get_or_create(
         idempotency_key=idempotency_key,
         defaults={
             "integration": integration,
@@ -115,15 +137,27 @@ def queue_delivery(*, integration, case, delivery_type: str, payload: dict, idem
             "next_attempt_at": timezone.now(),
         },
     )
+    if not created and (
+        delivery.integration_id != integration.pk
+        or delivery.case_id != (case.pk if case else None)
+        or delivery.delivery_type != delivery_type
+        or delivery.payload_json != payload
+    ):
+        raise WebhookDeliveryProblem("idempotency_conflict", "The idempotency key belongs to a different delivery operation.")
+    return delivery, created
 
 
 @transaction.atomic
 def claim_next_delivery(worker_id: str) -> IntegrationDelivery | None:
     now = timezone.now()
     delivery = (
-        IntegrationDelivery.objects.select_for_update(skip_locked=True)
+        IntegrationDelivery.objects.select_for_update(skip_locked=True, of=("self",))
         .select_related("integration", "integration__credential", "case")
-        .filter(result__in=["queued", "retry_wait"], attempt_count__lt=F("max_attempts"))
+        .filter(
+            Q(result__in=["queued", "retry_wait"])
+            | Q(result="running", lease_expires_at__lte=now)
+        )
+        .filter(attempt_count__lt=F("max_attempts"))
         .filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now))
         .order_by("created_at")
         .first()
@@ -143,20 +177,23 @@ def process_delivery(delivery: IntegrationDelivery) -> IntegrationDelivery:
     connection = delivery.integration
     url = str(connection.config.get("url") or "")
     body = json.dumps(delivery.payload_json, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    secret = read_integration_secret(connection)
-    signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest() if secret else ""
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "Netra/phase5",
-        "Idempotency-Key": delivery.idempotency_key or str(delivery.pk),
-    }
-    if signature:
-        headers["X-Netra-Signature"] = signature
     try:
-        target = validate_webhook_url(url)
+        secret = read_integration_secret(connection)
+        if not secret:
+            raise WebhookDeliveryProblem("webhook_credential_required", "The integration credential is not configured.")
+        signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Netra/phase5",
+            "Idempotency-Key": delivery.idempotency_key or str(delivery.pk),
+            "X-Netra-Signature": signature,
+        }
+        initial_target = validate_webhook_url(url)
         # Re-resolve immediately before the pinned connection. A changed or
         # unsafe answer fails before any socket is opened.
         target = validate_webhook_url(url)
+        if target.addresses != initial_target.addresses:
+            raise WebhookDeliveryProblem("webhook_dns_rebinding", "The webhook DNS answer changed before connection.")
         connection_http = _PinnedHTTPSConnection(target.hostname, target.addresses[0])
         try:
             connection_http.request("POST", target.path, body=body, headers=headers)

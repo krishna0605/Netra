@@ -147,15 +147,26 @@ class AnalysisCaseBoundaryTests(TestCase):
             "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/nodes/<str:node_id>",
             "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/attack-path",
         }
+        expected_feature_routes = {
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/references/<str:kind>",
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/search",
+        }
+        expected_integration_routes = {
+            "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/integrations/<str:integration_id>/alerts",
+        }
         canonical_patterns = {
             str(pattern.pattern)
             for pattern in api_urlpatterns
             if "/analysis/jobs/" in str(pattern.pattern)
         }
-        self.assertEqual(canonical_patterns, expected_canonical)
+        self.assertEqual(canonical_patterns, expected_canonical | expected_feature_routes | expected_integration_routes)
         for pattern in api_urlpatterns:
             if str(pattern.pattern) in expected_canonical:
                 self.assertEqual(pattern.callback.__module__, "apps.forensics.api.analysis")
+            elif str(pattern.pattern) in expected_feature_routes:
+                self.assertEqual(pattern.callback.__module__, "apps.forensics.api.features")
+            elif str(pattern.pattern) in expected_integration_routes:
+                self.assertEqual(pattern.callback.__module__, "apps.forensics.api.integrations")
 
     def test_canonical_read_routes_reject_non_get_methods(self):
         path = f"{self._prefix(self.alice_case, self.alice_job)}/packets"

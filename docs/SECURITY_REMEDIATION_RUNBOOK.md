@@ -233,3 +233,65 @@ NETRA_SYNC_FALLBACK_ENABLED=0
 ```
 
 The API must return `503 analysis_capacity_unavailable` before durable PCAP promotion when no recent compatible worker exists. Parser errors are job failures with stable codes; raw stderr and capture contents never enter client responses. See `PARSER_THREAT_MODEL.md`, `WORKER_OPERATIONS_RUNBOOK.md`, and `WORKER_IMAGE_SUPPLY_CHAIN.md`.
+
+## Phase 5 local verification
+
+Phase 5 adds migration `0016_analysis_references_and_integration_links`, two public tables, durable structured imports/references/integration links, encrypted integration credentials, SSRF-resistant queued webhooks, bounded Django SSE, and scoped search/capture controls. It remains local-only.
+
+```mermaid
+flowchart LR
+    CLIENT["Authenticated client"] --> SCOPE["Organization + workspace + job scope"]
+    SCOPE --> DB["53 protected public tables"]
+    DB --> WORKER["PostgreSQL row-locked worker"]
+    DB --> SSE["Five-minute bounded SSE"]
+    WORKER --> WEBHOOK["Pinned allowlisted HTTPS delivery"]
+    SCOPE --> SEARCH["Scoped Postgres search"]
+```
+
+Run the complete local suite without any cloud database variable:
+
+```powershell
+Set-Location backend
+$env:NETRA_TEST_SQLITE = '1'
+$env:NETRA_TEST_POSTGRES = '0'
+$env:Path = 'C:\Program Files\Wireshark;' + $env:Path
+$env:PYTHONPATH = 'C:\Users\ADMIN\Desktop\hackthon\ml-services\anomaly-engine'
+Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:SUPABASE_POOLER_DATABASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:SUPABASE_DIRECT_DATABASE_URL -ErrorAction SilentlyContinue
+python manage.py test apps.forensics.tests
+python manage.py makemigrations --check --dry-run
+python manage.py check
+```
+
+Rehearse PostgreSQL locking and migration behavior only with the disposable local container:
+
+```powershell
+Set-Location ..
+docker compose -f docker-compose.test-postgres.yml up -d --wait
+Set-Location backend
+$env:NETRA_TEST_POSTGRES = '1'
+$env:NETRA_TEST_SQLITE = '0'
+$env:POSTGRES_DB = 'netra_test'
+$env:POSTGRES_USER = 'netra_test'
+$env:POSTGRES_PASSWORD = 'netra_test_local_only'
+$env:POSTGRES_HOST = '127.0.0.1'
+$env:POSTGRES_PORT = '55432'
+python manage.py test apps.forensics.tests.test_postgres_concurrency apps.forensics.tests.test_feature_contracts apps.forensics.tests.test_integration_delivery apps.forensics.tests.test_phase_five_schema
+Set-Location ..
+docker compose -f docker-compose.test-postgres.yml down
+```
+
+Hosted defaults remain conservative:
+
+```text
+NETRA_REALTIME_PROVIDER=sse
+NETRA_SEARCH_PROVIDER=postgres
+NETRA_ENABLE_STRUCTURED_IMPORTS=0
+NETRA_ENABLE_INTEGRATIONS=0
+NETRA_WEBHOOK_ALLOWED_HOSTS=
+```
+
+Enable integrations only after exact hostnames are approved and each organization-scoped connection receives an encrypted credential through the AAL2 endpoint. There is no shared webhook signing-secret variable. Never put integration, database, evidence, custody, sensor, or Supabase secret keys in Vercel.
+
+Do not apply migrations 0014–0016, run imports, activate integrations, or open SSE against production during this local phase. The production application remains subject to its separate 0.75 GB migration ceiling and 5 GB uncached Supabase Free-plan operating ceiling.

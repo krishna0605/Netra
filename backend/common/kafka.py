@@ -52,7 +52,13 @@ def _get_producer():
 
 
 def publish_event(topic: str, payload: dict[str, Any], key: str | None = None) -> bool:
-    if getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka") == "supabase-pgmq":
+    provider = getattr(settings, "NETRA_QUEUE_PROVIDER", "kafka")
+    if provider == "postgres-row-lock":
+        # PostgreSQL job rows and OperationalEvent records are the durable
+        # production contracts. Do not probe a legacy Kafka broker merely to
+        # emit a best-effort duplicate notification.
+        return True
+    if provider == "supabase-pgmq":
         return publish_supabase_queue(topic, payload, key=key)
     global _producer
     try:

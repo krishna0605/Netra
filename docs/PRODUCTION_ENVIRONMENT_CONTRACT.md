@@ -25,6 +25,11 @@ Only the worker receives parser limits and required TShark/Zeek versions. `/app/
 | `NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS` | Storage consumers | Reviewed default `3600` |
 | `NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS` | Storage consumers | Reviewed default `60` |
 | `NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS` | Storage consumers | Reviewed default `30` |
+| `NETRA_REALTIME_PROVIDER` | API + worker | `sse`; browser database Realtime is not compiled into the frontend |
+| `NETRA_SEARCH_PROVIDER` | API + worker | `postgres` for the Free/Hobby profile |
+| `NETRA_ENABLE_STRUCTURED_IMPORTS` | API + worker | `0` until the 25 MiB import workflow is explicitly approved |
+| `NETRA_ENABLE_INTEGRATIONS` | API + worker | `0` until outbound delivery is explicitly approved |
+| `NETRA_WEBHOOK_ALLOWED_HOSTS` | API + worker | Empty while disabled; otherwise exact comma-separated HTTPS hostnames |
 
 ### Railway API-only variables
 
@@ -35,6 +40,24 @@ Only the worker receives parser limits and required TShark/Zeek versions. `/app/
 | `NETRA_WORKER_CAPACITY_CACHE_SECONDS` | Reviewed default `10` |
 
 The API must not receive parser executable paths or parser resource-limit settings. It must start and pass imports when TShark, Zeek, tcpdump, and Scapy are absent.
+
+### API stream and webhook limits
+
+| Variable | Reviewed default | Scope |
+|---|---:|---|
+| `NETRA_RATE_LIMIT_SSE_USER_PER_MINUTE` | `12` | API only |
+| `NETRA_RATE_LIMIT_SSE_ORG_PER_MINUTE` | `60` | API only |
+| `NETRA_SSE_MAX_SECONDS` | `300` | API only |
+| `NETRA_SSE_HEARTBEAT_SECONDS` | `15` | API only |
+| `NETRA_SSE_POLL_SECONDS` | `5` | API only |
+| `NETRA_SSE_BATCH_SIZE` | `100` | API only |
+| `NETRA_WEBHOOK_CONNECT_TIMEOUT_SECONDS` | `3` | Worker only when integrations are enabled |
+| `NETRA_WEBHOOK_READ_TIMEOUT_SECONDS` | `5` | Worker only when integrations are enabled |
+| `NETRA_WEBHOOK_REQUEST_MAX_BYTES` | `262144` | Worker only when integrations are enabled |
+| `NETRA_WEBHOOK_RESPONSE_MAX_BYTES` | `32768` | Worker only when integrations are enabled |
+| `NETRA_WEBHOOK_MAX_ATTEMPTS` | `2` | Worker only when integrations are enabled |
+
+Webhook signing uses a versioned, encrypted credential belonging to one organization-scoped integration. There is no shared `NETRA_WEBHOOK_SIGNING_SECRET` variable. Credential creation or replacement requires an organization Admin with AAL2.
 
 ### Railway worker-only variables
 
@@ -57,7 +80,7 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 
 ## Vercel frontend
 
-Vercel receives only the public API URL, Supabase URL, publishable key, and safe feature flags. Database URLs, service-role/secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel.
+Vercel receives only the public API URL, Supabase URL, publishable key, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel. No `VITE_SUPABASE_REALTIME_ENABLED` variable exists after Phase 5.
 
 ## Local concurrency tests
 

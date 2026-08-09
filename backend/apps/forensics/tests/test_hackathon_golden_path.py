@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import struct
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -10,8 +12,6 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
-from scapy.all import DNS, DNSQR, Ether, IP, TCP, UDP, PcapNgWriter, PcapWriter
-
 from apps.forensics.models import Case, ProcessingJob, UserProfile, WorkerHeartbeat
 from apps.forensics.tests.factories import netra_organization
 from common.async_pipeline import process_claimed_job
@@ -73,29 +73,64 @@ class HackathonGoldenPathTests(TestCase):
         )
 
     @staticmethod
-    def _packets():
-        packets = [
-            Ether() / IP(src="10.10.1.5", dst="192.0.2.10") / TCP(sport=41000, dport=22, flags="S"),
-            Ether() / IP(src="10.10.1.5", dst="8.8.8.8") / UDP(sport=53000, dport=53) / DNS(rd=1, qd=DNSQR(qname="netra.example")),
-            Ether() / IP(src="10.10.1.6", dst="198.51.100.20") / TCP(sport=42000, dport=443, flags="S"),
+    def _packet(source: str, destination: str, source_port: int, destination_port: int, protocol: int) -> bytes:
+        if protocol == 6:
+            transport = struct.pack("!HHIIHHHH", source_port, destination_port, 0, 0, (5 << 12) | 0x002, 8192, 0, 0)
+        else:
+            transport = struct.pack("!HHHH", source_port, destination_port, 8, 0)
+        ip_header = struct.pack(
+            "!BBHHHBBH4s4s",
+            0x45,
+            0,
+            20 + len(transport),
+            1,
+            0,
+            64,
+            protocol,
+            0,
+            ipaddress.ip_address(source).packed,
+            ipaddress.ip_address(destination).packed,
+        )
+        ethernet = bytes.fromhex("00112233445566778899aabb0800")
+        return ethernet + ip_header + transport
+
+    @classmethod
+    def _packets(cls):
+        return [
+            cls._packet("10.10.1.5", "192.0.2.10", 41000, 22, 6),
+            cls._packet("10.10.1.5", "8.8.8.8", 53000, 53, 17),
+            cls._packet("10.10.1.6", "198.51.100.20", 42000, 443, 6),
         ]
-        for index, packet in enumerate(packets):
-            packet.time = 1_720_000_000 + index
-        return packets
 
     def _capture_bytes(self, capture_format: str) -> bytes:
-        with tempfile.TemporaryDirectory(prefix="netra-fixture-") as folder:
-            path = Path(folder) / f"golden.{capture_format}"
-            if capture_format == "pcapng":
-                writer = PcapNgWriter(str(path))
-            else:
-                writer = PcapWriter(str(path), sync=True)
-            try:
-                for packet in self._packets():
-                    writer.write(packet)
-            finally:
-                writer.close()
-            return path.read_bytes()
+        packets = self._packets()
+        if capture_format == "pcap":
+            output = bytearray(struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+            for index, packet in enumerate(packets):
+                output.extend(struct.pack("<IIII", 1_720_000_000 + index, 0, len(packet), len(packet)))
+                output.extend(packet)
+            return bytes(output)
+        output = bytearray(struct.pack("<IIIHHqI", 0x0A0D0D0A, 28, 0x1A2B3C4D, 1, 0, -1, 28))
+        output.extend(struct.pack("<IIHHII", 1, 20, 1, 0, 65535, 20))
+        for index, packet in enumerate(packets):
+            timestamp = (1_720_000_000 + index) * 1_000_000
+            padded = packet + (b"\x00" * ((4 - len(packet) % 4) % 4))
+            block_length = 32 + len(padded)
+            output.extend(
+                struct.pack(
+                    "<IIIIIII",
+                    6,
+                    block_length,
+                    0,
+                    timestamp >> 32,
+                    timestamp & 0xFFFFFFFF,
+                    len(packet),
+                    len(packet),
+                )
+            )
+            output.extend(padded)
+            output.extend(struct.pack("<I", block_length))
+        return bytes(output)
 
     @patch("apps.forensics.views.publish_event", return_value=True)
     def test_real_pcap_upload_filters_ml_persistence_and_pdf_report(self, _publish):

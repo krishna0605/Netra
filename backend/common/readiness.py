@@ -209,7 +209,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
             "database-realtime-disabled",
             getattr(settings, "NETRA_REALTIME_PROVIDER", "") != "supabase",
             "Browser-facing Supabase Realtime publication is disabled.",
-            "Set NETRA_REALTIME_PROVIDER=sse and VITE_SUPABASE_REALTIME_ENABLED=0.",
+            "Set NETRA_REALTIME_PROVIDER=sse; the frontend contains no database Realtime client.",
             required=True,
         ),
         _deployment_check(
@@ -233,7 +233,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
             "Restore the persistent cache volume or permissions before evidence operations resume.",
             required=True,
         ),
-        _deployment_check("service-role-backend", bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")), "Backend service-role key is configured.", "Set SUPABASE_SERVICE_ROLE_KEY only on the backend.", required=True),
+        _deployment_check("service-role-backend", bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")), "Backend Supabase secret key is configured.", "Set SUPABASE_SECRET_KEY only on the backend.", required=True),
         _deployment_check("dev-role-headers-disabled", not getattr(settings, "NETRA_DEV_ROLE_HEADERS", False), "Development role headers are disabled.", "Set NETRA_DEV_ROLE_HEADERS=0.", required=True),
         _deployment_check(
             "evidence-key-non-default",
@@ -243,7 +243,6 @@ def deployment_readiness_payload() -> dict[str, Any]:
             required=True,
         ),
         _deployment_check("sensor-key-set", bool(getattr(settings, "NETRA_SENSOR_SHARED_KEY", "")) and settings.NETRA_SENSOR_SHARED_KEY != "netra-phase5-local-sensor-key", "Sensor shared key is non-default.", "Set a random NETRA_SENSOR_SHARED_KEY.", required=False),
-        _deployment_check("webhook-secret-set", bool(getattr(settings, "NETRA_WEBHOOK_SIGNING_SECRET", "")), "Webhook signing secret is configured.", "Set NETRA_WEBHOOK_SIGNING_SECRET for SIEM delivery signing.", required=False),
         _deployment_check(
             "queue-provider",
             getattr(settings, "NETRA_QUEUE_PROVIDER", "") == "postgres-row-lock",

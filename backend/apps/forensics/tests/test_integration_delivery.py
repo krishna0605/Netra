@@ -1,13 +1,15 @@
 import io
 import socket
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import IntegrationConnection, IntegrationCredential, UserProfile
+from apps.forensics.models import IntegrationConnection, IntegrationCredential, IntegrationDelivery, UserProfile
 from apps.forensics.services.integration_credentials import read_integration_secret, store_integration_secret
 from apps.forensics.services.webhook_delivery import (
     ValidatedWebhook,
@@ -39,7 +41,15 @@ class WebhookDestinationTests(SimpleTestCase):
             "https://user@hooks.example.test/netra",
             "https://hooks.example.test:8443/netra",
             "https://evil.example.test/netra",
+            "https://hooks.example.test./netra",
+            "https://hooks.example.test/netra#fragment",
         ):
+            with self.assertRaises(WebhookDeliveryProblem, msg=url):
+                validate_webhook_url(url)
+
+    @override_settings(NETRA_WEBHOOK_ALLOWED_HOSTS=["127.0.0.1", "::1"])
+    def test_ip_literal_hosts_are_rejected_even_if_misconfigured_in_allowlist(self):
+        for url in ("https://127.0.0.1/netra", "https://[::1]/netra"):
             with self.assertRaises(WebhookDeliveryProblem, msg=url):
                 validate_webhook_url(url)
 
@@ -114,6 +124,16 @@ class IntegrationCredentialTests(TestCase):
         self.assertEqual(credential.secret_envelope, {})
         self.assertIn("PLAN ONLY", output.getvalue())
 
+    def test_configuration_rejects_nested_credentials(self):
+        response = self.client.post(
+            "/api/integrations",
+            data={"systemName": "Unsafe config", "config": {"headers": [{"client-secret": "secret"}]}},
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "secret_not_accepted")
+
     @patch("apps.forensics.services.webhook_delivery.validate_webhook_url")
     @patch("apps.forensics.services.webhook_delivery._PinnedHTTPSConnection")
     def test_durable_worker_claims_and_completes_one_delivery(self, connection_class, validate):
@@ -135,3 +155,61 @@ class IntegrationCredentialTests(TestCase):
         completed = process_delivery(claimed)
         self.assertEqual(completed.result, "success")
         self.assertEqual(validate.call_count, 2)
+
+    def test_idempotency_key_conflict_cannot_rebind_a_delivery(self):
+        first, created = queue_delivery(
+            integration=self.connection,
+            case=None,
+            delivery_type="test",
+            payload={"source": "netra", "value": 1},
+            idempotency_key="delivery-conflict-1",
+        )
+        self.assertTrue(created)
+        with self.assertRaisesRegex(WebhookDeliveryProblem, "different delivery operation"):
+            queue_delivery(
+                integration=self.connection,
+                case=None,
+                delivery_type="test",
+                payload={"source": "netra", "value": 2},
+                idempotency_key="delivery-conflict-1",
+            )
+        self.assertEqual(IntegrationDelivery.objects.get(pk=first.pk).payload_json["value"], 1)
+
+    def test_expired_worker_lease_is_reclaimed_once(self):
+        delivery, _ = queue_delivery(
+            integration=self.connection,
+            case=None,
+            delivery_type="test",
+            payload={"source": "netra"},
+            idempotency_key="delivery-expired-lease",
+        )
+        delivery.result = "running"
+        delivery.attempt_count = 0
+        delivery.lease_owner = "dead-worker"
+        delivery.lease_expires_at = timezone.now() - timedelta(seconds=1)
+        delivery.save()
+        claimed = claim_next_delivery("replacement-worker")
+        self.assertEqual(claimed.pk, delivery.pk)
+        self.assertEqual(claimed.lease_owner, "replacement-worker")
+        self.assertEqual(claimed.attempt_count, 1)
+
+    @patch("apps.forensics.services.webhook_delivery._PinnedHTTPSConnection")
+    @patch("apps.forensics.services.webhook_delivery.validate_webhook_url")
+    def test_changed_dns_answer_is_rejected_before_socket_connect(self, validate, connection_class):
+        store_integration_secret(self.connection, "delivery-secret")
+        validate.side_effect = [
+            ValidatedWebhook("hooks.example.test", "/netra", ("93.184.216.34",)),
+            ValidatedWebhook("hooks.example.test", "/netra", ("93.184.216.35",)),
+        ]
+        delivery, _ = queue_delivery(
+            integration=self.connection,
+            case=None,
+            delivery_type="test",
+            payload={"source": "netra"},
+            idempotency_key="delivery-rebinding",
+        )
+        delivery.attempt_count = 1
+        delivery.save(update_fields=["attempt_count", "updated_at"])
+        completed = process_delivery(delivery)
+        self.assertEqual(completed.error_code, "webhook_dns_rebinding")
+        connection_class.assert_not_called()

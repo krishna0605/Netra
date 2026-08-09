@@ -53,8 +53,7 @@ The production configuration must retain:
 NETRA_REALTIME_PROVIDER=sse
 NETRA_STORAGE_DEEP_HEALTHCHECK=0
 NETRA_FREE_PLAN_GUARD=1
-VITE_SUPABASE_REALTIME_ENABLED=0
-VITE_NETRA_FREE_PLAN_GUARD=1
+# No VITE Supabase Realtime flag exists; database channel code was removed in Phase 5.
 ```
 
 Railway's ordinary pre-deploy hook runs Django migrations only. Run
