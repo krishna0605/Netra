@@ -19,7 +19,7 @@ import {
   UploadCloud,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { BrowserRouter as Router, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -1498,10 +1498,11 @@ function NetraProvider({ children }: { children: ReactNode }) {
 function App() {
   return (
     <AuthProvider>
-      <TooltipProvider>
-        <NetraProvider>
-          <div className="app-theme">
-            <Router>
+      <MotionConfig reducedMotion="user">
+        <TooltipProvider>
+          <NetraProvider>
+            <div className="app-theme">
+              <Router>
             <Toaster position="top-right" />
             <Routes>
               <Route path="/" element={<PublicHomePage languageControl={<LanguageControl />} />} />
@@ -1521,10 +1522,11 @@ function App() {
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
               <Route path="*" element={<PublicNotFoundPage languageControl={<LanguageControl />} />} />
             </Routes>
-            </Router>
-          </div>
-        </NetraProvider>
-      </TooltipProvider>
+              </Router>
+            </div>
+          </NetraProvider>
+        </TooltipProvider>
+      </MotionConfig>
     </AuthProvider>
   );
 }
@@ -4902,10 +4904,18 @@ function AccessLogTable() {
 }
 
 function PageFrame({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  const location = useLocation();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    document.title = `${title} | Netra`;
+    headingRef.current?.focus({ preventScroll: true });
+  }, [location.pathname, title]);
+
   return (
-    <motion.main initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 max-w-full overflow-x-hidden flex flex-col gap-5">
+    <motion.main id="main-content" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 max-w-full overflow-x-hidden flex flex-col gap-5">
       <div>
-        <h1 className="text-3xl font-black tracking-normal text-strong">{title}</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-black tracking-normal text-strong">{title}</h1>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{description}</p>
       </div>
       {children}
@@ -4982,7 +4992,7 @@ function TimelineList({ record }: { record: CaseRecord }) {
 }
 
 function ChartPanel({ title, children }: { title: string; children: ReactNode }) {
-  return <div className="min-w-0 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4"><h3 className="mb-3 text-sm font-bold text-strong">{title}</h3>{children}</div>;
+  return <section aria-label={`${title} chart`} className="min-w-0 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface-muted)] p-4"><h3 className="mb-3 text-sm font-bold text-strong">{title}</h3>{children}<p className="sr-only">A visual summary of {title}. Equivalent values are available in the associated case tables.</p></section>;
 }
 
 function MiniBarList({ rows }: { rows: { name: string; value: number }[] }) {
@@ -5011,7 +5021,8 @@ function AlertTable({ alerts: rows, liveId, compact = false }: { alerts: AlertRe
       {!compact && <div className="p-5 pb-0"><h3 className="text-lg font-black text-strong">{t("alertQueue")}</h3><p className="text-sm text-muted">{t("alertQueueBody")}</p></div>}
       <div className="overflow-x-auto p-5">
         <table className={cn("w-full text-left text-sm", compact && "min-w-[760px]")}>
-          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th className="py-3 pr-4">{t("severity")}</th><th className="pr-4">{t("class")}</th><th className="pr-4">{t("type")}</th><th className="pr-4">{t("source")}</th><th className="pr-4">{t("destination")}</th><th className="pr-4">{t("protocol")}</th><th className="pr-4">{t("confidence")}</th><th>{t("status")}</th></tr></thead>
+          <caption className="sr-only">Analysis alerts with severity, classification, endpoints, confidence, and review status</caption>
+          <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th scope="col" className="py-3 pr-4">{t("severity")}</th><th scope="col" className="pr-4">{t("class")}</th><th scope="col" className="pr-4">{t("type")}</th><th scope="col" className="pr-4">{t("source")}</th><th scope="col" className="pr-4">{t("destination")}</th><th scope="col" className="pr-4">{t("protocol")}</th><th scope="col" className="pr-4">{t("confidence")}</th><th scope="col">{t("status")}</th></tr></thead>
           <tbody>
             <AnimatePresence>{rows.map((alert) => (
               <motion.tr key={alert.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn("border-b border-[var(--border)] hover:bg-[var(--surface-muted)]", liveId === alert.id && "orange-pulse bg-[var(--accent-soft)]")}>

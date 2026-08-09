@@ -186,7 +186,7 @@ export default function AdminUsersPage() {
               <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th scope="col" className="py-3">User</th><th scope="col">Role</th><th scope="col">Account</th><th scope="col">Invitation</th><th scope="col">MFA</th><th scope="col">Last sign in</th><th scope="col">Last activity</th><th scope="col">Actions</th></tr></thead>
               <tbody>{loading ? <tr><td colSpan={8} className="py-8 text-center text-muted">Loading organization users…</td></tr> : users.map((user) => (
                 <tr key={user.id} className="border-b border-[var(--border)] align-top">
-                  <td className="py-4 pr-4"><strong className="block text-strong">{user.name}</strong><span className="text-xs text-muted">{user.email}</span></td>
+                  <th scope="row" className="py-4 pr-4 text-left font-normal"><strong className="block text-strong">{user.name}</strong><span className="text-xs text-muted">{user.email}</span></th>
                   <td className="pr-4">{user.role === "Admin" ? <Badge>Admin</Badge> : <Select value={user.role} onValueChange={(role) => void updateUser(user, { role })}><SelectTrigger aria-label={`Role for ${user.email}`} className="min-w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Investigator">Investigator</SelectItem><SelectItem value="Analyst">Analyst</SelectItem><SelectItem value="Viewer">Viewer</SelectItem></SelectContent></Select>}</td>
                   <td><Badge variant={user.active ? "secondary" : "warning"}>{user.active ? user.authState : "inactive"}</Badge></td>
                   <td>{user.invitationState}</td><td>{user.mfaState}</td><td>{dateLabel(user.lastSignInAt)}</td><td>{dateLabel(user.lastActivityAt)}</td>

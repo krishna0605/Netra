@@ -16,8 +16,11 @@ function AppLoadingScreen() {
 
 export default function App() {
   return (
-    <Suspense fallback={<AppLoadingScreen />}>
-      <NetraConsole />
-    </Suspense>
+    <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <Suspense fallback={<AppLoadingScreen />}>
+        <NetraConsole />
+      </Suspense>
+    </>
   );
 }
