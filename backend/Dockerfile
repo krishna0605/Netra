@@ -21,8 +21,7 @@ RUN apt-get update \
     && ! perl -MSocket -e 1
 
 COPY backend/requirements.api.txt /app/backend/requirements.txt
-RUN python -m pip install --upgrade "pip==26.1.1" \
-    && python -m pip install -r /app/backend/requirements.txt
+RUN python -m pip install --require-hashes --only-binary=:all: -r /app/backend/requirements.txt
 
 COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine

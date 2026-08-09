@@ -1,0 +1,11 @@
+[tool.bandit]
+exclude_dirs = [
+  "backend/apps/forensics/tests",
+  "backend/apps/forensics/migrations",
+]
+skips = ["B101"]
+
+[tool.netra-dependencies]
+pip_tools_version = "7.5.3"
+python_lock_target = "3.13/linux"
+hashes_required = true

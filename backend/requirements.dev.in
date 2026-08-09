@@ -1,0 +1,6 @@
+-r requirements.api.in
+scapy==2.7.0
+pip-tools==7.5.3
+pip-audit==2.10.1
+bandit==1.9.4
+semgrep==1.172.0

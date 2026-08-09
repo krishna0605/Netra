@@ -1,0 +1,27 @@
+rules:
+  - id: netra-no-shell-true
+    message: Subprocess execution must never invoke a shell.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: netra-no-executable-deserialization
+    message: Executable pickle/joblib deserialization is prohibited in production code.
+    severity: ERROR
+    languages: [python]
+    paths:
+      exclude:
+        - backend/apps/forensics/tests/**
+        - backend/apps/forensics/migrations/**
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+      - pattern: joblib.load(...)
+
+  - id: netra-no-service-key-in-frontend
+    message: Backend secret names must not appear in frontend source.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-regex: "SUPABASE_(?:SECRET|SERVICE_ROLE)_KEY"

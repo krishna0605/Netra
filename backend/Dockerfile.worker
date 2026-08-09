@@ -51,8 +51,7 @@ RUN apt-get update \
 
 COPY --from=wireshark-builder /opt/wireshark /opt/wireshark
 COPY backend/requirements.worker.txt /app/backend/requirements.txt
-RUN python -m pip install --upgrade "pip==26.1.1" \
-    && python -m pip install -r /app/backend/requirements.txt
+RUN python -m pip install --require-hashes --only-binary=:all: -r /app/backend/requirements.txt
 
 COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
