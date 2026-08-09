@@ -13,7 +13,7 @@ from django.views.decorators.http import require_http_methods
 from apps.forensics.api.errors import analysis_not_found, api_error
 from apps.forensics.models import AnalysisReference, Case, ProcessingJob
 from apps.forensics.services.analysis_scope import AnalysisScopeProblem, find_analysis_row, resolve_analysis_scope
-from common.async_pipeline import queue_uploaded_evidence
+from common.job_admission import queue_uploaded_evidence
 from common.audit import actor_from_request, can, visible_cases_for_actor
 from common.evidence_normalization import normalize_evidence_upload
 from common.indexing import search_index

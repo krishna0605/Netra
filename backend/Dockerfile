@@ -4,7 +4,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app/ml-services/anomaly-engine \
     NETRA_STORAGE_ROOT=/app/storage \
     NETRA_TEMP_ROOT=/app/.netra-tmp
 
@@ -24,7 +23,6 @@ COPY backend/requirements.api.txt /app/backend/requirements.txt
 RUN python -m pip install --require-hashes --only-binary=:all: -r /app/backend/requirements.txt
 
 COPY --chown=netra:netra backend /app/backend
-COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
 
 RUN mkdir -p /app/storage /app/.netra-tmp \
     && chown -R netra:netra /app \

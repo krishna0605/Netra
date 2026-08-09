@@ -27,7 +27,7 @@ from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_ca
 from common.analysis_contract import empty_analysis
 from common.bpf import validate_bpf_syntax
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact, report_analysis_from_snapshot
-from common.async_pipeline import queue_uploaded_evidence
+from common.job_admission import queue_uploaded_evidence
 from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case, workspace_status_payload
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules

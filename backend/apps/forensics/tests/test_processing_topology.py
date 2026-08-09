@@ -1,4 +1,6 @@
+import ast
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -81,6 +83,36 @@ class ProcessingTopologyTests(TestCase):
         from apps.forensics import views
 
         self.assertFalse(hasattr(views, "analyze_pcap"))
+
+    def test_api_sources_do_not_import_worker_pipeline_or_parser_modules(self):
+        api_root = Path(__file__).resolve().parents[1] / "api"
+        forbidden = (
+            "common.async_pipeline",
+            "common.analysis",
+            "common.parser_runner",
+            "common.structured_analysis",
+            "netra_ml",
+            "scapy",
+        )
+        for source_path in api_root.glob("*.py"):
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.update(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.add(node.module)
+            for module_name in forbidden:
+                self.assertFalse(
+                    any(name == module_name or name.startswith(f"{module_name}.") for name in imported),
+                    f"{source_path.name} imports {module_name}",
+                )
+
+    def test_api_image_does_not_copy_or_expose_ml_service(self):
+        dockerfile = Path(__file__).resolve().parents[3] / "Dockerfile"
+        source = dockerfile.read_text(encoding="utf-8")
+        self.assertNotIn("ml-services/anomaly-engine", source)
+        self.assertNotIn("PYTHONPATH=/app/ml-services", source)
 
     @patch("common.kafka._get_producer")
     def test_postgres_row_lock_topology_never_probes_legacy_kafka(self, get_producer):
