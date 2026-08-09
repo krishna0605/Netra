@@ -20,6 +20,23 @@ NETRA_FREE_PLAN_GUARD = os.getenv(
     "NETRA_FREE_PLAN_GUARD",
     "1" if NETRA_DEPLOYMENT_PROFILE == "hackathon-core" else "0",
 ) == "1"
+NETRA_DEPLOYMENT_ENV = os.getenv("NETRA_DEPLOYMENT_ENV", "local").lower()
+
+
+def _reject_conflicting_alias(legacy_name: str, canonical_name: str, canonical_value: str) -> None:
+    """Fail closed when a retired deployment alias disagrees with its canonical variable.
+
+    Railway carried several pre-remediation aliases. Until every environment is
+    cleaned up, a stale alias that disagrees with the canonical variable must
+    abort startup rather than silently win or be silently ignored.
+    """
+    legacy_value = (os.getenv(legacy_name) or "").strip()
+    canonical = (canonical_value or "").strip()
+    if not legacy_value or not canonical:
+        return
+    if legacy_value != canonical:
+        raise RuntimeError(f"{legacy_name} conflicts with {canonical_name}; remove the retired alias")
+
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -68,6 +85,13 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+_reject_conflicting_alias("SUPABASE_POOLER_DATABASE_URL", "DATABASE_URL", DATABASE_URL or "")
+_reject_conflicting_alias("SUPABASE_DIRECT_DATABASE_URL", "DATABASE_URL", DATABASE_URL or "")
+# Transport policy is explicit so a disposable loopback CI service can run
+# without TLS while every hosted deployment keeps requiring it.
+NETRA_DATABASE_SSL_REQUIRED = os.getenv("NETRA_DATABASE_SSL_REQUIRED", "1") == "1"
+if NETRA_DEPLOYMENT_ENV == "production" and not NETRA_DATABASE_SSL_REQUIRED:
+    raise RuntimeError("NETRA_DATABASE_SSL_REQUIRED cannot be disabled when NETRA_DEPLOYMENT_ENV=production")
 DATABASE_CONN_MAX_AGE = int(os.getenv("DATABASE_CONN_MAX_AGE", "0" if os.getenv("NETRA_DATABASE_PROVIDER", "").lower() == "supabase" else "60"))
 NETRA_TEST_POSTGRES = os.getenv("NETRA_TEST_POSTGRES", "0") == "1"
 NETRA_TEST_SQLITE = not NETRA_TEST_POSTGRES and (
@@ -76,7 +100,7 @@ NETRA_TEST_SQLITE = not NETRA_TEST_POSTGRES and (
 if NETRA_TEST_SQLITE:
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "test.sqlite3"}}
 elif DATABASE_URL:
-    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=DATABASE_CONN_MAX_AGE, ssl_require=True)}
+    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=DATABASE_CONN_MAX_AGE, ssl_require=NETRA_DATABASE_SSL_REQUIRED)}
 else:
     DATABASES = {
         "default": {
@@ -124,6 +148,7 @@ SUPABASE_PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+_reject_conflicting_alias("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", SUPABASE_SECRET_KEY)
 NETRA_SUPABASE_JWT_MODE = os.getenv("NETRA_SUPABASE_JWT_MODE", "remote").strip().lower()
 if NETRA_SUPABASE_JWT_MODE not in {"remote", "asymmetric-jwks"}:
     raise RuntimeError("NETRA_SUPABASE_JWT_MODE must be remote or asymmetric-jwks")
@@ -155,6 +180,7 @@ if NETRA_RUNTIME_ROLE not in {"api", "worker"}:
 if _legacy_service_kind and _legacy_service_kind != NETRA_RUNTIME_ROLE:
     raise RuntimeError("NETRA_SERVICE_KIND conflicts with NETRA_RUNTIME_ROLE")
 NETRA_PROCESSING_MODE = os.getenv("NETRA_PROCESSING_MODE", "postgres-worker").strip().lower()
+_reject_conflicting_alias("NETRA_SUPABASE_PROCESSING_MODE", "NETRA_PROCESSING_MODE", NETRA_PROCESSING_MODE)
 NETRA_DEV_ROLE_HEADERS = os.getenv(
     "NETRA_DEV_ROLE_HEADERS",
     "1" if DEBUG and NETRA_DEPLOYMENT_PROFILE == "local" else "0",
@@ -294,7 +320,6 @@ NETRA_KAFKA_LAG_CRITICAL = int(os.getenv("NETRA_KAFKA_LAG_CRITICAL", "5000"))
 NETRA_DISK_WARNING_PERCENT = int(os.getenv("NETRA_DISK_WARNING_PERCENT", "80"))
 NETRA_DISK_CRITICAL_PERCENT = int(os.getenv("NETRA_DISK_CRITICAL_PERCENT", "90"))
 NETRA_FRONTEND_ORIGINS = os.getenv("NETRA_FRONTEND_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080").split(",")
-NETRA_DEPLOYMENT_ENV = os.getenv("NETRA_DEPLOYMENT_ENV", "local").lower()
 NETRA_PUBLIC_BASE_URL = os.getenv("NETRA_PUBLIC_BASE_URL", "http://localhost:8080")
 NETRA_REQUIRE_HTTPS = os.getenv("NETRA_REQUIRE_HTTPS", "0") == "1"
 NETRA_RELEASE_ID = os.getenv("NETRA_RELEASE_ID", "local-dev")

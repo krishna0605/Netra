@@ -71,7 +71,11 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/ml-services/anomaly-engine
           NETRA_TEST_POSTGRES: "1"
-          DATABASE_URL: postgresql://netra_test:netra_test_local_only@127.0.0.1:5432/netra_test?sslmode=disable
+          # Disposable loopback service container only. Hosted deployments keep
+          # the default NETRA_DATABASE_SSL_REQUIRED=1, and production refuses to
+          # start without it.
+          NETRA_DATABASE_SSL_REQUIRED: "0"
+          DATABASE_URL: postgresql://netra_test:netra_test_local_only@127.0.0.1:5432/netra_test
         run: >-
           python manage.py test
           apps.forensics.tests.test_postgres_concurrency

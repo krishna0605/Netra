@@ -15,6 +15,7 @@ Only the worker receives parser limits and required TShark/Zeek versions. `/app/
 | Variable | Scope | Contract |
 |---|---|---|
 | `NETRA_RELEASE_ID` | API + worker | Same immutable release identifier during normal operation |
+| `NETRA_DATABASE_SSL_REQUIRED` | API + worker | `1`. Startup aborts when `NETRA_DEPLOYMENT_ENV=production` and this is `0`. Only a disposable loopback CI service container may set `0` |
 | `NETRA_PROCESSING_MODE` | API + worker | `postgres-worker` in hosted environments |
 | `NETRA_QUEUE_PROVIDER` | API + worker | `postgres-row-lock` for analysis-job acquisition |
 | `NETRA_SYNC_FALLBACK_ENABLED` | API + worker | `0`; hosted synchronous PCAP analysis is forbidden |
@@ -105,6 +106,21 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 
 Do not configure a legacy JWT secret or any obsolete anonymous/service-role
 alias. The application never performs local HS256 verification.
+
+### Retired aliases
+
+Startup aborts when a retired alias is present **and disagrees** with its
+canonical variable. An alias that matches is tolerated only for the duration of
+the Phase 8 transition and must be deleted from Railway once the canonical
+deployment validates.
+
+| Retired alias | Canonical variable |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_SECRET_KEY` |
+| `SUPABASE_POOLER_DATABASE_URL` | `DATABASE_URL` |
+| `SUPABASE_DIRECT_DATABASE_URL` | `DATABASE_URL` |
+| `NETRA_SUPABASE_PROCESSING_MODE` | `NETRA_PROCESSING_MODE` |
+| `NETRA_SERVICE_KIND` | `NETRA_RUNTIME_ROLE` |
 
 The Auth Admin adapter uses the existing backend-only Supabase service-role/secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON.
 
