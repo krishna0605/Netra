@@ -63,4 +63,3 @@ class FileLock:
 
     def __exit__(self, *_exc):
         self.release()
-

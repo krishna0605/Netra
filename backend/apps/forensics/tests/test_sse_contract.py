@@ -73,4 +73,3 @@ class BoundedSseContractTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_event_cursor")
-

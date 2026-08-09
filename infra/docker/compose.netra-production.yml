@@ -22,7 +22,7 @@ x-production-env: &production-env
     NETRA_QUEUE_PROVIDER: postgres-row-lock
     NETRA_REALTIME_PROVIDER: ${NETRA_REALTIME_PROVIDER:-sse}
     NETRA_AUTH_PROVIDER: supabase
-    NETRA_ACCESS_MODE: supabase-auth
+    NETRA_ACCESS_MODE: bearer
     NETRA_DEV_ROLE_HEADERS: "0"
     NETRA_SEARCH_PROVIDER: postgres
     NETRA_PROCESSING_MODE: postgres-worker
@@ -68,7 +68,7 @@ services:
       context: ../..
       dockerfile: backend/Dockerfile
     <<: *production-env
-    command: sh -c "python manage.py migrate --noinput && python manage.py bootstrap_supabase && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${NETRA_GUNICORN_WORKERS:-2} --timeout ${NETRA_GUNICORN_TIMEOUT:-240}"
+    command: sh -c "python manage.py check --deploy && python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${NETRA_GUNICORN_WORKERS:-2} --timeout ${NETRA_GUNICORN_TIMEOUT:-240}"
     expose:
       - "8000"
     volumes:

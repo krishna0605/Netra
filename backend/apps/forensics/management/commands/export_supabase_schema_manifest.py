@@ -20,7 +20,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--output", default="-", help="Output JSON path, or '-' for stdout.")
-        parser.add_argument("--require-count", type=int, default=49, help="Fail unless this many application tables exist.")
+        parser.add_argument("--require-count", type=int, default=53, help="Fail unless this many application tables exist.")
 
     def handle(self, *args, **options):
         table_names = sorted(

@@ -99,4 +99,3 @@ def read_integration_secret(connection: IntegrationConnection) -> str:
         except Exception:
             continue
     raise RuntimeError("The integration credential could not be decrypted.")
-

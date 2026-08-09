@@ -96,4 +96,3 @@ def event_stream(request):
     response["X-RateLimit-Limit"] = str(limit.limit)
     response["X-RateLimit-Remaining"] = str(limit.remaining)
     return response
-
