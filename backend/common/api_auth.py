@@ -61,7 +61,7 @@ def _disabled_feature(path: str) -> str | None:
     feature_gates = (
         (("/api/capture/replay",), settings.NETRA_ENABLE_PCAP_REPLAY, "PCAP replay"),
         (
-            ("/api/capture/live", "/api/capture/interfaces", "/api/capture/log-import", "/api/sensors", "/api/sensor-groups", "/api/events", "/api/logs/import/zeek"),
+            ("/api/capture/live", "/api/capture/interfaces", "/api/capture/log-import", "/api/sensors", "/api/sensor-groups", "/api/logs/import/zeek"),
             settings.NETRA_ENABLE_SENSOR_CAPTURE,
             "Native sensor capture",
         ),
@@ -78,6 +78,8 @@ def _disabled_feature(path: str) -> str | None:
 def _required_permission(method: str, path: str) -> str | None:
     if path.rstrip("/") == "/api/auth/logout":
         return None
+    if method == "GET" and path.rstrip("/") == "/api/events/stream":
+        return "view"
     privileged_prefixes = (
         ("/api/admin", "manage_users"),
         ("/api/users", "manage_users"),

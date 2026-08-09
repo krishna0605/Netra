@@ -116,9 +116,11 @@ def capability_registry() -> dict[str, CapabilityDefinition]:
         ),
         "sse": _defined(
             "sse",
-            implemented=False,
-            enabled=False,
-            reason="The bounded authenticated SSE transport is not installed yet.",
+            implemented=True,
+            enabled=getattr(settings, "NETRA_REALTIME_PROVIDER", "sse") == "sse",
+            reason="Bounded authenticated Django SSE is available."
+            if getattr(settings, "NETRA_REALTIME_PROVIDER", "sse") == "sse"
+            else "Django SSE is not the selected realtime provider.",
         ),
         "postgres_search": _defined(
             "postgres_search",

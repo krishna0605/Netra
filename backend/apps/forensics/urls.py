@@ -4,6 +4,7 @@ from apps.forensics import views
 from apps.forensics.api import analysis as analysis_views
 from apps.forensics.api import features as feature_views
 from apps.forensics.api import integrations as integration_views
+from apps.forensics.api import events as event_views
 
 
 urlpatterns = [
@@ -111,7 +112,7 @@ urlpatterns = [
     path("capture-schedules/<str:schedule_id>/run-now", views.capture_schedule_run_now),
     path("capture-schedules/<str:schedule_id>/history", views.capture_schedule_history),
     path("events", views.operational_events),
-    path("events/stream", views.operational_event_stream),
+    path("events/stream", event_views.event_stream),
     path("logs/import/zeek", views.zeek_log_import),
     path("jobs/<str:job_id>/status", views.job_status),
     path("jobs/<str:job_id>/events", views.job_events),

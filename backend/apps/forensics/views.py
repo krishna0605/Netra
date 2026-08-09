@@ -14,7 +14,7 @@ from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import Exists, F, OuterRef, Prefetch, Q, Sum
-from django.http import FileResponse, Http404, HttpResponse, JsonResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -1914,38 +1914,9 @@ def operational_events(request):
 
 
 def operational_event_stream(request):
-    actor = actor_from_request(request)
-    organization_id = actor.organization_id
-    case_id = request.GET.get("caseId")
-    capture_job_id = request.GET.get("captureJobId")
-    try:
-        cursor = int(request.GET.get("after") or request.headers.get("Last-Event-ID") or 0)
-    except ValueError:
-        cursor = 0
+    from apps.forensics.api.events import event_stream
 
-    def generate():
-        nonlocal cursor
-        last_heartbeat = time.monotonic()
-        while True:
-            rows = OperationalEvent.objects.filter(organization_id=organization_id, id__gt=cursor).order_by("id")
-            if case_id:
-                rows = rows.filter(case_id=case_id)
-            if capture_job_id:
-                rows = rows.filter(capture_job_id=capture_job_id)
-            emitted = False
-            for row in rows[:100]:
-                emitted = True
-                cursor = row.id
-                yield f"id: {row.id}\nevent: {row.event_type}\ndata: {json.dumps(_operational_event_dict(row))}\n\n"
-            if not emitted and time.monotonic() - last_heartbeat >= 15:
-                last_heartbeat = time.monotonic()
-                yield ": heartbeat\n\n"
-            time.sleep(1)
-
-    response = StreamingHttpResponse(generate(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"
-    return response
+    return event_stream(request)
 
 
 def _operational_event_dict(row: OperationalEvent) -> dict:
