@@ -50,7 +50,7 @@ def _bounded_json(response) -> dict[str, Any]:
 
 
 def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SECRET_KEY:
         raise SupabaseAdminError("Supabase Auth administration is not configured.")
     base = settings.SUPABASE_URL.rstrip("/")
     url = f"{base}/auth/v1/{path.lstrip('/')}"
@@ -60,8 +60,8 @@ def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None =
         method=method,
         data=body,
         headers={
-            "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
-            "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": settings.SUPABASE_SECRET_KEY,
+            "Authorization": f"Bearer {settings.SUPABASE_SECRET_KEY}",
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "Netra-Auth-Admin/1",

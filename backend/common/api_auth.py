@@ -45,6 +45,17 @@ def _profile_not_provisioned() -> JsonResponse:
     )
 
 
+def _auth_unavailable() -> JsonResponse:
+    return JsonResponse(
+        {"error": "Authentication verification is temporarily unavailable.", "code": "auth_verification_unavailable"},
+        status=503,
+    )
+
+
+def _session_invalid() -> JsonResponse:
+    return JsonResponse({"error": "Session is invalid.", "code": "session_invalid"}, status=401)
+
+
 def _feature_disabled(feature: str) -> JsonResponse:
     return JsonResponse(
         {
@@ -133,6 +144,10 @@ class NetraApiAuthMiddleware:
 
         actor = actor_from_request(request)
         if not actor.authenticated:
+            if getattr(request, "netra_auth_error", "") == "auth_verification_unavailable":
+                return _auth_unavailable()
+            if getattr(request, "netra_auth_error", "") == "session_invalid":
+                return _session_invalid()
             return _authentication_error()
         if not actor.organization_id:
             return _profile_not_provisioned()
@@ -145,6 +160,10 @@ class NetraApiAuthMiddleware:
         actor = getattr(request, "netra_actor", None)
         if actor is None:
             return None
+
+        privileged_error = self._verify_privileged_session(request, actor)
+        if privileged_error:
+            return privileged_error
 
         disabled_feature = _disabled_feature(request.path.rstrip("/"))
         if disabled_feature:
@@ -173,6 +192,33 @@ class NetraApiAuthMiddleware:
         resource_case_id = self._resource_case_id(view_kwargs)
         if resource_case_id and not can_actor_access_case(actor, resource_case_id):
             return _not_found()
+        return None
+
+    @staticmethod
+    def _verify_privileged_session(request, actor):
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return None
+        path = request.path.rstrip("/")
+        privileged = path.startswith("/api/users") or path.startswith("/api/admin") or (
+            path.startswith("/api/integrations") and path.endswith("/credential")
+        )
+        if not privileged or settings.NETRA_AUTH_PROVIDER != "supabase" or settings.NETRA_SUPABASE_JWT_MODE != "asymmetric-jwks":
+            return None
+        token = getattr(request, "netra_supabase_bearer_token", "")
+        if not token or not actor.external_id:
+            return _session_invalid()
+        from common.jwt_verifier import SupabaseVerificationUnavailable
+        from common.supabase_auth import verify_privileged_supabase_session
+
+        try:
+            valid = verify_privileged_supabase_session(token, actor.external_id)
+        except SupabaseVerificationUnavailable:
+            return JsonResponse(
+                {"error": "Authentication provider is temporarily unavailable.", "code": "auth_provider_unavailable"},
+                status=503,
+            )
+        if not valid:
+            return _session_invalid()
         return None
 
     @staticmethod

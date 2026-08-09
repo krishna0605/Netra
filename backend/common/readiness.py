@@ -160,6 +160,11 @@ def audit_export_payload(case: Case | None = None, *, organization_id=None) -> d
 
 def deployment_readiness_payload() -> dict[str, Any]:
     cache_status = storage_cache_status_payload()
+    from common.jwt_verifier import jwks_cache_state
+
+    jwt_mode = getattr(settings, "NETRA_SUPABASE_JWT_MODE", "remote")
+    jwks_state = jwks_cache_state()
+    now = timezone.now()
     organizations = list(Organization.objects.values_list("id", flat=True))
     invalid_admin_organizations = [
         str(organization_id)
@@ -233,7 +238,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
             "Restore the persistent cache volume or permissions before evidence operations resume.",
             required=True,
         ),
-        _deployment_check("service-role-backend", bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")), "Backend Supabase secret key is configured.", "Set SUPABASE_SECRET_KEY only on the backend.", required=True),
+        _deployment_check("secret-key-backend", bool(getattr(settings, "SUPABASE_SECRET_KEY", "")), "Backend Supabase secret key is configured.", "Set SUPABASE_SECRET_KEY only on the backend.", required=True),
         _deployment_check("dev-role-headers-disabled", not getattr(settings, "NETRA_DEV_ROLE_HEADERS", False), "Development role headers are disabled.", "Set NETRA_DEV_ROLE_HEADERS=0.", required=True),
         _deployment_check(
             "evidence-key-non-default",
@@ -274,6 +279,17 @@ def deployment_readiness_payload() -> dict[str, Any]:
         "requiredFailures": [item["name"] for item in required_failures],
         "warnings": [item["name"] for item in warnings],
         "cache": cache_status,
+        "authentication": {
+            "provider": getattr(settings, "NETRA_AUTH_PROVIDER", "django"),
+            "verificationMode": jwt_mode,
+            "algorithm": "ES256" if jwt_mode == "asymmetric-jwks" else "remote",
+            "jwksCacheSeconds": getattr(settings, "NETRA_SUPABASE_JWKS_CACHE_SECONDS", 600),
+            "jwksCached": bool(jwks_state.keys_by_id),
+            "jwksCacheAgeSeconds": (
+                max(0, int((now - jwks_state.fetched_at).total_seconds())) if jwks_state.fetched_at else None
+            ),
+            "privilegedRemoteValidation": True,
+        },
         "recommendation": "Ready for deployment smoke tests." if status == "ready" else ("Fix required deployment checks before sharing Netra." if status == "blocked" else "Usable for supervised deployment after reviewing warnings."),
     }
 
@@ -287,7 +303,7 @@ def ml_model_status_payload() -> dict[str, Any]:
 
 
 def status_matrix_payload() -> dict[str, Any]:
-    storage_ok = getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""))
+    storage_ok = getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and bool(getattr(settings, "SUPABASE_SECRET_KEY", ""))
     ml_status = ml_model_status_payload()
     deployment = deployment_readiness_payload()
     rows = [

@@ -122,10 +122,22 @@ NETRA_KAFKA_BOOTSTRAP = os.getenv("NETRA_KAFKA_BOOTSTRAP", "localhost:9092")
 NETRA_ELASTICSEARCH_URL = os.getenv("NETRA_ELASTICSEARCH_URL", "http://localhost:9200")
 SUPABASE_PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-# Prefer Supabase's modern opaque server key. Keep the legacy variable as a
-# compatibility fallback for existing deployments during a controlled cutover.
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+NETRA_SUPABASE_JWT_MODE = os.getenv("NETRA_SUPABASE_JWT_MODE", "remote").strip().lower()
+if NETRA_SUPABASE_JWT_MODE not in {"remote", "asymmetric-jwks"}:
+    raise RuntimeError("NETRA_SUPABASE_JWT_MODE must be remote or asymmetric-jwks")
+NETRA_SUPABASE_JWKS_CACHE_SECONDS = max(60, min(3600, int(os.getenv("NETRA_SUPABASE_JWKS_CACHE_SECONDS", "600"))))
+NETRA_SUPABASE_JWKS_TIMEOUT_SECONDS = max(1, min(10, int(os.getenv("NETRA_SUPABASE_JWKS_TIMEOUT_SECONDS", "3"))))
+NETRA_SUPABASE_JWKS_RESPONSE_MAX_BYTES = max(
+    4096,
+    min(1048576, int(os.getenv("NETRA_SUPABASE_JWKS_RESPONSE_MAX_BYTES", "131072"))),
+)
+NETRA_SUPABASE_JWT_AUDIENCE = os.getenv("NETRA_SUPABASE_JWT_AUDIENCE", "authenticated").strip()
+NETRA_SUPABASE_PRIVILEGED_VERIFY_TIMEOUT_SECONDS = max(
+    1,
+    min(10, int(os.getenv("NETRA_SUPABASE_PRIVILEGED_VERIFY_TIMEOUT_SECONDS", "3"))),
+)
 SUPABASE_STORAGE_BUCKET_EVIDENCE = os.getenv("SUPABASE_STORAGE_BUCKET_EVIDENCE", "netra-evidence")
 SUPABASE_STORAGE_BUCKET_CAPTURE_CHUNKS = os.getenv("SUPABASE_STORAGE_BUCKET_CAPTURE_CHUNKS", "netra-capture-chunks")
 SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS = os.getenv("SUPABASE_STORAGE_BUCKET_ANALYSIS_CHUNKS", "netra-analysis-chunks")
@@ -181,7 +193,6 @@ NETRA_AUTH_PROXY_ENABLED = os.getenv(
     "NETRA_AUTH_PROXY_ENABLED",
     "1" if DEBUG and NETRA_DEPLOYMENT_PROFILE == "local" and os.getenv("NETRA_AUTH_PROVIDER", "django").lower() == "django" else "0",
 ) == "1"
-NETRA_SUPABASE_TOKEN_CACHE_SECONDS = max(0, min(int(os.getenv("NETRA_SUPABASE_TOKEN_CACHE_SECONDS", "30")), 300))
 NETRA_STORAGE_DEEP_HEALTHCHECK = os.getenv("NETRA_STORAGE_DEEP_HEALTHCHECK", "0") == "1" and not NETRA_FREE_PLAN_GUARD
 NETRA_TRUSTED_LAN_ACTOR = os.getenv("NETRA_TRUSTED_LAN_ACTOR", "Local Investigator")
 NETRA_TRUSTED_LAN_ROLE = os.getenv("NETRA_TRUSTED_LAN_ROLE", "LAN Operator")
@@ -324,10 +335,10 @@ if not DEBUG:
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     if NETRA_DEV_ROLE_HEADERS or NETRA_ACCESS_MODE != "bearer":
         raise RuntimeError("Hosted deployments require bearer access mode and disabled development role headers")
-    if NETRA_AUTH_PROVIDER == "supabase" and (not SUPABASE_URL or not SUPABASE_ANON_KEY):
-        raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY are required for Supabase authentication")
+    if NETRA_AUTH_PROVIDER == "supabase" and (not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY):
+        raise RuntimeError("SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required for Supabase authentication")
     if NETRA_AUTH_INVITATIONS_ENABLED:
-        if NETRA_AUTH_PROVIDER != "supabase" or not SUPABASE_SERVICE_ROLE_KEY:
+        if NETRA_AUTH_PROVIDER != "supabase" or not SUPABASE_SECRET_KEY:
             raise RuntimeError("Hosted invitations require Supabase Auth and a backend secret key")
         if not NETRA_AUTH_INVITE_REDIRECT_URL.startswith("https://"):
             raise RuntimeError("NETRA_AUTH_INVITE_REDIRECT_URL must be an exact HTTPS URL")
@@ -350,7 +361,7 @@ if not DEBUG:
             raise RuntimeError("NETRA_DIRECT_UPLOAD_ENABLED requires NETRA_DEPLOYMENT_PROFILE=full")
         if NETRA_STORAGE_PROVIDER != "supabase" or NETRA_AUTH_PROVIDER != "supabase":
             raise RuntimeError("Direct evidence upload requires Supabase Auth and Storage")
-        if not SUPABASE_SERVICE_ROLE_KEY:
-            raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY is required for quarantine validation")
+        if not SUPABASE_SECRET_KEY:
+            raise RuntimeError("SUPABASE_SECRET_KEY is required for quarantine validation")
     if NETRA_DEPLOYMENT_PROFILE == "full" and NETRA_SENSOR_SHARED_KEY == "netra-phase5-local-sensor-key":
         raise RuntimeError("NETRA_SENSOR_SHARED_KEY must be replaced for the full deployment profile")

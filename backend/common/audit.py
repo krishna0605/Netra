@@ -104,12 +104,20 @@ def actor_from_request(request) -> Actor:
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
         if getattr(settings, "NETRA_AUTH_PROVIDER", "django") == "supabase":
-            from common.supabase_auth import verify_supabase_token
+            from common.jwt_verifier import SupabaseTokenInvalid, SupabaseVerificationUnavailable
+            from common.supabase_auth import verify_supabase_request_token
 
-            user = verify_supabase_token(token)
-            if user:
-                return sync_supabase_actor(user)
-            return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+            try:
+                verification = verify_supabase_request_token(token)
+            except SupabaseVerificationUnavailable:
+                request.netra_auth_error = "auth_verification_unavailable"
+                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+            except SupabaseTokenInvalid:
+                request.netra_auth_error = "session_invalid"
+                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+            request.netra_verified_supabase_token = verification.verified_token
+            request.netra_supabase_bearer_token = token
+            return sync_supabase_actor(verification.user)
         try:
             auth = JWTAuthentication()
             validated = auth.get_validated_token(token)

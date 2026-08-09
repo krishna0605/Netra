@@ -18,7 +18,7 @@ class SupabaseStorageEgressTests(SimpleTestCase):
 
         with override_settings(
             SUPABASE_URL="https://exampleproject.supabase.co",
-            SUPABASE_SERVICE_ROLE_KEY="test-service-key",
+            SUPABASE_SECRET_KEY="test-secret-key",
             NETRA_STORAGE_DEEP_HEALTHCHECK=False,
         ), patch.object(provider, "_request", return_value=b"[]") as request:
             result = provider.health_check()
@@ -39,7 +39,7 @@ class SupabaseStorageEgressTests(SimpleTestCase):
             with override_settings(
                 NETRA_STORAGE_ROOT=root / "storage",
                 SUPABASE_URL="https://exampleproject.supabase.co",
-                SUPABASE_SERVICE_ROLE_KEY="test-service-key",
+                SUPABASE_SECRET_KEY="test-secret-key",
             ), patch.object(provider, "_request", return_value=b"{}") as request:
                 uri = provider.upload_bucket_object("netra-evidence", "immutable/evidence.enc", source)
                 stat = provider.stat(uri)

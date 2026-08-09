@@ -12,7 +12,7 @@ class SupabaseBootstrapEgressTests(TestCase):
 
         with override_settings(
             SUPABASE_URL="https://exampleproject.supabase.co",
-            SUPABASE_SERVICE_ROLE_KEY="test-service-key",
+            SUPABASE_SECRET_KEY="test-secret-key",
         ), patch.object(command, "_storage_request", return_value="[]") as storage_request, patch.object(
             command, "_probe_bucket"
         ) as probe:
@@ -27,7 +27,7 @@ class SupabaseBootstrapEgressTests(TestCase):
 
         with override_settings(
             SUPABASE_URL="https://exampleproject.supabase.co",
-            SUPABASE_SERVICE_ROLE_KEY="test-service-key",
+            SUPABASE_SECRET_KEY="test-secret-key",
         ), patch.object(command, "_storage_request", return_value="[]"), patch.object(command, "_probe_bucket") as probe:
             result = command._buckets(deep_storage_check=True)
 

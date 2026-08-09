@@ -77,8 +77,8 @@ class Command(BaseCommand):
         return completed
 
     def _buckets(self, *, deep_storage_check: bool = False) -> list[str]:
-        if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-            return ["skipped: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"]
+        if not settings.SUPABASE_URL or not settings.SUPABASE_SECRET_KEY:
+            return ["skipped: SUPABASE_URL and SUPABASE_SECRET_KEY are required"]
         existing = self._storage_request("/storage/v1/bucket", method="GET")
         existing_names = {row.get("name") or row.get("id") for row in json.loads(existing or "[]")}
         completed = []
@@ -126,7 +126,7 @@ class Command(BaseCommand):
         return completed
 
     def _storage_request(self, path: str, method: str, body: bytes | None = None) -> str:
-        key = settings.SUPABASE_SERVICE_ROLE_KEY
+        key = settings.SUPABASE_SECRET_KEY
         request = urllib.request.Request(
             f"{settings.SUPABASE_URL.rstrip('/')}{path}",
             method=method,
@@ -143,7 +143,7 @@ class Command(BaseCommand):
             raise RuntimeError(f"Supabase Storage bootstrap HTTP {exc.code}: {detail}") from exc
 
     def _probe_bucket(self, bucket: str) -> None:
-        key = settings.SUPABASE_SERVICE_ROLE_KEY
+        key = settings.SUPABASE_SECRET_KEY
         object_name = f"bootstrap/netra-bootstrap-probe-{uuid.uuid4().hex}.txt"
         url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_name}"
         headers = {**elevated_api_headers(key, content_type="text/plain"), "x-upsert": "true"}

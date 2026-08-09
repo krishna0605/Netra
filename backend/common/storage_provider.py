@@ -144,9 +144,9 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         return settings.SUPABASE_URL.rstrip("/")
 
     def _service_key(self) -> str:
-        if not settings.SUPABASE_SERVICE_ROLE_KEY:
+        if not settings.SUPABASE_SECRET_KEY:
             raise RuntimeError("Evidence storage is not configured: backend Supabase service-role key is missing.")
-        return settings.SUPABASE_SERVICE_ROLE_KEY
+        return settings.SUPABASE_SECRET_KEY
 
     def _headers(self, content_type: str = "application/octet-stream") -> dict[str, str]:
         return elevated_api_headers(self._service_key(), content_type=content_type)

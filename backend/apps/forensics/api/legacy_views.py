@@ -2025,11 +2025,11 @@ def _probe_security() -> dict:
     if getattr(settings, "NETRA_DEV_ROLE_HEADERS", False):
         details.append("Development role headers are enabled.")
         status = "degraded"
-    if not getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
-        details.append("Backend Supabase service-role key is missing.")
+    if not getattr(settings, "SUPABASE_SECRET_KEY", ""):
+        details.append("Backend Supabase secret key is missing.")
         status = "failed"
-    if getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and not getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
-        details.append("Supabase Storage cannot use private buckets without backend service-role key.")
+    if getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and not getattr(settings, "SUPABASE_SECRET_KEY", ""):
+        details.append("Supabase Storage cannot use private buckets without a backend secret key.")
         status = "failed"
     if getattr(settings, "NETRA_EVIDENCE_KEY", "") == "netra-phase3-development-evidence-key":
         details.append("Evidence encryption key is still the development default.")
@@ -2045,8 +2045,8 @@ def _probe_security() -> dict:
         "authProvider": getattr(settings, "NETRA_AUTH_PROVIDER", "django"),
         "rbac": "enabled" if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase" else "development",
         "devRoleHeaders": bool(getattr(settings, "NETRA_DEV_ROLE_HEADERS", False)),
-        "serviceRoleBackendOnly": True,
-        "serviceRoleConfigured": bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")),
+        "secretKeyBackendOnly": True,
+        "secretKeyConfigured": bool(getattr(settings, "SUPABASE_SECRET_KEY", "")),
         "adminProfiles": admin_count,
         "detail": "; ".join(details) if details else "Supabase Auth, RBAC, private Storage credentials, and audit logging are configured.",
     }
