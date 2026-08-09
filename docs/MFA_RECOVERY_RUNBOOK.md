@@ -2,7 +2,13 @@
 
 This runbook defines the reviewed recovery boundary. It does not authorize a hosted Auth change by itself.
 
-## Normal recovery
+## Hackathon release policy
+
+Netra has no owned, verified SMTP domain for this release. `NETRA_PASSWORD_RECOVERY_ENABLED=0` and `NETRA_AUTH_INVITATIONS_ENABLED=0` are mandatory. The frontend obtains this state from `/api/capabilities`, hides email controls, and renders an accessible unavailable notice on direct routes. Resend and Supabase custom SMTP remain unconfigured. Existing-user password login and TOTP are unaffected.
+
+No temporary password, public default sender, or alternate recovery bypass is permitted.
+
+## Future normal recovery after approved SMTP activation
 
 1. The user requests password recovery from `/auth/forgot-password`.
 2. The browser sends the request directly to Supabase Auth using the publishable key and the exact `/auth/recovery` redirect.
@@ -27,7 +33,7 @@ Supabase TOTP does not provide recovery codes. Netra must not imply that recover
 
 If the Administrator identity itself cannot be recovered, use the existing ticketed break-glass transfer command. The command must leave exactly one active organization Administrator and write both audit records.
 
-## Production prerequisites
+## Future email-activation prerequisites
 
 - Exact Site URL and invitation/recovery redirect allowlist.
 - Production custom SMTP and sender identity.

@@ -39,6 +39,7 @@ try {
 
     Invoke-Checked { python scripts/validate_workflows.py } "Workflow policy"
     Invoke-Checked { python scripts/validate_github_governance.py } "GitHub governance policy"
+    Invoke-Checked { python scripts/validate_deployment_contract.py } "Hosted deployment contract"
     Invoke-Checked { python scripts/lint_supabase_sql.py } "Supabase SQL lint"
     Invoke-Checked { python scripts/validate_vex.py } "VEX expiry policy"
     Invoke-Checked { git diff --check } "Repository whitespace gate"

@@ -9,8 +9,8 @@ This checklist is documentation only. It does not authorize a deployment.
 - Confirm the current repository target is migration `0017_phase8_security_closure`, 53 application tables, and zero materialized views.
 - Export an encrypted logical backup outside Git before any hosted schema change; Supabase Free automatic backups are not treated as a recoverable operator backup.
 - Confirm one active organization Admin with AAL2 enrollment.
-- Confirm the exact Auth Site URL plus `/auth/invite` and `/auth/recovery` redirects.
-- Confirm custom SMTP delivery with a controlled non-Admin invitation and recovery drill.
+- Confirm the exact Auth Site URL. Do not add invitation/recovery redirects while those capabilities are disabled.
+- Confirm Resend has no release credential and Supabase custom SMTP remains disabled.
 - Confirm separate Railway API and worker services and the persistent `/app/storage` volume.
 - Confirm target environment names without exposing values in logs or frontend builds.
 - Record Supabase egress before the window; do not start legacy-object transfer before quota approval.
@@ -27,7 +27,7 @@ This checklist is documentation only. It does not authorize a deployment.
 - Deploy one worker and verify its pinned capability heartbeat.
 - Run read-only authentication, database and case-boundary checks.
 - Activate `asymmetric-jwks` only after ordinary-token, key-rotation, cached-outage, and privileged remote-validation smoke tests pass.
-- Verify password login, Administrator TOTP challenge, invitation acceptance, recovery global sign-out, and rejection of an AAL1 Admin mutation.
+- Verify password login, Administrator TOTP challenge, truthful disabled invitation/recovery controls, and rejection of an AAL1 Admin mutation.
 - Run one tiny explicit Storage probe only when the migration runbook authorizes it.
 - Reopen workers gradually, then reopen writes after every acceptance gate passes.
 

@@ -181,7 +181,7 @@ storage/              Runtime volume layout; generated content is Git-ignored
 ## Current limitations
 
 - Repository security, tenancy, cryptography, worker isolation, authentication, accessibility, dependency, container, and CI controls are implemented and verified locally. GitHub and hosted-platform activation have not occurred.
-- Invitation, recovery, and Administrator TOTP journeys are implemented with local provider mocks, but production redirects, custom SMTP, enrollment, and recovery drills remain deployment gates.
+- Email invitation and password-recovery implementations are intentionally disabled in the hackathon deployment because Netra does not yet own a verified SMTP domain. Existing-user password login and Administrator TOTP remain enabled; no temporary-password or insecure fallback flow is offered.
 - The current deterministic detector registry is active; ML production approval is intentionally withheld because representative held-out training/evaluation evidence is insufficient.
 - Do not deploy until the platform activation, migration, backup, and rollback gates have been completed with sanitized evidence.
 - The persistent Railway `/app/storage` volume and production key material still require external verification.

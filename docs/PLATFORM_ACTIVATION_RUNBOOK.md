@@ -5,47 +5,47 @@ This is an owner-executed runbook. Repository preparation does not authorize a p
 ```mermaid
 flowchart LR
     LOCAL["Offline repository gates"]
-    FREEZE["Freeze production writes"]
+    FREEZE["Freeze automatic deployments"]
     CI["Three policy gates"]
     BACKUP["Encrypted logical backup"]
     SCHEMA["Migrations 0014-0017"]
     HARDEN["53-table RLS and grants"]
-    PUSH["Fast-forward push main"]
-    DEPLOY["Automatic production deployments"]
+    TAG["Signed candidate tag"]
+    PUSH["Lease-guarded initial main publication"]
+    DEPLOY["Manual exact-SHA deployments"]
     PLATFORM["Bounded Railway, Auth, and Vercel drills"]
     PROTECT["Protect main after evidence push"]
 
-    LOCAL --> FREEZE --> BACKUP --> SCHEMA --> HARDEN --> PUSH
-    PUSH --> CI
-    PUSH --> DEPLOY --> PLATFORM --> PROTECT
+    LOCAL --> FREEZE --> BACKUP --> TAG --> CI --> PUSH
+    PUSH --> SCHEMA --> HARDEN --> DEPLOY --> PLATFORM --> PROTECT
     CI --> PLATFORM
 ```
 
 ## Pre-push stop gate
 
-1. Confirm local and remote repositories contain only `main`, and the update is a normal fast-forward.
-2. Confirm Railway API and Vercel Production are linked to `main`; their automatic deployments remain enabled for the controlled activation.
-3. Stop the old Railway API and every worker/producer before hosted schema work. The write freeze stays active until CI, deployment, and read-only smoke tests pass.
+1. Confirm only local `main` exists and record the exact current `origin/main` SHA.
+2. Confirm Railway API/worker and Vercel Production are linked to `main`; disable automatic deployment during initial cleaned-history publication.
+3. Keep Railway API and worker offline before hosted activation. Preserve the current Vercel production deployment as rollback.
 4. Configure Vercel Production with only `VITE_API_BASE_URL`, `VITE_DEPLOYMENT_PROFILE`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_DIRECT_UPLOAD_ENABLED=0`, and `VITE_MAX_UPLOAD_MB=25`.
 5. Confirm no backend/database/evidence/custody/SMTP secret exists in Vercel or GitHub workflow variables.
 6. Record organization-wide Supabase usage and initialize the local byte ledger.
-7. Harden and verify the empty target before pushing because the `main` push immediately deploys Railway and Vercel production.
-8. Never force-push `main`.
+7. Confirm the preserved target contains no cases or Storage objects. The existing Administrator, access logs, and stale worker-heartbeat rows remain covered by the encrypted backup.
+8. Create a signed `release-candidate-*` tag, require all three policy gates on that exact SHA, then publish the initial cleaned history with an exact `--force-with-lease` value. All later releases are normal fast-forwards.
 
 ## GitHub activation
 
-- Push the verified release directly to `main` only after the hosted pre-push gates pass.
+- Run `scripts/release-main.ps1 -Action PrepareCandidate` and verify the candidate before changing `main`.
 - Require `ci-policy-gate`, `security-policy-gate`, and `container-policy-gate`.
-- Keep production writes frozen while GitHub Actions and automatic platform deployments run in parallel.
+- Keep automatic platform deployments frozen until `origin/main` equals the verified candidate SHA and protection is active.
 - Fix remote-only failures in new commits on local `main`; never amend or force-push prior history.
-- Push the sanitized platform-evidence commit to `main`, then apply `infra/github/main-ruleset.json` only after all contexts have reported.
+- Apply `infra/github/main-ruleset.json` after the first verified history publication. It requires signed commits and the three policy gates, with no pull-request rule or bypass actor.
 - Enable CodeQL, Dependabot alerts/security updates, secret scanning, and push protection.
 - Verify protection with `infra/github/verify-repository-protection.ps1`.
-- Once protection is active, future repository changes require a reviewed short-lived branch; Phase 8B itself creates none.
+- Once protection is active, future changes use signed local commits on `main`, candidate-tag checks, and a fast-forward of the exact checked SHA. No persistent development branch is created.
 
 ## Hosted maintenance and backup gate
 
-- Confirm the target is empty: zero cases, evidence rows, Storage objects, and target-only ownership records. Any durable target data moves this work to the controlled migration procedure.
+- Confirm the target still has zero cases, evidence rows, and Storage objects. Preserve the existing Administrator/audit rows through the encrypted backup; any new case/evidence/object stops this release and moves it to migration handling.
 - Enter maintenance/read-only mode and stop all old writers/workers.
 - Export an encrypted logical schema/data backup outside Git.
 - Record Django/Supabase migration history, table row counts, and primary-key digests without recording credentials or user metadata.
@@ -64,10 +64,10 @@ npx --yes supabase@2.113.0 db lint --help
 1. Rehearse Django `0014`–`0017` on disposable PostgreSQL 17.
 2. Inspect hosted migration history and confirm `20260804182156_enforce_netra_target_security.sql` is already recorded.
 3. Run `db push --dry-run`; stop if the historical 49-table migration would replay.
-4. Apply Django migrations to the empty target.
-5. Apply `20260809164520_supersede_49_table_target_hardening.sql`.
-6. Apply `20260809164522_remove_netra_realtime_members.sql`.
-7. Verify 53 tables, 17 Django migrations, 53/53 RLS, zero browser-facing application policies/privileges, zero Netra Realtime members, and zero materialized views.
+4. Verify Django migrations through `0017_phase8_security_closure` are already recorded; apply only an idempotent missing migration after a fresh encrypted backup.
+5. Verify `20260809164520_supersede_49_table_target_hardening.sql` is recorded.
+6. Verify `20260809164522_remove_netra_realtime_members.sql` is recorded.
+7. Reconfirm 53 tables, 17 Django migrations, 53/53 RLS, zero browser-facing application policies/privileges, zero Netra Realtime members, and zero materialized views.
 
 The SQL intentionally leaves managed `auth`, `storage`, Realtime internals, extensions, and their ownership untouched. It revokes access only on Netra/Django application objects selected by their reviewed prefixes.
 
@@ -88,7 +88,7 @@ python manage.py migrate --noinput
 - Worker: one instance, same immutable release ID, `/app/storage` persistent volume, TShark 4.6.7, Zeek 8.2.1, and reviewed CPU/memory limits read from the actual Railway project.
 - Cache: a tiny encrypted synthetic object only; first read may fetch once and the second read must cause zero Storage GETs. Remove it afterwards.
 - Evidence/custody: synthetic v2.1 round trip, independently verified Ed25519 anchor, key-rotation rehearsal, and cleanup.
-- Auth: remain in remote mode through the maximum token lifetime plus 15 minutes after ES256 rotation; then enable `asymmetric-jwks`. Prove AAL1 denial, AAL2 Admin success, invitation, recovery, lost-factor procedure, and global sign-out.
+- Auth: remain in remote mode through the maximum token lifetime plus 15 minutes after ES256 rotation; then enable `asymmetric-jwks`. Prove existing-user login, AAL1 denial, AAL2 Admin success, lost-factor procedure, and global sign-out. Invitation and recovery email remain truthfully disabled.
 - Vercel: exact preview CSP, no wildcard host/image/WebSocket source, Auth/API/SSE success, and built assets containing only the publishable key.
 
 ## Egress ledger
