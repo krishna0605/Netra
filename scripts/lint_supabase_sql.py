@@ -21,6 +21,17 @@ def main() -> int:
             raise ValueError(f"{path}: SECURITY DEFINER requires an explicit search_path")
         if re.search(r"grant\s+all\s+on\s+all\s+tables.*\b(?:anon|authenticated)\b", lowered, re.DOTALL):
             raise ValueError(f"{path}: blanket Data API grants are prohibited")
+    hardening = next((path for path in files if path.name.endswith("supersede_49_table_target_hardening.sql")), None)
+    realtime = next((path for path in files if path.name.endswith("remove_netra_realtime_members.sql")), None)
+    if hardening is None or realtime is None:
+        raise ValueError("Phase 8 append-only hardening and Realtime migrations are required")
+    hardening_text = hardening.read_text(encoding="utf-8").lower()
+    realtime_text = realtime.read_text(encoding="utf-8").lower()
+    for required in ("application_table_count <> 53", "enable row level security", "browser_policy_count <> 0"):
+        if required not in hardening_text:
+            raise ValueError(f"{hardening}: missing reviewed 53-table hardening assertion: {required}")
+    if "alter publication supabase_realtime drop table" not in realtime_text or "remaining_count <> 0" not in realtime_text:
+        raise ValueError(f"{realtime}: missing fail-closed Realtime removal verification")
     print(f"Validated {len(files)} local Supabase SQL migration(s) without linking a project.")
     return 0
 

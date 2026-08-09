@@ -82,9 +82,9 @@ class RetiredEnvironmentAliasTests(SimpleTestCase):
         with self.assertRaises(RuntimeError):
             load_settings(SUPABASE_DIRECT_DATABASE_URL="postgresql://other:other@127.0.0.1:5432/other")
 
-    def test_conflicting_secret_key_alias_aborts_startup(self):
+    def test_retired_secret_key_alias_always_aborts_startup(self):
         with self.assertRaises(RuntimeError) as raised:
-            load_settings(SUPABASE_SECRET_KEY="sb_secret_canonical", SUPABASE_SERVICE_ROLE_KEY="legacy-jwt")
+            load_settings(SUPABASE_SECRET_KEY="sb_secret_canonical", SUPABASE_SERVICE_ROLE_KEY="sb_secret_canonical")
 
         self.assertIn("SUPABASE_SERVICE_ROLE_KEY", str(raised.exception))
 
@@ -98,18 +98,15 @@ class RetiredEnvironmentAliasTests(SimpleTestCase):
         probe = load_settings(
             DATABASE_URL="postgresql://netra:netra@127.0.0.1:5432/netra",
             SUPABASE_POOLER_DATABASE_URL="postgresql://netra:netra@127.0.0.1:5432/netra",
-            SUPABASE_SECRET_KEY="sb_secret_canonical",
-            SUPABASE_SERVICE_ROLE_KEY="sb_secret_canonical",
             NETRA_PROCESSING_MODE="postgres-worker",
             NETRA_SUPABASE_PROCESSING_MODE="postgres-worker",
         )
 
         self.assertEqual(probe.NETRA_PROCESSING_MODE, "postgres-worker")
 
-    def test_alias_alone_does_not_abort_startup(self):
-        probe = load_settings(SUPABASE_SECRET_KEY=None, SUPABASE_SERVICE_ROLE_KEY="legacy-jwt")
-
-        self.assertEqual(probe.SUPABASE_SECRET_KEY, "")
+    def test_secret_alias_alone_aborts_startup(self):
+        with self.assertRaises(RuntimeError):
+            load_settings(SUPABASE_SECRET_KEY=None, SUPABASE_SERVICE_ROLE_KEY="legacy-jwt")
 
 
 class DeploymentEnvironmentTests(SimpleTestCase):

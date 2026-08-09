@@ -109,10 +109,10 @@ alias. The application never performs local HS256 verification.
 
 ### Retired aliases
 
-Startup aborts when a retired alias is present **and disagrees** with its
-canonical variable. An alias that matches is tolerated only for the duration of
-the Phase 8 transition and must be deleted from Railway once the canonical
-deployment validates.
+Database/topology aliases abort startup when they disagree with their canonical
+variable and must be removed during Phase 8 activation. The retired
+`SUPABASE_SERVICE_ROLE_KEY` secret alias is stricter: its presence always aborts
+startup, even if its value matches `SUPABASE_SECRET_KEY`.
 
 | Retired alias | Canonical variable |
 |---|---|

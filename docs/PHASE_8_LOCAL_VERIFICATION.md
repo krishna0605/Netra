@@ -45,8 +45,11 @@ Corrective commits discovered by full-suite verification were added rather than 
 | Bundle budget | Application shell 61.27 KiB gzip; Auth closure 187.71 KiB gzip |
 | Browser matrix | 60 desktop/mobile tests passed |
 | Authenticated accessibility | MFA enrollment/challenge, case list, analysis, and Admin users: no serious/critical axe findings at desktop or Pixel 7 sizes |
+| Append-only target SQL rehearsal | Disposable PostgreSQL 17 produced `53 tables / 17 migrations / 53 RLS / 0 policies / 0 Realtime members` |
 
 The local worker-path tests used the installed workstation TShark 4.6.6. This validates the synthetic parsing path but is not evidence of the exact production tool version. The worker image and readiness contract remain pinned to TShark 4.6.7 and Zeek 8.2.1; their image verification remains part of the repository/container and later Railway gates.
+
+Repository-only Phase 8B contracts are present for the append-only 53-table hardening, Realtime removal, Railway pre-deploy, canonical environment variables, GitHub governance, Vercel Preview boundary, supervised bootstrap, backup, Auth rotation, and 60 MB egress ledger. The SQL rehearsal database was disposable synthetic state and was removed after verification. None of these repository artifacts prove hosted activation.
 
 ## Remaining owner-executed Phase 8B gates
 

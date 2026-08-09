@@ -237,7 +237,7 @@ Phase 8A closes the Phase 1–7 repository carryovers without contacting a hoste
 | P8-07/P8-08 browser coverage | Verified locally | MFA, Admin, case, and analysis journeys pass at desktop and Pixel 7 sizes with no serious/critical axe finding. |
 | P8-09/P8-10 detector truth | Verified locally | Migration `0017_phase8_security_closure` replaces misleading `scikit-v1` provenance and the unused Scikit-learn readiness helper is removed. |
 | P8-11 credential writes | Verified locally | All application writes use encrypted envelopes; legacy plaintext degrades readiness and blocks delivery until explicitly migrated. |
-| P8-12 target hardening | Repository contract pending | Append-only 53-table Supabase hardening SQL is prepared separately in Phase 8B and must be rehearsed before hosted execution. |
+| P8-12 target hardening | Verified locally; hosted execution pending | Append-only 53-table Supabase hardening and Realtime-removal SQL produced 53/17/53/0/0 on disposable PostgreSQL 17. Hosted migration remains owner-executed. |
 | P8-13 through P8-15 hosted activation | Not executed | Remote workflows, ruleset, migrations, Auth, Railway/Vercel, keys, volume, SMTP, and TOTP drills require owner approval and sanitized evidence. |
 
 Offline regression evidence: 216 backend tests passed with four expected environment-specific skips; 27 PostgreSQL 17 tests passed; 28 frontend unit tests passed; 60 desktop/mobile browser tests passed; lint, build, route-policy inventory, migration drift, and bundle budgets passed. The workstation TShark is 4.6.6; the production worker contract remains pinned to and rejects anything other than 4.6.7.

@@ -6,6 +6,8 @@ This checklist is documentation only during Phase 4. It does not authorize a dep
 
 - Complete Phases 4–7, protect `main`, and obtain green CI/security checks.
 - Rehearse Django migrations `0014` through the then-current migration on a disposable PostgreSQL 17 copy.
+- Confirm the current repository target is migration `0017_phase8_security_closure`, 53 application tables, and zero materialized views.
+- Export an encrypted logical backup outside Git before any hosted schema change; Supabase Free automatic backups are not treated as a recoverable operator backup.
 - Confirm one active organization Admin with AAL2 enrollment.
 - Confirm the exact Auth Site URL plus `/auth/invite` and `/auth/recovery` redirects.
 - Confirm custom SMTP delivery with a controlled non-Admin invitation and recovery drill.
@@ -20,6 +22,7 @@ This checklist is documentation only during Phase 4. It does not authorize a dep
 
 - Freeze writes, uploads, workers, schedules and retention jobs.
 - Apply reviewed migrations once and stop on the first error.
+- Apply the append-only 53-table RLS/privilege hardening and Realtime-removal migrations only after confirming the historical 49-table migration is already recorded.
 - Deploy API with workers stopped and confirm liveness/readiness.
 - Deploy one worker and verify its pinned capability heartbeat.
 - Run read-only authentication, database and case-boundary checks.

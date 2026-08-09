@@ -38,6 +38,12 @@ def _reject_conflicting_alias(legacy_name: str, canonical_name: str, canonical_v
         raise RuntimeError(f"{legacy_name} conflicts with {canonical_name}; remove the retired alias")
 
 
+def _reject_retired_secret_alias(legacy_name: str, canonical_name: str) -> None:
+    """Never accept a retired secret-bearing variable, even when values match."""
+    if os.getenv(legacy_name) is not None:
+        raise RuntimeError(f"{legacy_name} is retired; configure {canonical_name} and remove the alias")
+
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -148,7 +154,7 @@ SUPABASE_PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
-_reject_conflicting_alias("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", SUPABASE_SECRET_KEY)
+_reject_retired_secret_alias("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY")
 NETRA_SUPABASE_JWT_MODE = os.getenv("NETRA_SUPABASE_JWT_MODE", "remote").strip().lower()
 if NETRA_SUPABASE_JWT_MODE not in {"remote", "asymmetric-jwks"}:
     raise RuntimeError("NETRA_SUPABASE_JWT_MODE must be remote or asymmetric-jwks")

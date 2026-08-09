@@ -5,12 +5,12 @@
     "dockerfilePath": "backend/Dockerfile",
     "watchPatterns": [
       "backend/**",
-      "ml-services/anomaly-engine/**",
       "railway.json"
     ]
   },
   "deploy": {
     "preDeployCommand": [
+      "python manage.py check --deploy",
       "python manage.py migrate --noinput"
     ],
     "healthcheckPath": "/api/health",
