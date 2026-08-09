@@ -1,37 +1,67 @@
-FROM python:3.13-slim-bookworm@sha256:de89ed8283721548f7f9c8acfd19d638f435fa3870693a017890e94be5d37fc6
+FROM zeek/zeek@sha256:6ce464c9cc63185ac0ef40b86f1150842350895496520d7e6522c1756d07c755 AS wireshark-builder
+
+ARG WIRESHARK_VERSION=4.6.7
+ARG WIRESHARK_SHA256=242929b8c10ba89a8d3bcad7ff2eba8effb648d30f48e270d2e5e6ff94d88613
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential bison ca-certificates cmake curl flex libbrotli-dev libc-ares-dev \
+      libgcrypt20-dev libglib2.0-dev liblz4-dev libnghttp2-dev libpcap-dev \
+      libpcre2-dev libsnappy-dev libspeexdsp-dev libxml2-dev libzstd-dev ninja-build pkg-config xz-utils \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+      "https://www.wireshark.org/download/src/all-versions/wireshark-${WIRESHARK_VERSION}.tar.xz" \
+      --output /tmp/wireshark.tar.xz \
+    && echo "${WIRESHARK_SHA256}  /tmp/wireshark.tar.xz" | sha256sum --check --strict \
+    && mkdir /tmp/wireshark-src \
+    && tar --extract --xz --file /tmp/wireshark.tar.xz --directory /tmp/wireshark-src --strip-components=1 \
+    && cmake -S /tmp/wireshark-src -B /tmp/wireshark-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/wireshark \
+      -DBUILD_wireshark=OFF -DBUILD_tshark=ON -DBUILD_dumpcap=OFF \
+      -DBUILD_capinfos=ON -DBUILD_editcap=ON -DBUILD_mergecap=ON \
+      -DENABLE_LUA=OFF -DENABLE_PLUGINS=OFF -DENABLE_TESTS=OFF \
+    && cmake --build /tmp/wireshark-build --parallel 2 \
+    && cmake --install /tmp/wireshark-build \
+    && /opt/wireshark/bin/tshark --version | grep -F "4.6.7"
+
+FROM zeek/zeek@sha256:6ce464c9cc63185ac0ef40b86f1150842350895496520d7e6522c1756d07c755
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
+    PATH=/opt/netra-venv/bin:/opt/wireshark/bin:/usr/local/zeek/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONPATH=/app/ml-services/anomaly-engine \
-    NETRA_STORAGE_ROOT=/app/storage
+    NETRA_STORAGE_ROOT=/app/storage \
+    NETRA_TEMP_ROOT=/app/.netra-tmp \
+    NETRA_RUNTIME_ROLE=worker \
+    NETRA_PROCESSING_MODE=postgres-worker \
+    NETRA_QUEUE_PROVIDER=postgres-row-lock \
+    NETRA_SYNC_FALLBACK_ENABLED=0
 
 WORKDIR /app/backend
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates \
-      libpcap0.8 \
-      tcpdump \
-      tshark \
+      ca-certificates python3 python3-venv libbrotli1 libc-ares2 libgcrypt20 libglib2.0-0 \
+      liblz4-1 libnghttp2-14 libpcap0.8 libpcre2-8-0 libsnappy1v5 libspeexdsp1 libxml2 libzstd1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 netra \
     && useradd --uid 10001 --gid netra --create-home --shell /usr/sbin/nologin netra \
-    && rm -f /usr/lib/x86_64-linux-gnu/perl-base/Socket.pm \
-             /usr/lib/x86_64-linux-gnu/perl-base/auto/Socket/Socket.so \
-    && ! perl -MSocket -e 1
+    && python3 -m venv /opt/netra-venv
 
-COPY backend/requirements.txt /app/backend/requirements.txt
+COPY --from=wireshark-builder /opt/wireshark /opt/wireshark
+COPY backend/requirements.worker.txt /app/backend/requirements.txt
 RUN python -m pip install --upgrade "pip==26.1.1" \
     && python -m pip install -r /app/backend/requirements.txt
 
 COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
 
-RUN mkdir -p /app/storage \
-    && chown -R netra:netra /app
+RUN mkdir -p /app/storage /app/.netra-tmp \
+    && chown -R netra:netra /app \
+    && tshark --version | grep -F "4.6.7" \
+    && zeek --version | grep -F "8.2.1"
 
 USER 10001:10001
 
-CMD ["sh", "-c", "test \"${NETRA_RUNTIME_ROLE:-worker}\" = worker && python manage.py maintain_storage_cache --startup && exec python manage.py run_postgres_worker"]
+CMD ["sh", "-c", "test \"${NETRA_RUNTIME_ROLE}\" = worker && python manage.py maintain_storage_cache --startup && exec python manage.py run_postgres_worker"]

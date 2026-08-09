@@ -10,14 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/backend
 
-# Netra executes no Perl. Debian's essential perl-base currently ships a
-# vulnerable optional Socket XS module, so the module is removed and asserted.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates \
-      libpcap0.8 \
-      tcpdump \
-      tshark \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 netra \
     && useradd --uid 10001 --gid netra --create-home --shell /usr/sbin/nologin netra \
@@ -25,7 +20,7 @@ RUN apt-get update \
              /usr/lib/x86_64-linux-gnu/perl-base/auto/Socket/Socket.so \
     && ! perl -MSocket -e 1
 
-COPY backend/requirements.txt /app/backend/requirements.txt
+COPY backend/requirements.api.txt /app/backend/requirements.txt
 RUN python -m pip install --upgrade "pip==26.1.1" \
     && python -m pip install -r /app/backend/requirements.txt
 
@@ -33,7 +28,10 @@ COPY --chown=netra:netra backend /app/backend
 COPY --chown=netra:netra ml-services/anomaly-engine /app/ml-services/anomaly-engine
 
 RUN mkdir -p /app/storage /app/.netra-tmp \
-    && chown -R netra:netra /app
+    && chown -R netra:netra /app \
+    && ! command -v tshark \
+    && ! command -v zeek \
+    && ! command -v tcpdump
 
 USER 10001:10001
 
