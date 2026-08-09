@@ -178,8 +178,8 @@ storage/              Runtime volume layout; generated content is Git-ignored
 
 ## Current limitations
 
-- Phase 4 is locally complete; Phases 5-7 remain incomplete.
-- Integration truthfulness, MFA enrollment/recovery UX, CI scanning, and branch protection are later-phase gates.
+- Phases 1–6 are implemented and verified locally; Phase 7 CI, dependency/JWT/header hardening, scanning, and branch protection remain incomplete.
+- Invitation, recovery, and Administrator TOTP journeys are implemented with local provider mocks, but production redirects, custom SMTP, enrollment, and recovery drills remain deployment gates.
 - The current deterministic detector registry is active; ML production approval is intentionally withheld because representative held-out training/evaluation evidence is insufficient.
 - This branch must not be merged directly into `main`; Railway and Vercel are connected to the repository and could automatically deploy an incomplete intermediate phase.
 - The persistent Railway `/app/storage` volume and production key material still require external verification.
@@ -195,6 +195,8 @@ storage/              Runtime volume layout; generated content is Git-ignored
 - [Parser threat model](docs/PARSER_THREAT_MODEL.md)
 - [Worker operations runbook](docs/WORKER_OPERATIONS_RUNBOOK.md)
 - [Phase 4 verification](docs/PHASE_4_VERIFICATION.md)
+- [Phase 6 verification](docs/PHASE_6_VERIFICATION.md)
+- [MFA and account recovery](docs/MFA_RECOVERY_RUNBOOK.md)
 - [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 
 ## Responsible use

@@ -295,3 +295,23 @@ NETRA_WEBHOOK_ALLOWED_HOSTS=
 Enable integrations only after exact hostnames are approved and each organization-scoped connection receives an encrypted credential through the AAL2 endpoint. There is no shared webhook signing-secret variable. Never put integration, database, evidence, custody, sensor, or Supabase secret keys in Vercel.
 
 Do not apply migrations 0014–0016, run imports, activate integrations, or open SSE against production during this local phase. The production application remains subject to its separate 0.75 GB migration ceiling and 5 GB uncached Supabase Free-plan operating ceiling.
+
+## Phase 6 local verification
+
+Phase 6 adds no migration. It introduces backend-authorized invitations, password recovery, TOTP/AAL2 journeys, an AAL2 organization-Administrator workspace, route-oriented frontend entry points, accessibility coverage and enforced gzip budgets.
+
+```powershell
+Set-Location frontend
+npm test -- --run
+npm run lint
+npm run build
+npm run check:bundle
+npm run test:e2e
+npm run test:a11y
+```
+
+Browser tests provide fake Supabase URL/publishable values and intercept the reviewed Auth request. They must not use a real project URL or key. The authoritative axe gate is desktop; mobile public/Auth behavior has separate functional coverage. Automated axe results do not constitute accessibility certification.
+
+Production Auth activation requires the exact Site URL and redirect allowlist, custom SMTP, one current Administrator TOTP enrollment, one controlled non-Admin invitation, and the recovery drill in `MFA_RECOVERY_RUNBOOK.md`. Keep `NETRA_AUTH_INVITATIONS_ENABLED=0` until those gates pass.
+
+Phase 7 must clear the current production dependency advisories, add CI/scanning and branch protection, and complete JWT/header hardening before the branch is pushed.

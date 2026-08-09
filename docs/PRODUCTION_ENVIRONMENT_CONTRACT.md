@@ -78,9 +78,22 @@ Webhook signing uses a versioned, encrypted credential belonging to one organiza
 
 All parser variables are backend-only. None may use a `VITE_` prefix or enter Vercel.
 
+### Railway API Auth variables
+
+| Variable | Reviewed contract |
+|---|---|
+| `NETRA_MFA_POLICY` | `admin_required` |
+| `NETRA_AUTH_INVITATIONS_ENABLED` | `0` until redirect, SMTP and controlled invitation gates pass |
+| `NETRA_AUTH_INVITE_REDIRECT_URL` | Exact approved `https://<frontend>/auth/invite` URL |
+| `NETRA_AUTH_ADMIN_TIMEOUT_SECONDS` | `5` |
+| `NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES` | `65536` |
+| `NETRA_AUTH_ADMIN_LIST_PAGE_SIZE` | Maximum `100` |
+
+The Auth Admin adapter uses the existing backend-only Supabase service-role/secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON.
+
 ## Vercel frontend
 
-Vercel receives only the public API URL, Supabase URL, publishable key, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel. No `VITE_SUPABASE_REALTIME_ENABLED` variable exists after Phase 5.
+Vercel receives only the public API URL, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel. No `VITE_SUPABASE_REALTIME_ENABLED` variable exists after Phase 5.
 
 ## Local concurrency tests
 

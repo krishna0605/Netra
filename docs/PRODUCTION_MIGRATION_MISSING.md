@@ -140,10 +140,12 @@ compiled browser bundle.
   explicitly server-provisioned Admin profile.
 - The Phase 4 worker image contract pins TShark 4.6.7 and Zeek 8.2.1. Neither
   tool is optional for a worker advertising full PCAP capability.
-- Phase 5 local verification recorded 166 successful backend tests with four
-  environment-specific skips, 20 PostgreSQL tests, and 18 frontend tests.
-- Frontend lint had no errors and one Phase 6 hook warning; the production
-  build passed but exceeded the Phase 6 initial-bundle budget.
+- Phase 6 local verification recorded 174 successful backend tests with four
+  environment-specific skips, 42 selected PostgreSQL tests, and 24 frontend unit tests.
+- Frontend lint has no warning. The initial shell is 60.85 KiB gzip and the
+  direct authentication closure is 186.63 KiB gzip; the build-time budget passes.
+- Production dependency advisories discovered locally remain a Phase 7
+  remediation and scanning gate. Do not push until they are reviewed and cleared.
 - These are local repository results, not evidence that migrations `0014`–`0016`
   or the split worker topology have been activated in production.
 

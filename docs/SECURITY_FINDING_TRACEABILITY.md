@@ -188,3 +188,17 @@ Phase 5 is repository-only. Migration `0016_analysis_references_and_integration_
 ### Phase 5 deployment status
 
 Do not push or merge this branch. Phase 6 MFA/frontend/accessibility work, Phase 7 JWT/headers/CI/scanning, protected-main workflow, Railway API/worker sizing and volume proof, Supabase hardening for 53 tables, migrations 0014–0016 rehearsal, and the separately budgeted data cutover remain mandatory gates.
+
+## Phase 6 verification record
+
+Phase 6 is repository-only and adds no schema object. Expected state remains 53 public tables and 16 forensics migrations.
+
+| Finding/control | Status | Phase 6 control | Evidence |
+|---|---|---|---|
+| NTR-019 | Verified locally | Root application composition is small and direct Auth/console entries are lazy. | Vite manifest and bundle-budget gate |
+| NTR-020 | Verified locally | Initial shell is 60.85 KiB gzip and Auth closure 186.63 KiB gzip; individual JS assets remain below 350 KiB gzip. | `npm run check:bundle` |
+| NTR-025, Phase 6 scope | Verified locally | Auth/Admin frontend and backend routes use dedicated modules and shared security services. | Route inventory, module tests and complete regressions |
+| NTR-028 | Verified locally | Server-side invitations, enumeration-resistant recovery, global sign-out, TOTP enrollment/challenge and AAL2 Admin workspace are implemented. | Provisioning tests, Auth unit tests and browser journeys |
+| Phase 1–5 closure | Verified locally | Capability state remains authoritative; no synchronous processing or database Realtime frontend path returned. | Static scans and complete regression suites |
+
+Complete evidence and remaining gates are recorded in `PHASE_6_VERIFICATION.md`. Do not push or merge: Phase 7 scanning currently includes unresolved production dependency advisories, and all hosted Auth/migration/platform gates remain outstanding.
