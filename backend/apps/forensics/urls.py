@@ -1,5 +1,6 @@
 from django.urls import path
 
+from apps.forensics.route_policies import attach_route_policies
 from apps.forensics.api import analysis as analysis_views
 from apps.forensics.api import authentication as auth_views
 from apps.forensics.api import capture as capture_views
@@ -198,3 +199,5 @@ urlpatterns = [
     path("ml/model-status", operation_views.ml_model_status),
     path("audit/export", compliance_views.audit_export),
 ]
+
+attach_route_policies(urlpatterns)

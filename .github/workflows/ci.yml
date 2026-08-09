@@ -39,6 +39,7 @@ jobs:
           python manage.py test apps.forensics.tests
           python manage.py makemigrations --check --dry-run
           python manage.py check
+          python manage.py generate_route_policy_inventory --check
 
   backend-postgres:
     name: backend-postgres

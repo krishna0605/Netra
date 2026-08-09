@@ -161,6 +161,8 @@ class NetraApiAuthMiddleware:
         if actor is None:
             return None
 
+        self._record_deprecated_route_use(request, actor)
+
         privileged_error = self._verify_privileged_session(request, actor)
         if privileged_error:
             return privileged_error
@@ -193,6 +195,29 @@ class NetraApiAuthMiddleware:
         if resource_case_id and not can_actor_access_case(actor, resource_case_id):
             return _not_found()
         return None
+
+    @staticmethod
+    def _record_deprecated_route_use(request, actor) -> None:
+        route = str(getattr(getattr(request, "resolver_match", None), "route", "") or "").strip("/")
+        if route.startswith("api/"):
+            route = route.removeprefix("api/")
+        if not route:
+            return
+        from apps.forensics.route_policies import policy_for_route
+
+        if not policy_for_route(route).deprecated:
+            return
+        from apps.forensics.models import OperationalEvent
+
+        try:
+            OperationalEvent.objects.create(
+                organization_id=actor.organization_id,
+                event_type="compatibility.route.used",
+                payload_json={"route": route, "method": request.method},
+            )
+        except Exception:
+            # Compatibility telemetry must not weaken or interrupt authorization.
+            return
 
     @staticmethod
     def _verify_privileged_session(request, actor):

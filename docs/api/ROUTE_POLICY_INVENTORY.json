@@ -1,0 +1,1832 @@
+[
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "admin/organizations/<uuid:organization_id>/admin-transfer",
+    "scope": "organization",
+    "view": "apps.forensics.api.authentication.admin_transfer"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "alerts",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_alerts"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "mutation",
+    "route": "alerts/<str:alert_id>/status",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_alert_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "anomalies",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_anomalies"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "anomalies/baseline-comparison",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_anomaly_baseline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "anomalies/risk-timeline",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_anomaly_risk_timeline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "audit/access-logs",
+    "scope": "organization",
+    "view": "apps.forensics.api.compliance.access_logs"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "audit/export",
+    "scope": "organization",
+    "view": "apps.forensics.api.compliance.audit_export"
+  },
+  {
+    "aal": "none",
+    "authentication": "anonymous",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "auth/login",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_login"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "auth/logout",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_logout"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "auth/me",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_me"
+  },
+  {
+    "aal": "none",
+    "authentication": "anonymous",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "auth/refresh",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_refresh"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capabilities",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.capabilities"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capture-schedules",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_schedules"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capture-schedules/<str:schedule_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_schedule_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capture-schedules/<str:schedule_id>/history",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_schedule_history"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture-schedules/<str:schedule_id>/run-now",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_schedule_run_now"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capture/interfaces",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_interfaces"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/live/<str:job_id>/status",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_live_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/live/<str:job_id>/stop",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_live_stop"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/live/start",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_live_start"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/live/status/<str:job_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_live_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "mutation",
+    "route": "capture/live/stop",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_live_stop"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "structured_log_import",
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "capture/log-import",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_log_import"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/replay/<str:job_id>/status",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_replay_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/replay/<str:job_id>/stop",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_replay_stop"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/replay/start",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_replay_start"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "capture/replay/status/<str:job_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.capture.capture_replay_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "mutation",
+    "route": "capture/replay/stop",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.capture_replay_stop"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases",
+    "scope": "organization",
+    "view": "apps.forensics.api.cases.cases"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/anomaly-explanation",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_anomaly_explanation"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/charts",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_charts"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/custody-ledger",
+    "scope": "case",
+    "view": "apps.forensics.api.compliance.custody_ledger"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "cases/<str:case_id>/custody-ledger/export",
+    "scope": "case",
+    "view": "apps.forensics.api.compliance.custody_export"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/custody-ledger/verify",
+    "scope": "case",
+    "view": "apps.forensics.api.compliance.custody_verify"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/flags",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_flags"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/flags/<str:flag>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_flag_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/history",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_history"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/legal-hold",
+    "scope": "case",
+    "view": "apps.forensics.api.compliance.case_legal_hold"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/legal-review/checklist",
+    "scope": "case",
+    "view": "apps.forensics.api.compliance.case_legal_review_checklist"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/light-summary",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_light_summary"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/linked-evidence",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.case_linked_evidence"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/linked-packets",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.link_stub"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/linked-payloads",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.link_stub"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/linked-sessions",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.link_stub"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/links",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_links"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/links/<str:link_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_link_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/members",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_members"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/members/<str:member_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_member_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "cases/<str:case_id>/notes",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_notes"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "cases/<str:case_id>/reports",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.case_reports"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/summary",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_light_summary"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/tabs/<str:tab_name>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_tab"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "cases/<str:case_id>/workspace",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_workspace"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "compliance/checklist",
+    "scope": "organization",
+    "view": "apps.forensics.api.compliance.compliance_checklist"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "compliance/roles",
+    "scope": "organization",
+    "view": "apps.forensics.api.compliance.compliance_roles"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "compliance/security-posture",
+    "scope": "organization",
+    "view": "apps.forensics.api.compliance.security_posture"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "dashboard/protocol-distribution",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_protocol_distribution"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "dashboard/summary",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_summary"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "dashboard/traffic-timeline",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_traffic_timeline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "decoder/<str:protocol>",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_decoder_protocol"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "decoder/summary",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_decoder"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "detection/matches",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_detections"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "mutation",
+    "route": "detection/matches/<str:match_id>/status",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_detection_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "detection/rules",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.detection_rules"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "events",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.operational_events"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "sse",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "events/stream",
+    "scope": "organization",
+    "view": "apps.forensics.api.events.event_stream"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "evidence/<str:evidence_id>/download",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.evidence_download"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "evidence/<str:evidence_id>/manifest",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.evidence_manifest"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "evidence/<str:evidence_id>/verify-integrity",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.evidence_verify_integrity"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "evidence/normalize-preview",
+    "scope": "organization",
+    "view": "apps.forensics.api.evidence.evidence_normalize_preview"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "evidence/upload",
+    "scope": "organization",
+    "view": "apps.forensics.api.evidence.evidence_upload"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "evidence/upload-sessions",
+    "scope": "organization",
+    "view": "apps.forensics.api.evidence.evidence_upload_sessions"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "evidence/upload-sessions/<uuid:upload_session_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.evidence_upload_session_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "evidence/upload-sessions/<uuid:upload_session_id>/finalize",
+    "scope": "case",
+    "view": "apps.forensics.api.evidence.evidence_upload_session_finalize"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "exports",
+    "scope": "organization",
+    "view": "apps.forensics.api.reports.exports"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "exports/<str:export_id>",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.export_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "exports/<str:export_id>/download",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.export_download"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "graph",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_graph"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "graph/attack-path",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_graph_attack_path"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "graph/nodes/<str:node_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_graph_node"
+  },
+  {
+    "aal": "none",
+    "authentication": "anonymous",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "health",
+    "scope": "none",
+    "view": "apps.forensics.api.operations.health"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_configuration",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.connections"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_configuration",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.connection_detail"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": "integration_configuration",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>/credential",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.credential"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_delivery",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>/deliveries",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.deliveries"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_delivery",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>/deliveries/<str:delivery_id>/retry",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.retry_delivery"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_external_sync",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>/sync",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.external_sync"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_delivery",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/<str:integration_id>/test",
+    "scope": "organization",
+    "view": "apps.forensics.api.integrations.test_delivery"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_configuration",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "integrations/siem/export",
+    "scope": "organization",
+    "view": "apps.forensics.api.reports.siem_export"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "jobs/<str:job_id>/cancel",
+    "scope": "case",
+    "view": "apps.forensics.api.operations.job_cancel"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "jobs/<str:job_id>/events",
+    "scope": "case",
+    "view": "apps.forensics.api.operations.job_events"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "jobs/<str:job_id>/reprocess",
+    "scope": "case",
+    "view": "apps.forensics.api.operations.job_reprocess"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "jobs/<str:job_id>/status",
+    "scope": "case",
+    "view": "apps.forensics.api.operations.job_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "zeek_log_import",
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "logs/import/zeek",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.zeek_log_import"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "ml/model-status",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.ml_model_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "packets",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_packets"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "packets/<str:packet_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_packet_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "payloads",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_payloads"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "payloads/<str:finding_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_payload_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "reports",
+    "scope": "organization",
+    "view": "apps.forensics.api.reports.reports"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "reports/<str:case_id>/generate",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.report_generate"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "reports/<str:case_id>/generate-pdf",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.report_generate"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "reports/<str:case_id>/preview",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.report_preview"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "reports/<str:report_id>/download",
+    "scope": "case",
+    "view": "apps.forensics.api.reports.report_download"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "retention/execute",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.retention_execute"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "retention/policy",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.retention_policy"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "retention/preview",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.retention_preview_view"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "retention/runs",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.retention_runs"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "postgres_search",
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "search",
+    "scope": "case+job",
+    "view": "apps.forensics.api.operations.search"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensor-groups",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_groups"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensor-groups/<str:group_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_group_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensors",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensors"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensors/<str:sensor_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensors/<str:sensor_id>/captures",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_captures"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/<str:sensor_id>/captures/<str:job_id>/complete",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_capture_complete"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/<str:sensor_id>/captures/<str:job_id>/fail",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_capture_fail"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/<str:sensor_id>/chunks",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_chunk_upload"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/<str:sensor_id>/commands/next",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_next_command"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "sensors/<str:sensor_id>/disable",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_disable"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "sensors/<str:sensor_id>/enable",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_enable"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/<str:sensor_id>/heartbeat",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_heartbeat"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "sensors/<str:sensor_id>/history",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensor_history"
+  },
+  {
+    "aal": "none",
+    "authentication": "sensor-key",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "excluded",
+    "route": "sensors/register",
+    "scope": "none",
+    "view": "apps.forensics.api.capture.sensor_register"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "sessions",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_sessions"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "sessions/<str:session_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_session_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": true,
+    "rate_category": "read",
+    "route": "sessions/<str:session_id>/timeline",
+    "scope": "organization",
+    "view": "apps.forensics.api.analysis.legacy_session_timeline"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "setup/admin",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.setup_admin"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "setup/status",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.setup_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/capacity",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_capacity"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/database",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_database"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/dead-letter",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.dead_letter"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "system/dead-letter/<str:event_id>/ignore",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.dead_letter_ignore"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "system/dead-letter/<str:event_id>/retry",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.dead_letter_retry"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/deployment-readiness",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_deployment_readiness"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/health/deep",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_health_deep"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/incident-readiness",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_incident_readiness"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/indexes",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_indexes"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/indexes/retention",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_index_retention"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/kafka",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_kafka"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/kafka/lag",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_kafka_lag"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/metrics",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_metrics"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/realtime",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_realtime"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/sensors",
+    "scope": "organization",
+    "view": "apps.forensics.api.capture.sensors"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "system/status-matrix",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_status_matrix"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/storage",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_storage"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/throughput",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_throughput"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "system/workers",
+    "scope": "organization",
+    "view": "apps.forensics.api.operations.system_workers"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "users",
+    "scope": "organization",
+    "view": "apps.forensics.api.authentication.users"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "users/<str:user_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.authentication.user_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_workspace_by_route"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/alerts",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.alerts"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/alerts/<str:alert_id>/status",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.alert_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.anomalies"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies/baseline-comparison",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.anomaly_baseline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/anomalies/risk-timeline",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.anomaly_risk_timeline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/decoder",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.decoder"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/decoder/<str:protocol>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.decoder_protocol"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/detections",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.detections"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/detections/<str:match_id>/status",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.detection_status"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.graph"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/attack-path",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.graph_attack_path"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/nodes/<str:node_id>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.graph_node"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_delivery",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/integrations/<str:integration_id>/alerts",
+    "scope": "case+job",
+    "view": "apps.forensics.api.integrations.send_alerts"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/packets",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.packets"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/packets/<str:packet_id>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.packet_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/payloads",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.payloads"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/payloads/<str:finding_id>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.payload_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/protocol-distribution",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.protocol_distribution"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "analysis_references",
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/references/<str:kind>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.features.analysis_references"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "postgres_search",
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/search",
+    "scope": "case+job",
+    "view": "apps.forensics.api.features.scoped_search"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.sessions"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions/<str:session_id>",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.session_detail"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/sessions/<str:session_id>/timeline",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.session_timeline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/summary",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.summary"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/traffic-timeline",
+    "scope": "case+job",
+    "view": "apps.forensics.api.analysis.traffic_timeline"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "capture_stop",
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "workspaces/<uuid:route_ref>/capture/jobs/<str:job_id>/stop",
+    "scope": "case+job",
+    "view": "apps.forensics.api.features.capture_stop"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "structured_log_import",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "workspaces/<uuid:route_ref>/imports/capture-log",
+    "scope": "case",
+    "view": "apps.forensics.api.features.capture_log_import"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "zeek_log_import",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "workspaces/<uuid:route_ref>/imports/zeek-log",
+    "scope": "case",
+    "view": "apps.forensics.api.features.zeek_log_import"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_configuration",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "workspaces/<uuid:route_ref>/integrations",
+    "scope": "case",
+    "view": "apps.forensics.api.integrations.workspace_connections"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": "integration_case_linking",
+    "deprecated": false,
+    "rate_category": "specialized",
+    "route": "workspaces/<uuid:route_ref>/integrations/<str:integration_id>/link",
+    "scope": "case",
+    "view": "apps.forensics.api.integrations.link_case"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "workspaces/<uuid:route_ref>/status",
+    "scope": "case",
+    "view": "apps.forensics.api.cases.case_workspace_status"
+  }
+]

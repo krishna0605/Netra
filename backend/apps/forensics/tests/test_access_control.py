@@ -8,7 +8,7 @@ from django.test import Client, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import Case, CaseMembership, Export, ProcessingJob, Report, UserProfile
+from apps.forensics.models import Case, CaseMembership, Export, OperationalEvent, ProcessingJob, Report, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
 from apps.forensics.tests.factories import netra_organization
 from common.audit import sync_supabase_actor
@@ -50,6 +50,17 @@ class ApiAccessControlTests(TestCase):
         self.assertEqual(response.json(), {"status": "ok", "service": "netra-backend"})
         self.assertEqual(self.client.get("/api/cases").status_code, 401)
         self.assertEqual(self.client.get("/api/setup/status").status_code, 401)
+
+    def test_deprecated_route_telemetry_is_minimal_and_tenant_scoped(self):
+        user, headers = self._user("telemetry@example.test", "Investigator")
+        case = self._case("CASE-COMPAT-TELEMETRY")
+        CaseMembership.objects.create(case=case, user=user, role="Investigator")
+
+        self.client.get(f"/api/dashboard/summary?caseId={case.id}", **headers)
+
+        event = OperationalEvent.objects.get(event_type="compatibility.route.used")
+        self.assertEqual(event.organization_id, netra_organization().id)
+        self.assertEqual(event.payload_json, {"route": "dashboard/summary", "method": "GET"})
 
     def test_every_declared_api_route_is_default_deny_for_anonymous_callers(self):
         self.assertGreaterEqual(len(api_urlpatterns), 147)
