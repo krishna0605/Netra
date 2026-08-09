@@ -3,6 +3,7 @@ from django.urls import path
 from apps.forensics import views
 from apps.forensics.api import analysis as analysis_views
 from apps.forensics.api import features as feature_views
+from apps.forensics.api import integrations as integration_views
 
 
 urlpatterns = [
@@ -47,6 +48,9 @@ urlpatterns = [
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/references/<str:kind>", feature_views.analysis_references),
     path("workspaces/<uuid:route_ref>/imports/capture-log", feature_views.capture_log_import),
     path("workspaces/<uuid:route_ref>/imports/zeek-log", feature_views.zeek_log_import),
+    path("workspaces/<uuid:route_ref>/integrations", integration_views.workspace_connections),
+    path("workspaces/<uuid:route_ref>/integrations/<str:integration_id>/link", integration_views.link_case),
+    path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/integrations/<str:integration_id>/alerts", integration_views.send_alerts),
     path("cases/<str:case_id>/summary", views.case_light_summary),
     path("cases/<str:case_id>/light-summary", views.case_light_summary),
     path("cases/<str:case_id>/charts", views.case_charts),
@@ -161,16 +165,14 @@ urlpatterns = [
     path("exports", views.exports),
     path("exports/<str:export_id>", views.export_detail),
     path("exports/<str:export_id>/download", views.export_download),
-    path("integrations", views.integrations),
+    path("integrations", integration_views.connections),
     path("integrations/siem/export", views.siem_export),
-    path("integrations/<str:integration_id>", views.integration_detail),
-    path("integrations/<str:integration_id>/sync", views.integration_sync),
-    path("integrations/<str:integration_id>/test", views.integration_test),
-    path("integrations/<str:integration_id>/send-alerts", views.integration_send_alerts),
-    path("integrations/<str:integration_id>/deliveries", views.integration_deliveries),
-    path("integrations/<str:integration_id>/deliveries/<str:delivery_id>/retry", views.integration_delivery_retry),
-    path("integrations/case-link", views.integration_case_link),
-    path("integrations/case-link/<str:case_id>", views.integration_case_link_detail),
+    path("integrations/<str:integration_id>", integration_views.connection_detail),
+    path("integrations/<str:integration_id>/credential", integration_views.credential),
+    path("integrations/<str:integration_id>/sync", integration_views.external_sync),
+    path("integrations/<str:integration_id>/test", integration_views.test_delivery),
+    path("integrations/<str:integration_id>/deliveries", integration_views.deliveries),
+    path("integrations/<str:integration_id>/deliveries/<str:delivery_id>/retry", integration_views.retry_delivery),
     path("compliance/checklist", views.compliance_checklist),
     path("compliance/roles", views.compliance_roles),
     path("compliance/security-posture", views.security_posture),

@@ -54,6 +54,7 @@ def _defined(
 
 def capability_registry() -> dict[str, CapabilityDefinition]:
     integrations_enabled = bool(getattr(settings, "NETRA_ENABLE_INTEGRATIONS", False))
+    delivery_enabled = integrations_enabled and bool(getattr(settings, "NETRA_WEBHOOK_ALLOWED_HOSTS", []))
     search_provider = getattr(settings, "NETRA_SEARCH_PROVIDER", "postgres")
     return {
         "analysis_references": _defined(
@@ -91,16 +92,21 @@ def capability_registry() -> dict[str, CapabilityDefinition]:
         ),
         "integration_delivery": _defined(
             "integration_delivery",
-            implemented=False,
-            enabled=False,
-            reason="Outbound delivery remains unavailable until the durable worker is installed.",
+            implemented=True,
+            enabled=delivery_enabled,
+            reason="Durable outbound webhook delivery is available."
+            if delivery_enabled
+            else "Outbound delivery requires integrations and an exact webhook hostname allowlist.",
             requires_aal2=True,
+            durable_consumer="postgres-worker:integration_delivery",
         ),
         "integration_case_linking": _defined(
             "integration_case_linking",
-            implemented=False,
-            enabled=False,
-            reason="Durable integration case links are not installed yet.",
+            implemented=True,
+            enabled=integrations_enabled,
+            reason="Durable organization-scoped case links are available."
+            if integrations_enabled
+            else "Integration case linking is disabled for this deployment profile.",
         ),
         "integration_external_sync": _defined(
             "integration_external_sync",

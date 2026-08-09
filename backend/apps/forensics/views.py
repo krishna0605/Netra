@@ -1,13 +1,10 @@
 import json
 import logging
 import os
-import hmac
 import hashlib
 import ipaddress
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -25,6 +22,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
 from apps.forensics.services.administration import AdministrationProblem, ensure_admin_mutation_allowed, transfer_administrator
+from apps.forensics.services.webhook_delivery import queue_delivery
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
 from common.analysis_contract import empty_analysis
@@ -2944,33 +2942,17 @@ def integration_delivery_retry(request, integration_id: str, delivery_id: str):
 
 
 def _deliver_webhook(connection: IntegrationConnection, payload: dict, delivery_type: str, case: Case | None = None) -> IntegrationDelivery:
-    url = str(connection.config.get("url", "")).strip()
-    if not url:
-        return IntegrationDelivery.objects.create(integration=connection, case=case, delivery_type=delivery_type, payload_json=payload, result="failed", response_summary="Webhook URL is not configured.")
-    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    credential = getattr(connection, "credential", None)
-    secret = credential.secret_value if credential else ""
-    signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest() if secret else ""
-    headers = {"Content-Type": "application/json", "User-Agent": "Netra/phase5"}
-    if signature:
-        headers["X-Netra-Signature"] = signature
-    summary = ""
-    result = "failed"
-    for attempt in range(1, 4):
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="POST"), timeout=5) as response:
-                preview = response.read(200).decode("utf-8", errors="replace").strip()
-                summary = f"HTTP {response.status}" + (f" {preview}" if preview else "")
-                result = "success" if 200 <= response.status < 300 else "failed"
-            if result == "success":
-                break
-        except urllib.error.HTTPError as exc:
-            summary = f"HTTP {exc.code}"
-        except Exception as exc:
-            summary = f"{type(exc).__name__}: {exc}"
-        if attempt < 3:
-            time.sleep(0.25 * attempt)
-    return IntegrationDelivery.objects.create(integration=connection, case=case, delivery_type=delivery_type, payload_json=payload, result=result, response_summary=summary)
+    key = hashlib.sha256(
+        f"legacy-adapter:{connection.pk}:{case.pk if case else ''}:{delivery_type}:{json.dumps(payload, sort_keys=True)}".encode("utf-8")
+    ).hexdigest()
+    delivery, _ = queue_delivery(
+        integration=connection,
+        case=case,
+        delivery_type=delivery_type,
+        payload=payload,
+        idempotency_key=key,
+    )
+    return delivery
 
 
 @csrf_exempt

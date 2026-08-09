@@ -27,6 +27,6 @@ class CapabilityContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         capabilities = response.json()["results"]
         self.assertEqual(capabilities["postgres_search"]["state"], "available")
-        self.assertEqual(capabilities["integration_delivery"]["state"], "not_implemented")
+        self.assertEqual(capabilities["integration_delivery"]["state"], "disabled")
         self.assertEqual(capabilities["integration_configuration"]["state"], "disabled")
         self.assertEqual(self.client.get("/api/auth/me", **self.headers).json()["capabilities"], capabilities)

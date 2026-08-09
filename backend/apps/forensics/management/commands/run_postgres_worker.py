@@ -13,6 +13,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from apps.forensics.models import WorkerHeartbeat
+from apps.forensics.services.webhook_delivery import claim_next_delivery, process_delivery
 from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import claim_next_job, mark_job_failure, renew_job_lease
 from common.quarantine_cleanup import cleanup_worker_artifacts
@@ -45,6 +46,13 @@ class Command(BaseCommand):
             job = claim_next_job(worker_id)
             self._heartbeat(worker_id, job.id if job else "")
             if job is None:
+                delivery = claim_next_delivery(worker_id) if settings.NETRA_ENABLE_INTEGRATIONS else None
+                if delivery is not None:
+                    completed = process_delivery(delivery)
+                    self.stdout.write(f"Integration delivery {completed.pk} ended as {completed.result}")
+                    if options["once"]:
+                        return
+                    continue
                 if options["once"]:
                     return
                 time.sleep(settings.NETRA_JOB_POLL_SECONDS)
