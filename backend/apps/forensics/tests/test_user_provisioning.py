@@ -52,6 +52,14 @@ class SupabaseUserProvisioningTests(TestCase):
         ):
             return users(self._request(payload))
 
+    def _list(self, actor=None):
+        request = self.factory.get("/api/users", {"limit": "50"})
+        with (
+            patch("apps.forensics.api.authentication.require_permission", return_value=None),
+            patch("apps.forensics.api.authentication.actor_from_request", return_value=actor or self.actor),
+        ):
+            return users(request)
+
     @patch("apps.forensics.api.authentication.invite_user", return_value=SUPABASE_USER)
     def test_invitation_creates_unusable_local_identity_and_audit(self, invite):
         response = self._call({"email": "Invitee@Netra.Test", "name": "Invitee", "role": "Viewer"})
@@ -89,3 +97,30 @@ class SupabaseUserProvisioningTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(json.loads(response.content)["error"]["code"], "user_invitations_disabled")
         self.assertFalse(get_user_model().objects.filter(username="invitee@netra.test").exists())
+
+    @patch("apps.forensics.api.authentication.list_auth_users", return_value=([SUPABASE_USER], None))
+    def test_user_list_adds_bounded_auth_metadata(self, _list_users):
+        invited = get_user_model().objects.create_user(username="invitee@netra.test", email="invitee@netra.test")
+        UserProfile.objects.create(user=invited, organization=self.organization, role=UserProfile.Role.VIEWER)
+        response = self._list()
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        row = next(item for item in payload["results"] if item["email"] == "invitee@netra.test")
+        self.assertEqual(row["authState"], "invited")
+        self.assertEqual(row["mfaState"], "unenrolled")
+        self.assertEqual(row["organization"]["slug"], "netra")
+        self.assertIn("nextCursor", payload)
+
+    @patch("apps.forensics.api.authentication.list_auth_users", side_effect=SupabaseAdminError("offline"))
+    def test_auth_metadata_failure_degrades_without_hiding_local_users(self, _list_users):
+        response = self._list()
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["authMetadataStatus"], "degraded")
+        self.assertEqual(payload["results"][0]["mfaState"], "unknown")
+
+    def test_aal1_admin_cannot_list_user_security_metadata(self):
+        aal1_actor = Actor(**{**self.actor.__dict__, "aal": "aal1"})
+        response = self._list(aal1_actor)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.content)["error"]["code"], "aal2_required")

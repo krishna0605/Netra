@@ -35,7 +35,9 @@ class OrganizationBoundaryTests(TestCase):
     def _identity(self, email, role, organization):
         user = get_user_model().objects.create_user(username=email, email=email)
         profile = UserProfile.objects.create(user=user, organization=organization, role=role, department="Shared Department")
-        token = str(RefreshToken.for_user(user).access_token)
+        token = RefreshToken.for_user(user).access_token
+        token["aal"] = "aal2"
+        token = str(token)
         return user, profile, {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
     def _case(self, case_id, organization):

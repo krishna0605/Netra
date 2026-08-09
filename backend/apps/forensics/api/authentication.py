@@ -14,6 +14,7 @@ from django.contrib.auth import authenticate, get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models import Max
 from django.http import Http404, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -33,6 +34,7 @@ from common.supabase_admin import (
     SupabaseAdminError,
     find_user_by_email,
     invite_user,
+    list_users as list_auth_users,
 )
 
 
@@ -222,12 +224,12 @@ def users(request):
     if denied:
         return denied
     User = get_user_model()
+    actor = actor_from_request(request)
+    try:
+        ensure_admin_mutation_allowed(actor)
+    except AdministrationProblem as problem:
+        return _administration_problem_response(problem)
     if request.method == "POST":
-        actor = actor_from_request(request)
-        try:
-            ensure_admin_mutation_allowed(actor)
-        except AdministrationProblem as problem:
-            return _administration_problem_response(problem)
         payload = _json_body(request)
         email = str(payload.get("email") or "").strip().lower()
         role = payload.get("role", "Viewer")
@@ -365,25 +367,76 @@ def users(request):
             },
             status=201,
         )
-    rows = []
-    actor = actor_from_request(request)
-    profiles = (
+    try:
+        limit = max(1, min(100, int(request.GET.get("limit", "50"))))
+        cursor = max(0, int(request.GET.get("cursor", "0")))
+    except ValueError:
+        return JsonResponse(
+            {"error": {"code": "invalid_cursor", "message": "The user-list cursor is invalid."}},
+            status=400,
+        )
+    profile_query = (
         UserProfile.objects.filter(organization_id=actor.organization_id)
-        .select_related("user")
+        .select_related("user", "organization")
         .order_by("user__username")
     )
+    total = profile_query.count()
+    profiles = list(profile_query[cursor : cursor + limit])
+    user_ids = [profile.user_id for profile in profiles]
+    last_activity = {
+        row["user_id"]: row["latest"]
+        for row in AccessLog.objects.filter(organization_id=actor.organization_id, user_id__in=user_ids)
+        .values("user_id")
+        .annotate(latest=Max("created_at"))
+    }
+    auth_by_email = {}
+    auth_metadata_status = "not_applicable"
+    if getattr(settings, "NETRA_AUTH_PROVIDER", "") == "supabase":
+        auth_metadata_status = "available"
+        try:
+            auth_users, _ = list_auth_users(page=1)
+            auth_by_email = {row.email: row for row in auth_users}
+        except SupabaseAdminError:
+            auth_metadata_status = "degraded"
+    rows = []
     for profile in profiles:
         user = profile.user
-        rows.append(
-            {
-                "id": user.id,
-                "email": user.username,
-                "name": profile.display_name,
-                "role": profile.role,
-                "active": user.is_active,
-            }
-        )
-    return JsonResponse({"results": rows})
+        auth_user = auth_by_email.get(user.username.strip().lower())
+        invitation_state = "unknown"
+        auth_state = "unknown" if auth_metadata_status == "degraded" else "missing"
+        mfa_state = "unknown" if auth_metadata_status == "degraded" else "unenrolled"
+        last_sign_in_at = ""
+        if auth_user:
+            auth_state = "active" if auth_user.email_confirmed_at else "invited"
+            invitation_state = "accepted" if auth_user.email_confirmed_at else "pending"
+            mfa_state = auth_user.mfa_state
+            last_sign_in_at = auth_user.last_sign_in_at
+        rows.append({
+            "id": user.id,
+            "email": user.username,
+            "name": profile.display_name,
+            "role": profile.role,
+            "active": user.is_active,
+            "organization": {
+                "id": str(profile.organization_id),
+                "name": profile.organization.name,
+                "slug": profile.organization.slug,
+            },
+            "authState": auth_state,
+            "invitationState": invitation_state,
+            "mfaState": mfa_state,
+            "lastSignInAt": last_sign_in_at,
+            "lastActivityAt": last_activity[user.id].isoformat() if last_activity.get(user.id) else "",
+        })
+    next_cursor = cursor + limit if cursor + limit < total else None
+    return JsonResponse(
+        {
+            "results": rows,
+            "users": rows,
+            "nextCursor": next_cursor,
+            "authMetadataStatus": auth_metadata_status,
+        }
+    )
 
 
 @csrf_exempt

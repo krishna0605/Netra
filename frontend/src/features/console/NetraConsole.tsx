@@ -99,6 +99,7 @@ import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "../auth/AuthPa
 import { AuthProvider } from "../auth/AuthProvider";
 import { useAuth } from "../auth/AuthContext";
 import { MfaPage } from "../auth/MfaPage";
+import AdminUsersPage from "../admin/AdminUsersPage";
 import {
   PublicAboutPage,
   PublicContactPage,
@@ -1736,6 +1737,7 @@ function AppShell() {
               <Route path="settings" element={<Navigate to={appViewRoute("settings")} replace />} />
               <Route path="settings/technical-status" element={<Navigate to={appViewRoute("technicalStatus")} replace />} />
               <Route path="settings/security" element={<MfaPage allowAdditional />} />
+              <Route path="admin/users" element={<AdminUsersPage />} />
               <Route path="settings/sensors" element={<Navigate to={appViewRoute("sensors")} replace />} />
               <Route path="settings/schedules" element={<Navigate to={appViewRoute("schedules")} replace />} />
               <Route path="settings/integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />
@@ -3515,6 +3517,8 @@ function SettingsPage() {
   const { deploymentAccess } = useNetra();
   const sections: { module: DeploymentModuleKey; title: string; description: string; href: string; icon: LucideIcon }[] = [
     { module: "system", title: "Technical Status", description: "Deployment health, workers, storage, database, ML artifact, and operational diagnostics.", href: appViewRoute("technicalStatus"), icon: Activity },
+    { module: "system", title: "User Administration", description: "AAL2-protected invitations, roles, account activation, MFA state, and Administrator transfer.", href: "/app/admin/users", icon: Fingerprint },
+    { module: "system", title: "Account Security", description: "Enroll an additional authenticator and review the current MFA policy.", href: "/app/settings/security", icon: Fingerprint },
     { module: "sensors", title: "Sensors", description: "Enrollment, heartbeats, interfaces, groups, and bounded native-capture controls.", href: appViewRoute("sensors"), icon: Database },
     { module: "schedules", title: "Schedules", description: "One-time and recurring capture windows for enrolled external sensors.", href: appViewRoute("schedules"), icon: History },
     { module: "integrations", title: "Integrations", description: "Administrator-managed SIEM and signed webhook destinations and delivery history.", href: appViewRoute("integrations"), icon: FileText },
