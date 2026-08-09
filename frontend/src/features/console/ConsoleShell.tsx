@@ -4,6 +4,7 @@ import { appViewRoute } from "./ConsoleCore";
 import { AuthProvider } from "../auth/AuthProvider";
 import { caseWorkspaceRoute } from "./ConsoleCore";
 import { cn } from "../../lib/utils";
+import { useCapabilities } from "../../lib/useCapabilities";
 import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "../auth/AuthPages";
 import { Link, Navigate, NavLink, Route, BrowserRouter as Router, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { MetadataRow } from "./reports/ReportPages";
@@ -115,6 +116,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 export function LoginPage() {
+  const { available } = useCapabilities();
   const navigate = useNavigate();
   const location = useLocation();
   const { state, session, signIn: authenticateSession, signOut: endSession } = useAuth();
@@ -172,7 +174,7 @@ export function LoginPage() {
           <Button type="submit" disabled={loading || !email || !password}>
             {loading ? "Signing in..." : "Sign in"}
           </Button>
-          <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link>
+          {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link> : null}
         </form>}
       </section>
     </main>

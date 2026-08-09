@@ -20,7 +20,7 @@ class RoutePolicy:
     deprecated: bool = False
 
 
-_ANONYMOUS = {"health", "auth/login", "auth/refresh"}
+_ANONYMOUS = {"health", "capabilities", "auth/login", "auth/refresh"}
 _SENSOR_SUFFIXES = (
     "sensors/register",
     "/heartbeat",

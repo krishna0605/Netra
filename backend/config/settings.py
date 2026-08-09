@@ -142,6 +142,7 @@ NETRA_MFA_POLICY = os.getenv("NETRA_MFA_POLICY", "admin_required").strip().lower
 if NETRA_MFA_POLICY not in {"admin_required", "optional"}:
     raise RuntimeError("NETRA_MFA_POLICY must be admin_required or optional")
 NETRA_AUTH_INVITATIONS_ENABLED = os.getenv("NETRA_AUTH_INVITATIONS_ENABLED", "0") == "1"
+NETRA_PASSWORD_RECOVERY_ENABLED = os.getenv("NETRA_PASSWORD_RECOVERY_ENABLED", "0") == "1"
 NETRA_AUTH_INVITE_REDIRECT_URL = os.getenv("NETRA_AUTH_INVITE_REDIRECT_URL", "").strip()
 NETRA_AUTH_ADMIN_TIMEOUT_SECONDS = max(1, min(15, int(os.getenv("NETRA_AUTH_ADMIN_TIMEOUT_SECONDS", "5"))))
 NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES = max(4096, min(1048576, int(os.getenv("NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES", "65536"))))

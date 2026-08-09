@@ -120,13 +120,13 @@
     "view": "apps.forensics.api.authentication.auth_refresh"
   },
   {
-    "aal": "aal1",
-    "authentication": "bearer",
+    "aal": "none",
+    "authentication": "anonymous",
     "capability": null,
     "deprecated": false,
-    "rate_category": "read",
+    "rate_category": "excluded",
     "route": "capabilities",
-    "scope": "organization",
+    "scope": "none",
     "view": "apps.forensics.api.operations.capabilities"
   },
   {

@@ -95,7 +95,9 @@ class SupabaseUserProvisioningTests(TestCase):
         with override_settings(NETRA_AUTH_INVITATIONS_ENABLED=False):
             response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Viewer"})
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(json.loads(response.content)["error"]["code"], "user_invitations_disabled")
+        payload = json.loads(response.content)
+        self.assertEqual(payload["error"]["code"], "feature_disabled")
+        self.assertEqual(payload["error"]["feature"], "user_invitations")
         self.assertFalse(get_user_model().objects.filter(username="invitee@netra.test").exists())
 
     @patch("apps.forensics.api.authentication.list_auth_users", return_value=([SUPABASE_USER], None))

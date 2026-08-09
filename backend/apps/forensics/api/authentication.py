@@ -249,8 +249,9 @@ def users(request):
                 return JsonResponse(
                     {
                         "error": {
-                            "code": "user_invitations_disabled",
-                            "message": "User invitations are not enabled for this deployment.",
+                            "code": "feature_disabled",
+                            "message": "User invitations require an approved custom SMTP domain.",
+                            "feature": "user_invitations",
                         }
                     },
                     status=503,

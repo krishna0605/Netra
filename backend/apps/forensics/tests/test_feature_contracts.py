@@ -23,9 +23,12 @@ class CapabilityContractTests(TestCase):
         self.client = Client()
 
     def test_capabilities_are_authoritative_and_also_exposed_by_identity(self):
-        response = self.client.get("/api/capabilities", **self.headers)
+        response = self.client.get("/api/capabilities")
         self.assertEqual(response.status_code, 200)
         capabilities = response.json()["results"]
+        self.assertEqual(capabilities["user_invitations"]["state"], "disabled")
+        self.assertEqual(capabilities["password_recovery"]["state"], "disabled")
+        self.assertTrue(capabilities["user_invitations"]["requires_aal2"])
         self.assertEqual(capabilities["postgres_search"]["state"], "available")
         self.assertEqual(capabilities["integration_delivery"]["state"], "disabled")
         self.assertEqual(capabilities["integration_configuration"]["state"], "disabled")

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { Link, useNavigate } from "react-router-dom";
 
 import { Alert, Button, Input } from "../../components/ui/primitives";
+import { useCapabilities } from "../../lib/useCapabilities";
 import { clearNetraSessionState, supabase, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { passwordChecks, validPassword } from "./passwordPolicy";
 
@@ -28,6 +29,8 @@ function AuthShell({ eyebrow, title, description, children }: {
 
 
 export function ForgotPasswordPage() {
+  const { available, loaded, reason } = useCapabilities();
+  const recoveryEnabled = available("password_recovery");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -36,8 +39,8 @@ export function ForgotPasswordPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    if (!supabase) {
-      setError("Password recovery is not configured for this deployment.");
+    if (!recoveryEnabled || !supabase) {
+      setError(reason("password_recovery"));
       return;
     }
     setBusy(true);
@@ -56,13 +59,19 @@ export function ForgotPasswordPage() {
 
   return (
     <AuthShell eyebrow="NETRA / Account recovery" title="Reset your password." description="Use the email address assigned by your Netra administrator.">
-      {!SUPABASE_AUTH_ENABLED ? <Alert>Password recovery is unavailable in this build.</Alert> : null}
-      {submitted ? (
+      {!loaded ? <Alert>Checking password-recovery availability…</Alert> : null}
+      {loaded && (!SUPABASE_AUTH_ENABLED || !recoveryEnabled) ? (
+        <div className="mt-5 grid gap-4" role="status" aria-live="polite">
+          <Alert>{reason("password_recovery")}</Alert>
+          <Link className="text-sm font-semibold text-accent underline" to="/login">Return to sign in</Link>
+        </div>
+      ) : null}
+      {loaded && recoveryEnabled && submitted ? (
         <div className="mt-5 grid gap-4" role="status" aria-live="polite">
           <Alert>If an eligible account exists, recovery instructions have been sent. Check your inbox and spam folder.</Alert>
           <Link className="text-sm font-semibold text-accent underline" to="/login">Return to sign in</Link>
         </div>
-      ) : (
+      ) : loaded && recoveryEnabled ? (
         <form className="mt-5 grid gap-4" onSubmit={submit} noValidate>
           <div className="grid gap-1">
             <label htmlFor="recovery-email" className="text-sm font-semibold text-strong">Email</label>
@@ -72,13 +81,16 @@ export function ForgotPasswordPage() {
           <Button type="submit" disabled={busy || !email}>{busy ? "Requesting…" : "Send recovery instructions"}</Button>
           <Link className="text-sm font-semibold text-accent underline" to="/login">Return to sign in</Link>
         </form>
-      )}
+      ) : null}
     </AuthShell>
   );
 }
 
 
 function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
+  const { available, loaded, reason } = useCapabilities();
+  const capabilityKey = mode === "invite" ? "user_invitations" : "password_recovery";
+  const featureEnabled = available(capabilityKey);
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -90,9 +102,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
   const acceptedLink = mode === "invite" || window.location.search.includes("code=") || window.location.hash.includes("type=recovery");
 
   useEffect(() => {
-    if (!supabase) {
-      return undefined;
-    }
+    if (!loaded || !featureEnabled || !supabase) return undefined;
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
@@ -106,7 +116,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
     return () => {
       mounted = false;
     };
-  }, [acceptedLink]);
+  }, [acceptedLink, featureEnabled, loaded]);
 
   async function complete(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,8 +147,15 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
       title={mode === "invite" ? "Complete your account." : "Choose a new password."}
       description="This link proves control of your email account. It never assigns a Netra organization or role."
     >
-      {checking ? <Alert>Validating the secure link…</Alert> : null}
-      {!checking && !sessionReady ? (
+      {!loaded ? <Alert>Checking email-account availability…</Alert> : null}
+      {loaded && !featureEnabled ? (
+        <div className="mt-5 grid gap-4" role="status" aria-live="polite">
+          <Alert>{reason(capabilityKey)}</Alert>
+          <Link className="text-sm font-semibold text-accent underline" to="/login">Return to sign in</Link>
+        </div>
+      ) : null}
+      {featureEnabled && checking ? <Alert>Validating the secure link…</Alert> : null}
+      {featureEnabled && !checking && !sessionReady ? (
         <div className="mt-5 grid gap-4" role="alert">
           <Alert>This secure link is invalid, already used, or expired.</Alert>
           <Link className="text-sm font-semibold text-accent underline" to={mode === "invite" ? "/login" : "/auth/forgot-password"}>
@@ -146,7 +163,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
           </Link>
         </div>
       ) : null}
-      {!checking && sessionReady ? (
+      {featureEnabled && !checking && sessionReady ? (
         <form className="mt-5 grid gap-4" onSubmit={complete} noValidate>
           <div className="grid gap-1">
             <label htmlFor={`${mode}-password`} className="text-sm font-semibold text-strong">New password</label>

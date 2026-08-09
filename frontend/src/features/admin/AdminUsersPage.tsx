@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 
 import { Alert, Badge, Button, Dialog, DialogContent, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/primitives";
+import { useCapabilities } from "../../lib/useCapabilities";
 import { getCurrentAccessToken } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthContext";
 
@@ -47,6 +48,8 @@ function dateLabel(value: string) {
 }
 
 export default function AdminUsersPage() {
+  const { available, reason: capabilityReason } = useCapabilities();
+  const invitationsEnabled = available("user_invitations");
   const { state } = useAuth();
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,7 +167,7 @@ export default function AdminUsersPage() {
         {status ? <p className="rounded-xl border border-emerald-400/30 bg-emerald-950/20 p-4 text-sm text-emerald-100" role="status" aria-live="polite">{status}</p> : null}
         {authMetadataStatus === "degraded" ? <Alert>Supabase Auth metadata is temporarily unavailable. Local role and activation controls remain authoritative.</Alert> : null}
 
-        <section className="surface rounded-[1.5rem] p-5" aria-labelledby="invite-heading">
+        {invitationsEnabled ? <section className="surface rounded-[1.5rem] p-5" aria-labelledby="invite-heading">
           <h2 id="invite-heading" className="text-xl font-black text-strong">Invite a user</h2>
           <p className="mt-1 text-sm text-muted">Netra sends a signed invitation. No temporary password is generated or displayed.</p>
           <form className="mt-4 grid gap-3 md:grid-cols-4" onSubmit={inviteUser}>
@@ -173,7 +176,7 @@ export default function AdminUsersPage() {
             <div className="grid gap-1"><label htmlFor="invite-role" className="text-sm font-semibold">Role</label><Select value={invite.role} onValueChange={(role) => setInvite((current) => ({ ...current, role }))}><SelectTrigger id="invite-role"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Investigator">Investigator</SelectItem><SelectItem value="Analyst">Analyst</SelectItem><SelectItem value="Viewer">Viewer</SelectItem></SelectContent></Select></div>
             <Button className="self-end" type="submit" disabled={inviteBusy}>{inviteBusy ? "Sending…" : "Send invitation"}</Button>
           </form>
-        </section>
+        </section> : <Alert>{capabilityReason("user_invitations")}</Alert>}
 
         <section className="surface overflow-hidden rounded-[1.5rem]" aria-labelledby="users-heading">
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">

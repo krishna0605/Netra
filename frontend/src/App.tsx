@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
 
+import { CapabilityProvider } from "./lib/CapabilityProvider";
+
 const NetraConsole = lazy(() => import("./features/console/NetraConsole"));
 const AuthApplication = lazy(() => import("./features/auth/AuthApplication"));
 
@@ -22,9 +24,11 @@ export default function App() {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <Suspense fallback={<AppLoadingScreen />}>
-        <RouteApplication />
-      </Suspense>
+      <CapabilityProvider>
+        <Suspense fallback={<AppLoadingScreen />}>
+          <RouteApplication />
+        </Suspense>
+      </CapabilityProvider>
     </>
   );
 }

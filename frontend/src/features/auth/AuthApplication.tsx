@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react
 import { Toaster } from "sonner";
 
 import { Alert, Button, Input } from "../../components/ui/primitives";
+import { useCapabilities } from "../../lib/useCapabilities";
 import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { AuthProvider } from "./AuthProvider";
 import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "./AuthPages";
@@ -16,6 +17,7 @@ function safeDestination(value: string | null) {
 
 
 function LoginPage() {
+  const { available } = useCapabilities();
   const location = useLocation();
   const { session, signIn, signOut, state } = useAuth();
   const [email, setEmail] = useState("");
@@ -57,7 +59,7 @@ function LoginPage() {
             <div className="grid gap-1"><label htmlFor="login-email" className="text-sm font-semibold">Email</label><Input id="login-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
             <div className="grid gap-1"><label htmlFor="login-password" className="text-sm font-semibold">Password</label><Input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
             <Button type="submit" disabled={busy || !email || !password} aria-busy={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-            <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link>
+            {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link> : null}
           </form>
         )}
       </section>

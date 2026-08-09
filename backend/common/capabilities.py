@@ -57,6 +57,23 @@ def capability_registry() -> dict[str, CapabilityDefinition]:
     delivery_enabled = integrations_enabled and bool(getattr(settings, "NETRA_WEBHOOK_ALLOWED_HOSTS", []))
     search_provider = getattr(settings, "NETRA_SEARCH_PROVIDER", "postgres")
     return {
+        "user_invitations": _defined(
+            "user_invitations",
+            implemented=True,
+            enabled=bool(getattr(settings, "NETRA_AUTH_INVITATIONS_ENABLED", False)),
+            reason="Organization user invitations are available."
+            if getattr(settings, "NETRA_AUTH_INVITATIONS_ENABLED", False)
+            else "User invitations require an approved custom SMTP domain.",
+            requires_aal2=True,
+        ),
+        "password_recovery": _defined(
+            "password_recovery",
+            implemented=True,
+            enabled=bool(getattr(settings, "NETRA_PASSWORD_RECOVERY_ENABLED", False)),
+            reason="Password recovery is available."
+            if getattr(settings, "NETRA_PASSWORD_RECOVERY_ENABLED", False)
+            else "Password recovery requires an approved custom SMTP domain.",
+        ),
         "analysis_references": _defined(
             "analysis_references",
             implemented=True,

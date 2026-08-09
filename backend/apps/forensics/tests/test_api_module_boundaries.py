@@ -68,4 +68,4 @@ class ApiModuleBoundaryTests(SimpleTestCase):
                 )
             if policy.capability is not None:
                 self.assertIn(policy.capability, capability_keys)
-        self.assertEqual(anonymous_routes, {"health", "auth/login", "auth/refresh"})
+        self.assertEqual(anonymous_routes, {"health", "capabilities", "auth/login", "auth/refresh"})

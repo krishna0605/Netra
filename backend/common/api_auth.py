@@ -129,7 +129,9 @@ class NetraApiAuthMiddleware:
     def __call__(self, request):
         if not request.path.startswith("/api/") or not settings.NETRA_PUBLIC_API_AUTH_REQUIRED:
             return self.get_response(request)
-        if request.method == "OPTIONS" or (request.method == "GET" and request.path.rstrip("/") == "/api/health"):
+        if request.method == "OPTIONS" or (
+            request.method == "GET" and request.path.rstrip("/") in {"/api/health", "/api/capabilities"}
+        ):
             return self.get_response(request)
         if settings.NETRA_AUTH_PROXY_ENABLED and request.path.rstrip("/") in {"/api/auth/login", "/api/auth/refresh"}:
             return self.get_response(request)
