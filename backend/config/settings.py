@@ -319,7 +319,7 @@ if not DEBUG:
         raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=0")
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
-    SECURE_REFERRER_POLICY = "same-origin"
+    SECURE_REFERRER_POLICY = "no-referrer"
     SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True

@@ -277,3 +277,14 @@ class CorsTests(TestCase):
         self.assertNotIn("Access-Control-Allow-Origin", denied)
         self.assertNotIn("X-Netra-Role", allowed["Access-Control-Allow-Headers"])
         self.assertIn("DELETE", allowed["Access-Control-Allow-Methods"])
+
+    def test_api_security_headers_are_fail_closed_and_cross_origin_compatible(self):
+        response = self.client.get("/api/health", HTTP_ORIGIN="https://console.example.test")
+        self.assertEqual(response["Content-Security-Policy"], "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response["X-Frame-Options"], "DENY")
+        self.assertEqual(response["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response["Permissions-Policy"], "camera=(), geolocation=(), microphone=(), payment=(), usb=()")
+        self.assertEqual(response["Cross-Origin-Resource-Policy"], "cross-origin")
+        self.assertEqual(response["Access-Control-Allow-Origin"], "https://console.example.test")
+        self.assertNotIn("Access-Control-Allow-Credentials", response)

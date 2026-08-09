@@ -7,5 +7,9 @@ class ApiSecurityHeadersMiddleware:
         if request.path.startswith("/api/"):
             response.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
             response.setdefault("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()")
+            response.setdefault("X-Content-Type-Options", "nosniff")
+            response.setdefault("X-Frame-Options", "DENY")
+            response.setdefault("Referrer-Policy", "no-referrer")
+            response.setdefault("Cross-Origin-Resource-Policy", "cross-origin")
             response.setdefault("Cache-Control", "no-store")
         return response
