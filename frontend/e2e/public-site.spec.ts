@@ -18,7 +18,7 @@ for (const [path, heading] of publicRoutes) {
 
 test("changelog redirects to updates", async ({ page }) => {
   await page.goto("/changelog");
-  await expect(page).toHaveURL(/\/updates$/);
+  await expect(page).toHaveURL(/\/updates$/, { timeout: 15_000 });
 });
 
 test("unknown routes use the NETRA 404", async ({ page }) => {

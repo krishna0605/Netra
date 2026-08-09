@@ -12,6 +12,11 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     reuseExistingServer: true,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      VITE_SUPABASE_URL: "https://netra-auth.test",
+      VITE_SUPABASE_PUBLISHABLE_KEY: "local-publishable-key-for-browser-tests-only",
+    },
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },

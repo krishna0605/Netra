@@ -335,7 +335,7 @@ export function PublicHomePage({ languageControl }: PublicPageProps) {
 
   return (
     <PublicShell languageControl={languageControl} className="home-public-site">
-      <main>
+      <main id="main-content">
         <section className="hero-section" id="hero">
           <aside className="hero-audience"><span>Built for</span><strong>Cybercrime teams</strong><div className="audience-symbol"><i /><i /><i /></div><div className="audience-symbol stacked"><i /><i /><i /></div></aside>
           <div className="hero-copy">
@@ -444,7 +444,7 @@ export function PublicAboutPage(props: PublicPageProps) {
     ["Platform engineering", "Supabase data services, authenticated APIs, storage, queues, and reporting."],
     ["Product systems", "Accessible investigation screens, multilingual UI, and print-safe outputs."],
   ];
-  return <PublicShell {...props} className="about-public-site"><main className="about-page">
+  return <PublicShell {...props} className="about-public-site"><main className="about-page" id="main-content">
     <section className="about-hero" id="about-top"><aside /><div className="about-hero-content"><motion.div {...reveal(0)}><SectionLabel>About NETRA</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>A focused system,<br />built with intent.</motion.h1><motion.p {...reveal(.2)}>Network evidence is complex. NETRA is designed to help cybercrime teams preserve what was observed, understand how signals connect, and communicate conclusions without hiding uncertainty.</motion.p><motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/" }}>Open investigation console</Link></Button></motion.div></div></section>
     <section className="about-story"><aside /><div className="about-story-content"><div className="about-operations-image"><MosaicPoster /><span>NETRA / EVIDENCE OPERATIONS</span></div><div className="about-story-grid"><div><SectionLabel>Hello</SectionLabel><h2>Build conclusions from evidence, not opacity.</h2><p>NETRA brings packet capture, protocol evidence, explainable detections, anomaly review, case context, custody history, and reporting into one investigation workflow.</p><p>The system is built around a simple constraint: an investigator should be able to move from a conclusion back to the traffic and reasoning that support it.</p></div><div className="about-metrics"><article><strong>12</strong><span>Detection families</span></article><article><strong>08</strong><span>Decoded protocols</span></article><article><strong>24/7</strong><span>Sensor-ready operations</span></article><article><strong>03</strong><span>Report languages</span></article></div></div></div></section>
     <div className="about-section-system"><aside className="about-rail" aria-label="About sections">{aboutSections.map((label, index) => <a key={label} href={`#about-${index + 1}`} className={activeSection === index ? "active" : ""} aria-current={activeSection === index ? "location" : undefined}><span>0{index + 1}</span>{label}<i style={{ transform: `scaleX(${activeSection === index ? sectionProgress : 0})` }} /></a>)}</aside><div className="about-section-stack">
@@ -458,7 +458,7 @@ export function PublicAboutPage(props: PublicPageProps) {
 
 export function PublicUpdatesPage(props: PublicPageProps) {
   const reveal = useDispatchReveal();
-  return <PublicShell {...props} className="updates-public-site"><main className="updates-page">
+  return <PublicShell {...props} className="updates-public-site"><main className="updates-page" id="main-content">
     <section className="updates-hero"><motion.div {...reveal(0)}><SectionLabel>Threat brief</SectionLabel></motion.div><motion.h1 {...reveal(.1)}>Cyber risk,<br />seen clearly.</motion.h1><motion.p {...reveal(.2)}>How common cyber attacks reach people across India, which patterns matter now, and what to preserve when an incident happens.</motion.p></section>
     <section className="updates-timeline" aria-label="India cyber threat brief">
       {publicUpdates.map((update, index) => <ThreatBriefCard key={update.version} update={update} index={index} />)}
@@ -490,7 +490,7 @@ export function PublicContactPage(props: PublicPageProps) {
     if (contactEmail) window.location.href = `mailto:${contactEmail}?subject=${encodeURIComponent(`NETRA enquiry from ${form.get("name")}`)}&body=${encodeURIComponent(String(form.get("message") ?? ""))}`;
     setSubmitted(true);
   }
-  return <PublicShell {...props}><main><InteriorHero label="Contact" title="Bring a network-evidence workflow into focus." body="Share the investigation, deployment, or integration context you want to discuss." /><section className="contact-section cream-section"><div><SectionLabel index="01">Enquiry</SectionLabel><h2>Describe the evidence problem.</h2><p>This prototype does not send form data to a third-party service. Configure <code>VITE_CONTACT_EMAIL</code> to open an addressed email draft.</p></div><form onSubmit={submit}><label>Name<Input name="name" required /></label><label>Email<Input name="email" type="email" required /></label><label>Message<Textarea name="message" required /></label><Button type="submit" className="clip-button">Prepare enquiry</Button>{submitted && <p role="status">Your enquiry is ready in the configured email workflow.</p>}</form></section></main></PublicShell>;
+  return <PublicShell {...props}><main id="main-content"><InteriorHero label="Contact" title="Bring a network-evidence workflow into focus." body="Share the investigation, deployment, or integration context you want to discuss." /><section className="contact-section cream-section"><div><SectionLabel index="01">Enquiry</SectionLabel><h2>Describe the evidence problem.</h2><p>This prototype does not send form data to a third-party service. Configure <code>VITE_CONTACT_EMAIL</code> to open an addressed email draft.</p></div><form onSubmit={submit}><label>Name<Input name="name" required /></label><label>Email<Input name="email" type="email" required /></label><label>Message<Textarea name="message" required /></label><Button type="submit" className="clip-button">Prepare enquiry</Button>{submitted && <p role="status">Your enquiry is ready in the configured email workflow.</p>}</form></section></main></PublicShell>;
 }
 
 export function PublicPrivacyPage(props: PublicPageProps) {
@@ -502,9 +502,9 @@ export function PublicTermsPage(props: PublicPageProps) {
 }
 
 function LegalPage({ title, intro, sections, ...props }: PublicPageProps & { title: string; intro: string; sections: string[][] }) {
-  return <PublicShell {...props}><main className="legal-page"><InteriorHero label="NETRA legal" title={title} body={intro} /><article>{sections.map(([heading, body], index) => <section key={heading}><span>0{index + 1}</span><h2>{heading}</h2><p>{body}</p></section>)}</article></main></PublicShell>;
+  return <PublicShell {...props}><main className="legal-page" id="main-content"><InteriorHero label="NETRA legal" title={title} body={intro} /><article>{sections.map(([heading, body], index) => <section key={heading}><span>0{index + 1}</span><h2>{heading}</h2><p>{body}</p></section>)}</article></main></PublicShell>;
 }
 
 export function PublicNotFoundPage(props: PublicPageProps) {
-  return <PublicShell {...props}><main className="not-found"><span>404 / ROUTE NOT FOUND</span><h1>The requested path is outside this case.</h1><p>Return to the public NETRA overview or open the investigation console.</p><div><Button asChild className="clip-button"><Link to="/">Return home</Link></Button><Button asChild variant="outline"><Link to="/login">Open console</Link></Button></div></main></PublicShell>;
+  return <PublicShell {...props}><main className="not-found" id="main-content"><span>404 / ROUTE NOT FOUND</span><h1>The requested path is outside this case.</h1><p>Return to the public NETRA overview or open the investigation console.</p><div><Button asChild className="clip-button"><Link to="/">Return home</Link></Button><Button asChild variant="outline"><Link to="/login">Open console</Link></Button></div></main></PublicShell>;
 }
