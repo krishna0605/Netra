@@ -116,3 +116,4 @@ Desktop.ini
 *.sln
 *.sw?
 .vercel/
+/infra/supabase/.temp/
