@@ -57,12 +57,12 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]",
+        default: "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent-contrast)]",
         secondary: "border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)]",
         success: "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--text)]",
         warning: "border-[var(--border-strong)] bg-[var(--surface-muted)] text-[var(--text)]",
         destructive: "border-[var(--border-strong)] bg-[var(--ink)] text-[var(--bg)]",
-        teal: "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]",
+        teal: "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent-contrast)]",
       },
     },
     defaultVariants: {

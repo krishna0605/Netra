@@ -180,7 +180,12 @@ export default function AdminUsersPage() {
             <div><h2 id="users-heading" className="text-xl font-black text-strong">Provisioned users</h2><p className="mt-1 text-sm text-muted">Authentication metadata is read only when this page is opened.</p></div>
             <Button type="button" variant="secondary" onClick={() => setTransferOpen(true)} disabled={!nonAdminTargets.length}>Transfer Administrator</Button>
           </div>
-          <div className="overflow-x-auto p-4 pt-0">
+          <div
+            aria-label="Organization users table"
+            className="overflow-x-auto p-4 pt-0"
+            role="region"
+            tabIndex={0}
+          >
             <table className="w-full min-w-[980px] text-left text-sm">
               <caption className="sr-only">Organization users, roles, authentication status, MFA status, and recent activity</caption>
               <thead className="border-b border-[var(--border)] text-xs uppercase text-muted"><tr><th scope="col" className="py-3">User</th><th scope="col">Role</th><th scope="col">Account</th><th scope="col">Invitation</th><th scope="col">MFA</th><th scope="col">Last sign in</th><th scope="col">Last activity</th><th scope="col">Actions</th></tr></thead>

@@ -183,7 +183,7 @@ export function LanguageControl() {
   const { language, setLanguage } = useNetra();
   return (
     <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
-      <SelectTrigger className="min-w-28">
+      <SelectTrigger aria-label="Language" className="min-w-28">
         <Languages className="size-4" />
         <SelectValue />
       </SelectTrigger>

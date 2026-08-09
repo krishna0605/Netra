@@ -79,7 +79,7 @@ export function CasesPage() {
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search case, investigator, IP, finding" />
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Filter cases by status"><SelectValue /></SelectTrigger>
             <SelectContent>{["all", "open", "closed"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="secondary" onClick={() => reloadAnalysis()}><Search className="size-4" />Refresh cases</Button>
