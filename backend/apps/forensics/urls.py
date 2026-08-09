@@ -12,6 +12,7 @@ urlpatterns = [
     path("auth/refresh", views.auth_refresh),
     path("auth/logout", views.auth_logout),
     path("auth/me", views.auth_me),
+    path("capabilities", views.capabilities),
     path("users", views.users),
     path("users/<str:user_id>", views.user_detail),
     path("admin/organizations/<uuid:organization_id>/admin-transfer", views.admin_transfer),

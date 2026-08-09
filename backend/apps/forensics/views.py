@@ -36,6 +36,8 @@ from common.custody import custody_event_dict, record_custody_event, verify_case
 from common.detection import classify_detection, load_rules
 from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize_evidence_upload
 from common.indexing import search_index
+from common.capabilities import public_capabilities
+from apps.forensics.api.errors import api_error
 from common.jobs import job_status_payload
 from common.kafka import probe_supabase_queue, publish_event
 from common.queue_limits import OrganizationQueueLimit
@@ -468,6 +470,7 @@ def auth_me(request):
             },
             "aal": actor.aal,
             "privilegedAdminReady": actor.role == "Admin" and actor.aal == "aal2",
+            "capabilities": public_capabilities(),
             "deployment": {
                 "profile": settings.NETRA_DEPLOYMENT_PROFILE,
                 "hostCaptureEnabled": settings.NETRA_ENABLE_HOST_CAPTURE,
@@ -1012,9 +1015,7 @@ def case_member_detail(request, case_id: str, member_id: str):
 @csrf_exempt
 @require_http_methods(["POST"])
 def link_stub(request, case_id: str):
-    payload = _json_body(request)
-    publish_event("netra.case.events", {"type": "case.linked_evidence", "caseId": case_id, "payload": payload})
-    return JsonResponse({"caseId": case_id, "linked": payload}, status=201)
+    return api_error(request, "feature_not_implemented", "Durable analysis references are not installed.", status=501)
 
 
 def _storage_configuration_response() -> JsonResponse:
@@ -1140,6 +1141,10 @@ def evidence_upload_sessions(request):
         settings.NETRA_RATE_LIMIT_UPLOAD_USER_PER_HOUR,
         organization_limit=settings.NETRA_RATE_LIMIT_UPLOAD_ORG_PER_HOUR,
     )
+
+
+def capabilities(_request):
+    return JsonResponse({"results": public_capabilities()})
     if limited:
         return limited
     if not analysis_admission_available():
@@ -1446,13 +1451,7 @@ def capture_live_status(_request, job_id: str):
 @csrf_exempt
 @require_http_methods(["POST"])
 def capture_log_import(request):
-    denied = require_permission(request, "upload", resource_type="LogImport")
-    if denied:
-        return denied
-    payload = _json_body(request)
-    job_id = f"log-{uuid4().hex[:8]}"
-    publish_event("netra.pcap.processing", {"type": "log.imported", "jobId": job_id, "payload": payload})
-    return JsonResponse({"jobId": job_id, "status": "queued", "mode": "log_import"}, status=201)
+    return api_error(request, "feature_not_implemented", "Durable capture-log import is not installed.", status=501)
 
 
 @csrf_exempt
@@ -1959,13 +1958,7 @@ def _operational_event_dict(row: OperationalEvent) -> dict:
 @csrf_exempt
 @require_http_methods(["POST"])
 def zeek_log_import(request):
-    denied = require_permission(request, "upload", resource_type="ZeekLog")
-    if denied:
-        return denied
-    payload = _json_body(request)
-    job_id = f"zeek-log-{uuid4().hex[:8]}"
-    publish_event("netra.protocol.decoded", {"type": "zeek.log.imported", "jobId": job_id, "payload": payload})
-    return JsonResponse({"jobId": job_id, "status": "queued", "mode": "zeek_log_import"}, status=201)
+    return api_error(request, "feature_not_implemented", "Durable Zeek-log import is not installed.", status=501)
 
 
 def job_status(_request, job_id: str):
@@ -2855,9 +2848,8 @@ def _integration_dict(row: IntegrationConnection) -> dict:
 
 @csrf_exempt
 @require_http_methods(["POST"])
-def integration_sync(_request, integration_id: str):
-    publish_event("netra.case.events", {"type": "integration.sync", "integrationId": integration_id})
-    return JsonResponse({"integrationId": integration_id, "status": "sync-requested"})
+def integration_sync(request, integration_id: str):
+    return api_error(request, "feature_not_implemented", "No reviewed external synchronization adapter is installed.", status=501)
 
 
 @csrf_exempt
@@ -3011,15 +3003,11 @@ def siem_export(request):
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def integration_case_link(request):
-    if request.method == "POST":
-        payload = _json_body(request)
-        publish_event("netra.case.events", {"type": "case.integration_linked", "payload": payload})
-        return JsonResponse({"status": "linked", **payload}, status=201)
-    return JsonResponse({"results": [], "syncStatus": "not-linked"})
+    return api_error(request, "feature_not_implemented", "Durable integration case links are not installed.", status=501)
 
 
-def integration_case_link_detail(_request, case_id: str):
-    return JsonResponse({"caseId": case_id, "reportedCaseId": "", "syncStatus": "not-linked"})
+def integration_case_link_detail(request, case_id: str):
+    return api_error(request, "feature_not_implemented", "Durable integration case links are not installed.", status=501)
 
 
 def compliance_checklist(_request):

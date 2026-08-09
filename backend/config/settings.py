@@ -108,7 +108,7 @@ if NETRA_FREE_PLAN_GUARD and NETRA_REALTIME_PROVIDER == "supabase":
     # Keep stale deployment variables from overriding the guarded profile.
     NETRA_REALTIME_PROVIDER = "sse"
 NETRA_AUTH_PROVIDER = os.getenv("NETRA_AUTH_PROVIDER", "django").lower()
-NETRA_SEARCH_PROVIDER = os.getenv("NETRA_SEARCH_PROVIDER", "elasticsearch").lower()
+NETRA_SEARCH_PROVIDER = os.getenv("NETRA_SEARCH_PROVIDER", "postgres").lower()
 NETRA_DATABASE_MODE = os.getenv("NETRA_DATABASE_MODE", "docker-postgres")
 NETRA_KAFKA_BOOTSTRAP = os.getenv("NETRA_KAFKA_BOOTSTRAP", "localhost:9092")
 NETRA_ELASTICSEARCH_URL = os.getenv("NETRA_ELASTICSEARCH_URL", "http://localhost:9200")
