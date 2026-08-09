@@ -22,7 +22,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
+from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
+from apps.forensics.services.administration import AdministrationProblem, require_privileged_admin
+from apps.forensics.services.integration_credentials import store_integration_secret
 from apps.forensics.services.webhook_delivery import queue_delivery
 from common.audit import access_log_dict, actor_from_request, add_history, can_actor_access_case, log_access, require_permission, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
@@ -83,6 +85,10 @@ def integrations(request):
         denied = require_permission(request, "integrations", resource_type="IntegrationConnection")
         if denied:
             return denied
+        try:
+            require_privileged_admin(actor, actor.organization_id)
+        except AdministrationProblem as problem:
+            return api_error(request, problem.code, problem.message, status=problem.status)
         payload = _json_body(request)
         connection, _ = IntegrationConnection.objects.update_or_create(
             organization_id=actor.organization_id,
@@ -94,7 +100,7 @@ def integrations(request):
             },
         )
         if payload.get("secret"):
-            IntegrationCredential.objects.update_or_create(integration=connection, defaults={"secret_label": "webhook-hmac", "secret_value": payload["secret"]})
+            store_integration_secret(connection, str(payload["secret"]), label="webhook-hmac")
         return JsonResponse(_integration_dict(connection), status=201)
     rows = [
         _integration_dict(row)

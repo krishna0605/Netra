@@ -16,7 +16,7 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.forensics.models import IntegrationDelivery
+from apps.forensics.models import IntegrationCredential, IntegrationDelivery
 from apps.forensics.services.integration_credentials import read_integration_secret
 
 
@@ -123,6 +123,13 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 
 def queue_delivery(*, integration, case, delivery_type: str, payload: dict, idempotency_key: str) -> tuple[IntegrationDelivery, bool]:
+    if IntegrationCredential.objects.filter(
+        integration__organization_id=integration.organization_id
+    ).exclude(secret_value="").exists():
+        raise WebhookDeliveryProblem(
+            "integration_credentials_migration_required",
+            "Integration delivery is disabled until legacy credentials are migrated.",
+        )
     if len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > settings.NETRA_WEBHOOK_REQUEST_MAX_BYTES:
         raise WebhookDeliveryProblem("webhook_payload_too_large", "The webhook payload exceeds the configured limit.")
     delivery, created = IntegrationDelivery.objects.get_or_create(

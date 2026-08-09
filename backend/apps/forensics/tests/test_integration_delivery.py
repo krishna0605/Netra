@@ -1,5 +1,8 @@
+import ast
 import io
+import json
 import socket
+from pathlib import Path
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +22,7 @@ from apps.forensics.services.webhook_delivery import (
     queue_delivery,
     validate_webhook_url,
 )
+from common.readiness import deployment_readiness_payload
 from apps.forensics.tests.factories import netra_organization
 
 
@@ -123,6 +127,56 @@ class IntegrationCredentialTests(TestCase):
         self.assertEqual(credential.secret_value, "legacy-secret")
         self.assertEqual(credential.secret_envelope, {})
         self.assertIn("PLAN ONLY", output.getvalue())
+
+    def test_plan_only_json_summary_contains_counts_and_no_secret(self):
+        IntegrationCredential.objects.create(
+            integration=self.connection,
+            secret_label="legacy",
+            secret_value="legacy-secret",
+        )
+        output = io.StringIO()
+        call_command("migrate_integration_credentials", "--json", stdout=output)
+        summary = json.loads(output.getvalue())
+        self.assertEqual(summary, {"mode": "plan", "legacyCredentialCount": 1, "migratedCount": 0})
+        self.assertNotIn("legacy-secret", output.getvalue())
+
+    def test_legacy_plaintext_degrades_readiness_and_disables_delivery(self):
+        IntegrationCredential.objects.create(
+            integration=self.connection,
+            secret_label="legacy",
+            secret_value="legacy-secret",
+        )
+        checks = {item["name"]: item for item in deployment_readiness_payload()["checks"]}
+        self.assertEqual(checks["integration-credentials-encrypted"]["status"], "fail")
+        with self.assertRaisesRegex(WebhookDeliveryProblem, "disabled until legacy credentials are migrated"):
+            queue_delivery(
+                integration=self.connection,
+                case=None,
+                delivery_type="test",
+                payload={"source": "netra"},
+                idempotency_key="blocked-by-legacy-credential",
+            )
+
+    def test_production_source_has_no_direct_plaintext_credential_write(self):
+        source_root = Path(__file__).resolve().parents[3]
+        offenders = []
+        for path in source_root.rglob("*.py"):
+            if "migrations" in path.parts or "tests" in path.parts or path.name == "models.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                values = []
+                if isinstance(node, ast.Call):
+                    values.extend(keyword.value for keyword in node.keywords if keyword.arg == "secret_value")
+                if isinstance(node, ast.Dict):
+                    values.extend(
+                        value
+                        for key, value in zip(node.keys, node.values)
+                        if isinstance(key, ast.Constant) and key.value == "secret_value"
+                    )
+                if any(not (isinstance(value, ast.Constant) and value.value == "") for value in values):
+                    offenders.append(f"{path.relative_to(source_root)}:{node.lineno}")
+        self.assertEqual(offenders, [])
 
     def test_configuration_rejects_nested_credentials(self):
         response = self.client.post(

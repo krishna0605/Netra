@@ -17,6 +17,7 @@ from apps.forensics.models import (
     DeadLetterEvent,
     EvidenceFile,
     Export,
+    IntegrationCredential,
     OperationalEvent,
     Organization,
     ProcessingJob,
@@ -176,6 +177,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
         ).count()
         != 1
     ]
+    legacy_plaintext_credentials = IntegrationCredential.objects.exclude(secret_value="").count()
     checks = [
         _deployment_check("debug-disabled", not settings.DEBUG, "Django debug mode is disabled.", "Set DJANGO_DEBUG=0 before shared deployment.", required=True),
         _deployment_check("secret-key-set", bool(getattr(settings, "SECRET_KEY", "")) and settings.SECRET_KEY != "netra-development-only-secret", "Django secret key is non-default.", "Set a strong DJANGO_SECRET_KEY.", required=True),
@@ -258,6 +260,13 @@ def deployment_readiness_payload() -> dict[str, Any]:
         _deployment_check("runtime-role", getattr(settings, "NETRA_RUNTIME_ROLE", "") in {"api", "worker"}, "Runtime role is explicit.", "Set NETRA_RUNTIME_ROLE to api or worker.", required=True),
         _deployment_check("worker-only-processing", getattr(settings, "NETRA_PROCESSING_MODE", "") == "postgres-worker" and not getattr(settings, "NETRA_SYNC_FALLBACK_ENABLED", True), "Packet analysis is worker-only.", "Set NETRA_PROCESSING_MODE=postgres-worker and NETRA_SYNC_FALLBACK_ENABLED=0.", required=True),
         _deployment_check("search-provider", getattr(settings, "NETRA_SEARCH_PROVIDER", "") == "postgres", "Postgres search is active.", "Set NETRA_SEARCH_PROVIDER=postgres for Supabase mode.", required=False),
+        _deployment_check(
+            "integration-credentials-encrypted",
+            legacy_plaintext_credentials == 0,
+            "Integration credentials use encrypted envelopes.",
+            f"Migrate {legacy_plaintext_credentials} legacy integration credential row(s) before enabling delivery.",
+            required=False,
+        ),
         _deployment_check(
             "https-plan",
             bool(getattr(settings, "NETRA_PUBLIC_BASE_URL", "").startswith("https://")) or not getattr(settings, "NETRA_REQUIRE_HTTPS", False),
