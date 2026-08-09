@@ -3579,6 +3579,8 @@ function LabToolsPage() {
   const [labError, setLabError] = useState("");
   const selectedSensor = sensors.find((sensor) => sensor.id === sensorId);
   const terminal = captureJob ? ["completed", "failed", "stopped"].includes(captureJob.status) : true;
+  const captureJobId = captureJob?.jobId;
+  const captureJobMode = captureJob?.mode;
 
   const loadSensors = useCallback(async () => {
     try {
@@ -3605,12 +3607,12 @@ function LabToolsPage() {
   }, [deploymentAccess.sensorCaptureEnabled, loadSensors]);
 
   useEffect(() => {
-    if (!captureJob || terminal) return undefined;
+    if (!captureJobId || !captureJobMode || terminal) return undefined;
     let mounted = true;
     const refresh = async () => {
-      const family = captureJob.mode === "replay" ? "replay" : "live";
+      const family = captureJobMode === "replay" ? "replay" : "live";
       try {
-        const current = await apiGet<CaptureJobRecord>(`/capture/${family}/${captureJob.jobId}/status`);
+        const current = await apiGet<CaptureJobRecord>(`/capture/${family}/${captureJobId}/status`);
         if (!mounted) return;
         setCaptureJob(current);
         setLabError("");
@@ -3628,7 +3630,7 @@ function LabToolsPage() {
       mounted = false;
       window.clearInterval(timer);
     };
-  }, [captureJob?.jobId, captureJob?.mode, terminal, reloadAnalysis]);
+  }, [captureJobId, captureJobMode, terminal, reloadAnalysis]);
 
   async function startReplay() {
     if (!replayFile) {

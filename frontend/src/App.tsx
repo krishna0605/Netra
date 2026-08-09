@@ -1,6 +1,9 @@
 import { lazy, Suspense } from "react";
 
 const NetraConsole = lazy(() => import("./features/console/NetraConsole"));
+const AuthApplication = lazy(() => import("./features/auth/AuthApplication"));
+
+const AUTH_ROUTE_PATTERN = /^\/(?:login|auth(?:\/|$))/;
 
 function AppLoadingScreen() {
   return (
@@ -15,11 +18,12 @@ function AppLoadingScreen() {
 }
 
 export default function App() {
+  const RouteApplication = AUTH_ROUTE_PATTERN.test(window.location.pathname) ? AuthApplication : NetraConsole;
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <Suspense fallback={<AppLoadingScreen />}>
-        <NetraConsole />
+        <RouteApplication />
       </Suspense>
     </>
   );
