@@ -2812,12 +2812,14 @@ def export_download(request, export_id: str):
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def integrations(request):
+    actor = actor_from_request(request)
     if request.method == "POST":
         denied = require_permission(request, "integrations", resource_type="IntegrationConnection")
         if denied:
             return denied
         payload = _json_body(request)
         connection, _ = IntegrationConnection.objects.update_or_create(
+            organization_id=actor.organization_id,
             system_name=payload.get("systemName", "Local webhook"),
             defaults={
                 "status": "pending",
@@ -2828,7 +2830,10 @@ def integrations(request):
         if payload.get("secret"):
             IntegrationCredential.objects.update_or_create(integration=connection, defaults={"secret_label": "webhook-hmac", "secret_value": payload["secret"]})
         return JsonResponse(_integration_dict(connection), status=201)
-    rows = [_integration_dict(row) for row in IntegrationConnection.objects.order_by("system_name")]
+    rows = [
+        _integration_dict(row)
+        for row in IntegrationConnection.objects.filter(organization_id=actor.organization_id).order_by("system_name")
+    ]
     return JsonResponse({"results": rows})
 
 

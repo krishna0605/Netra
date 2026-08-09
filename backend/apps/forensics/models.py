@@ -455,6 +455,11 @@ class ProcessingJob(TimeStampedModel):
         FAILED = "failed", "Failed"
         CANCELED = "canceled", "Canceled"
 
+    class OperationKind(models.TextChoices):
+        ANALYSIS = "analysis", "Analysis"
+        CAPTURE_LOG_IMPORT = "capture_log_import", "Capture log import"
+        ZEEK_LOG_IMPORT = "zeek_log_import", "Zeek log import"
+
     id = models.CharField(max_length=64, primary_key=True)
     case = models.ForeignKey(Case, related_name="processing_jobs", on_delete=models.CASCADE)
     evidence_file = models.ForeignKey(EvidenceFile, related_name="processing_jobs", null=True, blank=True, on_delete=models.SET_NULL)
@@ -467,7 +472,13 @@ class ProcessingJob(TimeStampedModel):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True)
-    processing_path = models.CharField(max_length=32, default="sync-fallback")
+    processing_path = models.CharField(max_length=32, default="postgres-worker")
+    operation_kind = models.CharField(
+        max_length=32,
+        choices=OperationKind.choices,
+        default=OperationKind.ANALYSIS,
+        db_index=True,
+    )
     fallback_reason = models.TextField(blank=True)
     stage_deadline_at = models.DateTimeField(null=True, blank=True)
     last_progress_at = models.DateTimeField(null=True, blank=True)
@@ -657,18 +668,28 @@ class Export(TimeStampedModel):
 
 
 class IntegrationConnection(TimeStampedModel):
-    system_name = models.CharField(max_length=160, unique=True)
+    organization = models.ForeignKey(Organization, related_name="integration_connections", on_delete=models.PROTECT)
+    system_name = models.CharField(max_length=160)
     status = models.CharField(max_length=32, default="pending")
     last_sync_at = models.DateTimeField(null=True, blank=True)
     linked_cases_count = models.PositiveIntegerField(default=0)
     api_mode = models.CharField(max_length=160)
     config = models.JSONField(default=dict, blank=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "system_name"], name="netra_integration_org_name_uniq"),
+        ]
+        indexes = [models.Index(fields=["organization", "status"], name="netra_integration_org_idx")]
+
 
 class IntegrationCredential(TimeStampedModel):
     integration = models.OneToOneField(IntegrationConnection, related_name="credential", on_delete=models.CASCADE)
     secret_label = models.CharField(max_length=160, blank=True)
     secret_value = models.TextField(blank=True)
+    secret_version = models.CharField(max_length=32, blank=True)
+    secret_key_id = models.CharField(max_length=80, blank=True)
+    secret_envelope = models.JSONField(default=dict, blank=True)
 
 
 class IntegrationDelivery(TimeStampedModel):
@@ -680,6 +701,75 @@ class IntegrationDelivery(TimeStampedModel):
     response_summary = models.TextField(blank=True)
     artifact_path = models.CharField(max_length=500, blank=True)
     artifact_sha256 = models.CharField(max_length=64, blank=True)
+    idempotency_key = models.CharField(max_length=128, unique=True, null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=2)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    lease_owner = models.CharField(max_length=160, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["result", "next_attempt_at"], name="netra_delivery_ready_idx"),
+            models.Index(fields=["result", "lease_expires_at"], name="netra_delivery_lease_idx"),
+        ]
+
+
+class AnalysisReference(TimeStampedModel):
+    class Kind(models.TextChoices):
+        PACKET = "packet", "Packet"
+        SESSION = "session", "Session"
+        PAYLOAD = "payload", "Payload"
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    organization = models.ForeignKey(Organization, related_name="analysis_references", on_delete=models.PROTECT)
+    case = models.ForeignKey(Case, related_name="analysis_references", on_delete=models.CASCADE)
+    processing_job = models.ForeignKey(ProcessingJob, related_name="analysis_references", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    source_reference = models.CharField(max_length=160)
+    evidence_file = models.ForeignKey(EvidenceFile, null=True, blank=True, related_name="analysis_references", on_delete=models.SET_NULL)
+    metadata_json = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, related_name="netra_analysis_references", on_delete=models.SET_NULL)
+    created_by_label = models.CharField(max_length=160, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "processing_job", "kind", "source_reference"],
+                name="netra_analysis_ref_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "case", "kind"], name="netra_analysis_ref_org_idx"),
+            models.Index(fields=["processing_job", "kind"], name="netra_analysis_ref_job_idx"),
+        ]
+
+
+class IntegrationCaseLink(TimeStampedModel):
+    class SyncStatus(models.TextChoices):
+        DISABLED = "disabled", "Disabled"
+        PENDING = "pending", "Pending"
+        READY = "ready", "Ready"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    organization = models.ForeignKey(Organization, related_name="integration_case_links", on_delete=models.PROTECT)
+    case = models.ForeignKey(Case, related_name="integration_links", on_delete=models.CASCADE)
+    integration = models.ForeignKey(IntegrationConnection, related_name="case_links", on_delete=models.CASCADE)
+    external_case_reference = models.CharField(max_length=160, blank=True)
+    sync_enabled = models.BooleanField(default=False)
+    sync_status = models.CharField(max_length=16, choices=SyncStatus.choices, default=SyncStatus.DISABLED)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, related_name="netra_integration_case_links", on_delete=models.SET_NULL)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["case", "integration"], name="netra_case_integration_uniq"),
+        ]
+        indexes = [models.Index(fields=["organization", "sync_status", "updated_at"], name="netra_case_link_sync_idx")]
 
 
 class CaseHistoryEvent(TimeStampedModel):

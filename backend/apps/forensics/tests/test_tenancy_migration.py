@@ -21,11 +21,12 @@ class TenancySchemaTests(TestCase):
         self.assertEqual(self.netra.name, "Netra")
         self.assertEqual(self.netra.max_queued_analyses, 5)
 
-    def test_phase_two_schema_has_41_domain_and_10_framework_tables(self):
+    def test_phase_five_schema_has_43_domain_and_10_framework_tables(self):
         domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
-        self.assertEqual(len(domain_tables), 41)
-        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 15)
+        self.assertEqual(len(domain_tables), 43)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 16)
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
+        self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0016_analysis_references_and_integration_links").exists())
 
     def test_case_display_reference_is_unique_within_organization(self):
         Case.objects.create(
