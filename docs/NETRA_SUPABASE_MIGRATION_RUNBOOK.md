@@ -173,7 +173,7 @@ the dashboard delta reaches 0.75 GiB even if the local meter is lower.
 
 Before reopening writes, verify:
 
-- 53 public application tables and 16 Netra Django migrations.
+- 53 public application tables and 17 Netra Django migrations.
 - Source and target data manifests match.
 - One Auth user and one identity exist; sessions and refresh tokens are empty.
 - Seven private buckets and 608 hash-verified objects exist.

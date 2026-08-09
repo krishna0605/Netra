@@ -2,7 +2,7 @@
 
 Audit date: 7 August 2026 (Asia/Kolkata)
 
-Phase 5 local update: 9 August 2026. The tenancy, custody-ordering, and durable feature migrations are local only. Production remains on the previously deployed schema; migrations `0014` through `0016`, their schema changes, and the new environment names have not been applied to Supabase or Railway. The expected repository schema after those migrations is 53 public application tables and 16 forensics migrations.
+Phase 8A local update: 9 August 2026. The tenancy, custody-ordering, durable feature, and detector-provenance migrations are local only. Production remains on the previously deployed schema; migrations `0014` through `0017`, their schema changes, and the new environment names have not been applied to Supabase or Railway. The expected repository schema after those migrations is 53 public application tables and 17 forensics migrations.
 
 Current decision: **the application stack is switched to the new Supabase
 project, but production evidence writes remain NO-GO until the two owner
@@ -21,7 +21,7 @@ This file records names and status only. Never add credential values here.
 | Local test environment | Disposable PostgreSQL 17 concurrency evidence | Completed locally against a disposable PostgreSQL 17.6 container; no Supabase connection was used. | Repeat in Phase 7 CI using an isolated service container. Never substitute a Supabase free-plan project. |
 | Phase 4 activation | Separate Railway API and worker services | Local images are split and pinned, but the Phase 4 topology has not been deployed or sized on Railway Hobby. | Confirm service separation, CPU/memory limits, worker persistent volume, and expected Hobby usage before preview deployment. |
 | Phase 4 activation | Migration `0015` rehearsal | Hash-link backfill and failure cases pass locally, but production data has not been rehearsed. | Rehearse migrations `0014` and `0015` on an encrypted disposable copy, review every chain, and approve the migration window. |
-| Phase 5 activation | Migration `0016` rehearsal | Durable references, imports, and tenant-owned integration changes pass locally but are not present in the hosted database. | Rehearse migrations `0014` through `0016` on an encrypted disposable copy and approve the migration window. |
+| Phase 5/8 activation | Migrations `0016`–`0017` rehearsal | Durable references, imports, tenant-owned integrations, and truthful detector provenance pass locally but are not present in the hosted database. | Rehearse migrations `0014` through `0017` on an encrypted disposable copy and approve the migration window. |
 | Phase 5 activation | Integration allowlist and consumer approval | Integration delivery is implemented but intentionally disabled without exact approved hosts and worker capacity. | Supply exact HTTPS hostnames, approve the worker consumer, and keep generic external sync disabled until a reviewed adapter exists. |
 | Phase 6 activation | Auth redirects, SMTP, and TOTP | Invitation, password-recovery, and Administrator MFA flows require exact redirects, production email delivery, and an enrolled factor. | Configure the exact invite/recovery redirects and custom SMTP, then complete a controlled TOTP/recovery drill without recording secrets. |
 | Release governance | Phase 7 CI and branch protection | Phases 1–5 are locally implemented, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 6–7 before pushing this branch or opening the production PR. |
@@ -35,7 +35,7 @@ This file records names and status only. Never add credential values here.
 | Area | Verified state |
 |---|---|
 | Target Supabase | Healthy project `frjzewpyjgirorbguegm` in Sydney (`ap-southeast-2`). |
-| Hosted database snapshot | 49 public tables and the previously deployed migration set. Local migrations `0014`–`0016` are not included in this hosted snapshot. Do not describe the hosted target as 53 tables until the reviewed migration sequence is applied and verified. |
+| Hosted database snapshot | 49 public tables and the previously deployed migration set. Local migrations `0014`–`0017` are not included in this hosted snapshot. Do not describe the hosted target as 53 tables until the reviewed migration sequence is applied and verified. |
 | Data API security | Public/`anon`/`authenticated` privileges revoked; Netra tables are not published to Supabase Realtime. |
 | Storage | Seven private buckets exist, zero objects for the fresh start, and routine health checks are metadata-only. |
 | Queues | Fourteen canonical PGMQ queues exist empty. Production processing currently uses the reviewed `postgres-row-lock` worker because only one matching Railway worker is deployed. |
@@ -146,7 +146,7 @@ compiled browser bundle.
   direct authentication closure is 186.63 KiB gzip; the build-time budget passes.
 - Production dependency advisories discovered locally remain a Phase 7
   remediation and scanning gate. Do not push until they are reviewed and cleared.
-- These are local repository results, not evidence that migrations `0014`–`0016`
+- These are local repository results, not evidence that migrations `0014`–`0017`
   or the split worker topology have been activated in production.
 
 Production evidence writes may open only after the permanent Admin and

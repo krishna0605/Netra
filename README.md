@@ -91,10 +91,14 @@ Netra’s remediation work is organized as independently verified phases. The cu
 - a persistent encrypted object cache with LRU eviction and hard capacity gates.
 - worker-only production PCAP processing with bounded parser execution and exact tool capabilities;
 - a canonical detector registry with executable pickle/joblib models removed.
+- parser-free API imports, feature-owned frontend/backend modules, and a machine-checked policy for every API route;
+- truthful deterministic detector provenance and encrypted-only integration credential writes.
 
 New durable artifacts use immutable generation-specific paths. Legacy Fernet artifacts are decrypt-only and can be migrated only through an explicit, resumable, byte-capped command. Custody records are **tamper-evident**, not tamper-proof; direct database administrator access crosses that trust boundary.
 
 See [security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md), the [remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md), and [production migration blockers](docs/PRODUCTION_MIGRATION_MISSING.md) before treating any environment as production-ready.
+
+Phase 8A is verified locally at 53 public application tables and 17 forensics migrations. Phase 8B platform activation, Phase 9 migration, and the controlled production rollout remain incomplete; the remediation branch is not approved for `main`.
 
 ## Free-plan safeguards
 

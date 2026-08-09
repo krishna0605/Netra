@@ -294,7 +294,13 @@ NETRA_WEBHOOK_ALLOWED_HOSTS=
 
 Enable integrations only after exact hostnames are approved and each organization-scoped connection receives an encrypted credential through the AAL2 endpoint. There is no shared webhook signing-secret variable. Never put integration, database, evidence, custody, sensor, or Supabase secret keys in Vercel.
 
-Do not apply migrations 0014–0016, run imports, activate integrations, or open SSE against production during this local phase. The production application remains subject to its separate 0.75 GB migration ceiling and 5 GB uncached Supabase Free-plan operating ceiling.
+Do not apply migrations 0014–0017, run imports, activate integrations, or open SSE against production during this local phase. The production application remains subject to its separate 0.75 GB migration ceiling and 5 GB uncached Supabase Free-plan operating ceiling.
+
+## Phase 8 local closure
+
+Phase 8A closes the repository structural blockers left after Phase 7: the API no longer imports worker analysis code, durable legacy reads are streaming and bounded, frontend/backend feature monoliths are decomposed, all 183 routes have machine-checked policy metadata, authenticated MFA/Admin/case/analysis journeys run at desktop and mobile sizes, deterministic detector provenance is recorded by migration `0017`, and application credential writes use encrypted envelopes only.
+
+Phase 8B is not an ordinary deployment. The repository contracts may be prepared locally, but target hardening, GitHub activation, Railway/Vercel validation, ES256 rotation, SMTP/TOTP drills, and any sanitized platform evidence require explicit owner execution. Do not run `bootstrap_supabase` as a routine pre-deploy command and do not migrate legacy data in Phase 8.
 
 ## Phase 6 local verification
 

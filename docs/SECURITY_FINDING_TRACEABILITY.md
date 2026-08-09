@@ -223,3 +223,21 @@ are complete, but NTR-025 prevents the controlled branch-push approval. Hosted
 JWT activation, GitHub ruleset activation, SMTP/MFA drills, migrations,
 platform sizing/volume proof, and data migration remain separate external
 gates.
+
+## Phase 8A local closure record
+
+Phase 8A closes the Phase 1–7 repository carryovers without contacting a hosted service. Expected state is 53 public application tables, 17 forensics migrations, and zero materialized views.
+
+| Control | Status | Phase 8A evidence |
+|---|---|---|
+| P8-01/P8-02 worker isolation | Verified locally | API modules use worker-neutral job admission; API image has no ML path or parser payload. |
+| P8-03 bounded legacy reads | Verified locally | Legacy Fernet input and report/export responses are streamed through cleanup-aware temporary files with an 8 MiB in-memory ceiling. |
+| P8-04/P8-05 modularization | Verified locally | Console and Django endpoint implementations are owned by bounded feature modules; compatibility files contain composition/adapters only. |
+| P8-06 route policy | Verified locally | A generated inventory covers all 183 routes and CI fails on drift. |
+| P8-07/P8-08 browser coverage | Verified locally | MFA, Admin, case, and analysis journeys pass at desktop and Pixel 7 sizes with no serious/critical axe finding. |
+| P8-09/P8-10 detector truth | Verified locally | Migration `0017_phase8_security_closure` replaces misleading `scikit-v1` provenance and the unused Scikit-learn readiness helper is removed. |
+| P8-11 credential writes | Verified locally | All application writes use encrypted envelopes; legacy plaintext degrades readiness and blocks delivery until explicitly migrated. |
+| P8-12 target hardening | Repository contract pending | Append-only 53-table Supabase hardening SQL is prepared separately in Phase 8B and must be rehearsed before hosted execution. |
+| P8-13 through P8-15 hosted activation | Not executed | Remote workflows, ruleset, migrations, Auth, Railway/Vercel, keys, volume, SMTP, and TOTP drills require owner approval and sanitized evidence. |
+
+Offline regression evidence: 216 backend tests passed with four expected environment-specific skips; 27 PostgreSQL 17 tests passed; 28 frontend unit tests passed; 60 desktop/mobile browser tests passed; lint, build, route-policy inventory, migration drift, and bundle budgets passed. The workstation TShark is 4.6.6; the production worker contract remains pinned to and rejects anything other than 4.6.7.
