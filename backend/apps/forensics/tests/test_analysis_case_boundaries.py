@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.forensics.api import analysis as analysis_module
-from apps.forensics.api import legacy_views
+from apps.forensics.api import legacy_support
 from apps.forensics.models import Alert, Case, CaseHistoryEvent, CaseMembership, CustodyLedgerEvent, DetectionMatch, ProcessingJob, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
 from apps.forensics.tests.factories import netra_organization
@@ -326,10 +326,10 @@ class UnscopedAnalysisHelperTests(SimpleTestCase):
 
     def test_scoped_analysis_helper_requires_a_case(self):
         with self.assertRaises(Http404):
-            legacy_views._case_scoped_analysis(case_id="")
+            legacy_support._case_scoped_analysis(case_id="")
         with self.assertRaises(Http404):
-            legacy_views._case_scoped_analysis(case_id="   ")
+            legacy_support._case_scoped_analysis(case_id="   ")
 
     def test_scoped_analysis_helper_cannot_be_called_positionally(self):
         with self.assertRaises(TypeError):
-            legacy_views._case_scoped_analysis("CASE-ALICE-SCOPE")
+            legacy_support._case_scoped_analysis("CASE-ALICE-SCOPE")

@@ -55,7 +55,7 @@ class ProcessingTopologyTests(TestCase):
         )
 
     def test_missing_worker_capacity_rejects_before_storage_write(self):
-        with patch("apps.forensics.views.save_uploaded_file") as save_uploaded:
+        with patch("apps.forensics.api.evidence.save_uploaded_file") as save_uploaded:
             response = self._upload()
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["code"], "analysis_capacity_unavailable")

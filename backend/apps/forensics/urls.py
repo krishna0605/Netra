@@ -1,6 +1,5 @@
 from django.urls import path
 
-from apps.forensics import views
 from apps.forensics.api import analysis as analysis_views
 from apps.forensics.api import authentication as auth_views
 from apps.forensics.api import capture as capture_views

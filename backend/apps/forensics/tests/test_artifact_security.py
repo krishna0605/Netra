@@ -88,7 +88,7 @@ class CaseIdentifierRequestTests(TestCase):
         with TemporaryDirectory() as temporary_directory, override_settings(
             NETRA_STORAGE_ROOT=Path(temporary_directory) / "storage",
             NETRA_TEMP_ROOT=Path(temporary_directory) / "temp",
-        ), patch("apps.forensics.views.save_uploaded_file") as save_uploaded:
+        ), patch("apps.forensics.api.evidence.save_uploaded_file") as save_uploaded:
             response = self.client.post(
                 "/api/evidence/upload",
                 data={

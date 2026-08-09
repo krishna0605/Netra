@@ -132,7 +132,7 @@ class HackathonGoldenPathTests(TestCase):
             output.extend(struct.pack("<I", block_length))
         return bytes(output)
 
-    @patch("apps.forensics.views.publish_event", return_value=True)
+    @patch("apps.forensics.api.evidence.publish_event", return_value=True)
     def test_real_pcap_upload_filters_ml_persistence_and_pdf_report(self, _publish):
         with tempfile.TemporaryDirectory(prefix="netra-golden-storage-") as storage:
             with self.settings(NETRA_STORAGE_ROOT=Path(storage)):
@@ -247,7 +247,7 @@ class HackathonGoldenPathTests(TestCase):
         self.assertEqual(response.status_code, 413)
         self.assertEqual(response.json()["maximumBytes"], 64 * 1024)
 
-    @patch("apps.forensics.views.publish_event", return_value=True)
+    @patch("apps.forensics.api.evidence.publish_event", return_value=True)
     def test_real_pcapng_is_auto_detected_and_analyzed(self, _publish):
         with tempfile.TemporaryDirectory(prefix="netra-golden-storage-") as storage:
             with self.settings(NETRA_STORAGE_ROOT=Path(storage)):
