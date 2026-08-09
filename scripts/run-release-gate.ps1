@@ -20,11 +20,22 @@ try {
 
     Push-Location backend
     try {
+        $PreviousPythonPath = $env:PYTHONPATH
+        $PreviousExecutablePath = $env:PATH
+        $env:PYTHONPATH = Join-Path $RepositoryRoot "ml-services\anomaly-engine"
+        $LocalWireshark = "C:\Program Files\Wireshark"
+        if (Test-Path -LiteralPath (Join-Path $LocalWireshark "tshark.exe")) {
+            $env:PATH = "$LocalWireshark$([IO.Path]::PathSeparator)$env:PATH"
+        }
         Invoke-Checked { python manage.py test apps.forensics.tests } "Django test suite"
         Invoke-Checked { python manage.py makemigrations --check --dry-run } "Django migration drift check"
         Invoke-Checked { python manage.py check } "Django system check"
         Invoke-Checked { python manage.py generate_route_policy_inventory --check } "Route-policy inventory"
-    } finally { Pop-Location }
+    } finally {
+        $env:PYTHONPATH = $PreviousPythonPath
+        $env:PATH = $PreviousExecutablePath
+        Pop-Location
+    }
 
     Push-Location frontend
     try {

@@ -44,10 +44,13 @@ class ApiAccessControlTests(TestCase):
             investigator="Test Investigator",
         )
 
-    def test_health_is_the_only_minimal_public_operational_response(self):
+    def test_public_operational_responses_are_minimal_and_read_only(self):
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "service": "netra-backend"})
+        capabilities = self.client.get("/api/capabilities")
+        self.assertEqual(capabilities.status_code, 200)
+        self.assertIn("password_recovery", capabilities.json()["results"])
         self.assertEqual(self.client.get("/api/cases").status_code, 401)
         self.assertEqual(self.client.get("/api/setup/status").status_code, 401)
 
@@ -72,7 +75,7 @@ class ApiAccessControlTests(TestCase):
                 response = getattr(self.client, method)(path, data={}, content_type="application/json")
                 self.assertEqual(response.status_code, 401, msg=f"{method.upper()} {path}")
             get_response = self.client.get(path)
-            expected_get = 200 if path.rstrip("/") == "/api/health" else 401
+            expected_get = 200 if path.rstrip("/") in {"/api/health", "/api/capabilities"} else 401
             self.assertEqual(get_response.status_code, expected_get, msg=f"GET {path}")
             self.assertEqual(self.client.options(path).status_code, 200, msg=f"OPTIONS {path}")
 
