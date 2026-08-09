@@ -58,21 +58,27 @@ def capability_registry() -> dict[str, CapabilityDefinition]:
     return {
         "analysis_references": _defined(
             "analysis_references",
-            implemented=False,
-            enabled=False,
-            reason="Durable scoped analysis references are not installed yet.",
+            implemented=True,
+            enabled=True,
+            reason="Durable workspace and analysis-job scoped references are available.",
         ),
         "structured_log_import": _defined(
             "structured_log_import",
-            implemented=False,
-            enabled=False,
-            reason="The durable structured-log consumer is not installed yet.",
+            implemented=True,
+            enabled=bool(getattr(settings, "NETRA_ENABLE_STRUCTURED_IMPORTS", False)),
+            reason="Structured-log import is available."
+            if getattr(settings, "NETRA_ENABLE_STRUCTURED_IMPORTS", False)
+            else "Structured-log import is disabled for this deployment profile.",
+            durable_consumer="postgres-worker:capture_log_import",
         ),
         "zeek_log_import": _defined(
             "zeek_log_import",
-            implemented=False,
-            enabled=False,
-            reason="The durable Zeek-log consumer is not installed yet.",
+            implemented=True,
+            enabled=bool(getattr(settings, "NETRA_ENABLE_STRUCTURED_IMPORTS", False)),
+            reason="Zeek-log import is available."
+            if getattr(settings, "NETRA_ENABLE_STRUCTURED_IMPORTS", False)
+            else "Zeek-log import is disabled for this deployment profile.",
+            durable_consumer="postgres-worker:zeek_log_import",
         ),
         "integration_configuration": _defined(
             "integration_configuration",
@@ -135,4 +141,3 @@ def capability_registry() -> dict[str, CapabilityDefinition]:
 
 def public_capabilities() -> dict[str, dict]:
     return {key: value.as_public_dict() for key, value in capability_registry().items()}
-

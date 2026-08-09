@@ -2,6 +2,7 @@ from django.urls import path
 
 from apps.forensics import views
 from apps.forensics.api import analysis as analysis_views
+from apps.forensics.api import features as feature_views
 
 
 urlpatterns = [
@@ -43,6 +44,9 @@ urlpatterns = [
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph", analysis_views.graph),
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/nodes/<str:node_id>", analysis_views.graph_node),
     path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/graph/attack-path", analysis_views.graph_attack_path),
+    path("workspaces/<uuid:route_ref>/analysis/jobs/<str:job_id>/references/<str:kind>", feature_views.analysis_references),
+    path("workspaces/<uuid:route_ref>/imports/capture-log", feature_views.capture_log_import),
+    path("workspaces/<uuid:route_ref>/imports/zeek-log", feature_views.zeek_log_import),
     path("cases/<str:case_id>/summary", views.case_light_summary),
     path("cases/<str:case_id>/light-summary", views.case_light_summary),
     path("cases/<str:case_id>/charts", views.case_charts),

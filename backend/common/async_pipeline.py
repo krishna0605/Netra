@@ -12,7 +12,7 @@ from django.db import transaction
 from django.core.files import File
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from apps.forensics.models import AnalysisChunk, Case, CaseMembership, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Organization, ProcessingJob, WorkerStageReceipt
+from apps.forensics.models import AnalysisChunk, Case, CaseMembership, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Organization, ProcessingJob, WorkerStageReceipt, ZeekLogSummary
 from common.analysis import analyze_pcap
 from common.audit import Actor, add_history, log_access
 from common.custody import record_custody_event
@@ -46,29 +46,32 @@ def queue_uploaded_evidence(
     organization = netra_organization() if not actor.organization_id else Organization.objects.get(pk=actor.organization_id)
     lock_and_check_queue_capacity(organization.id, job_id=job_id)
     intake = saved.get("intake", {})
-    case, _ = Case.objects.update_or_create(
-        id=case_id,
-        defaults={
-            "organization": organization,
-            "display_reference": case_id,
-            "title": f"Queued PCAP analysis: {saved['filename']}",
-            "investigator": intake.get("investigator") or actor.user,
-            "department": intake.get("department") or "Gujarat Cyber Crime Cell",
-            "priority": intake.get("priority") or "Standard",
-            "origin": case_origin(case_id, intake),
-            "is_test": is_validator_case(case_id, intake),
-            "opened_at": datetime.now(timezone.utc),
-            "source_location": intake.get("sourceLocation", ""),
-            "remarks": intake.get("remarks", ""),
-            "flags_json": intake.get("flags", []),
-        },
-    )
+    case = Case.objects.filter(id=case_id, organization=organization).first()
+    if not case and Case.objects.filter(id=case_id).exists():
+        raise ValueError("The requested case is outside the authenticated organization.")
+    if not case:
+        case = Case.objects.create(
+            id=case_id,
+            organization=organization,
+            display_reference=case_id,
+            title=f"Queued evidence analysis: {saved['filename']}",
+            investigator=intake.get("investigator") or actor.user,
+            department=intake.get("department") or "Gujarat Cyber Crime Cell",
+            priority=intake.get("priority") or "Standard",
+            origin=case_origin(case_id, intake),
+            is_test=is_validator_case(case_id, intake),
+            opened_at=datetime.now(timezone.utc),
+            source_location=intake.get("sourceLocation", ""),
+            remarks=intake.get("remarks", ""),
+            flags_json=intake.get("flags", []),
+        )
     evidence, _ = EvidenceFile.objects.update_or_create(
         id=evidence_id,
         defaults={
             "case": case,
             "filename": saved["filename"],
             "stored_path": saved["stored_path"],
+            "evidence_type": (saved.get("normalization") or {}).get("normalizedType") or EvidenceFile.EvidenceType.PCAP,
             "size_bytes": saved["size_bytes"],
             "sha256": saved["sha256"],
             "uploaded_by": actor.user,
@@ -172,6 +175,23 @@ def process_queued_evidence(payload: dict) -> ProcessingJob:
             external_id=actor_data.get("externalId") or "",
         )
         completed = persist_analysis(analysis, saved, actor)
+        if job.operation_kind == ProcessingJob.OperationKind.ZEEK_LOG_IMPORT:
+            zeek = analysis.get("zeek") if isinstance(analysis.get("zeek"), dict) else {}
+            ZeekLogSummary.objects.update_or_create(
+                id=f"zeek-{job.id}",
+                defaults={
+                    "case": job.case,
+                    "evidence_file": job.evidence_file,
+                    "job_id": job.id,
+                    "status": "completed",
+                    "log_dir": "",
+                    "logs": zeek.get("logs", []),
+                    "summary": zeek.get("summary", analysis.get("summary", {})),
+                    "top_services": zeek.get("topServices", []),
+                    "top_dns_queries": zeek.get("topDnsQueries", []),
+                    "top_external_hosts": zeek.get("topExternalHosts", []),
+                },
+            )
         WorkerStageReceipt.objects.update_or_create(
             idempotency_key=f"{job.id}:analysis-finalized",
             defaults={
