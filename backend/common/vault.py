@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from django.conf import settings
@@ -55,24 +57,37 @@ def decrypt_file(source: str | Path, target: str | Path) -> None:
         decrypt_evidence_v2(source, target_path)
         return
     if settings.NETRA_EVIDENCE_ENCRYPTION != "on":
-        with storage_provider.open_encrypted(source, "rb") as handle:
-            target_path.write_bytes(handle.read())
+        with storage_provider.open_encrypted(source, "rb") as handle, target_path.open("wb") as output:
+            os.chmod(target_path, 0o600)
+            shutil.copyfileobj(handle, output, length=1024 * 1024)
         return
     decrypt_legacy_file(source, target_path)
 
 
 def read_encrypted_or_plain(source: str | Path) -> bytes:
-    if str(source).endswith("/manifest.v2.json"):
-        temporary = temporary_decrypted_copy(source)
+    """Read a deliberately small artifact, rejecting larger payloads before buffering."""
+
+    maximum = settings.NETRA_MAX_INMEMORY_ARTIFACT_BYTES
+    encrypted = settings.NETRA_EVIDENCE_ENCRYPTION == "on" and (
+        str(source).endswith(".enc") or str(source).endswith("/manifest.v2.json")
+    )
+    if encrypted:
+        temporary = Path(temporary_decrypted_copy(source))
         try:
-            return Path(temporary).read_bytes()
+            if temporary.stat().st_size > maximum:
+                raise OverflowError("Artifact exceeds NETRA_MAX_INMEMORY_ARTIFACT_BYTES.")
+            with temporary.open("rb") as handle:
+                return handle.read(maximum + 1)
         finally:
-            Path(temporary).unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
+    stat = storage_provider.stat(source)
+    if stat.size_bytes > maximum:
+        raise OverflowError("Artifact exceeds NETRA_MAX_INMEMORY_ARTIFACT_BYTES.")
     with storage_provider.open_encrypted(source, "rb") as handle:
-        content = handle.read()
-    if settings.NETRA_EVIDENCE_ENCRYPTION != "on" or not str(source).endswith(".enc"):
-        return content
-    return legacy_fernet().decrypt(content)
+        content = handle.read(maximum + 1)
+    if len(content) > maximum:
+        raise OverflowError("Artifact exceeds NETRA_MAX_INMEMORY_ARTIFACT_BYTES.")
+    return content
 
 
 def temporary_decrypted_copy(encrypted_path: str | Path) -> str:
@@ -81,6 +96,27 @@ def temporary_decrypted_copy(encrypted_path: str | Path) -> str:
         temp_path = tmp.name
     decrypt_file(encrypted_path, temp_path)
     return temp_path
+
+
+class CleanupArtifactFile:
+    """File wrapper that removes decrypted temporary data when the response closes."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self._handle = self.path.open("rb")
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+    def close(self) -> None:
+        try:
+            self._handle.close()
+        finally:
+            self.path.unlink(missing_ok=True)
+
+
+def open_decrypted_artifact(source: str | Path) -> CleanupArtifactFile:
+    return CleanupArtifactFile(temporary_decrypted_copy(source))
 
 
 def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:

@@ -51,7 +51,7 @@ from common.storage import save_uploaded_file, write_text_artifact
 from common.safe_paths import generated_artifact_filename
 from common.tenancy import netra_organization
 from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
-from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
+from common.vault import fernet, open_decrypted_artifact, temporary_decrypted_copy
 from common.vault_v2 import verify_evidence_v2
 from common.worker_capacity import analysis_admission_available, compatible_analysis_worker_available
 
@@ -2330,7 +2330,12 @@ def report_download(request, report_id: str):
     log_access(actor, "report.download", case=report.case, resource_type="Report", resource_id=report.id)
     filename = report.id.removesuffix(".enc")
     content_type = "application/pdf" if filename.lower().endswith(".pdf") else "text/html"
-    return HttpResponse(read_encrypted_or_plain(report.stored_path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type=content_type)
+    return FileResponse(
+        open_decrypted_artifact(report.stored_path),
+        as_attachment=True,
+        filename=filename,
+        content_type=content_type,
+    )
 
 
 @csrf_exempt
@@ -2408,7 +2413,12 @@ def export_download(request, export_id: str):
     log_access(actor, "export.download", case=export.case, resource_type="Export", resource_id=export.id)
     extension = "cef" if "cef" in export.export_type else ("csv" if "csv" in export.export_type or "alert" in export.export_type else "json")
     filename = f"{export.id}.{extension}"
-    return HttpResponse(read_encrypted_or_plain(export.stored_path), headers={"Content-Disposition": f'attachment; filename="{filename}"'}, content_type="application/octet-stream")
+    return FileResponse(
+        open_decrypted_artifact(export.stored_path),
+        as_attachment=True,
+        filename=filename,
+        content_type="application/octet-stream",
+    )
 
 
 @csrf_exempt

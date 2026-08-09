@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -31,17 +32,25 @@ def legacy_fernet() -> MultiFernet:
 
 
 def decrypt_legacy_file(source: str | Path, target: str | Path) -> Path:
-    """Decrypt a legacy Fernet artifact. New writes must never call this module."""
+    """Decrypt a legacy Fernet artifact without buffering ciphertext in memory."""
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_root = Path(settings.NETRA_TEMP_ROOT)
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    encoded_path: Path | None = None
     try:
-        with storage_provider.open_encrypted(source, "rb") as handle:
-            ciphertext = handle.read()
-        target_path.write_bytes(legacy_fernet().decrypt(ciphertext))
-        return target_path
+        with NamedTemporaryFile(delete=False, dir=temporary_root, suffix=".fernet-encoded") as temporary:
+            encoded_path = Path(temporary.name)
+        os.chmod(encoded_path, 0o600)
+        with storage_provider.open_encrypted(source, "rb") as encrypted, encoded_path.open("wb") as local_copy:
+            shutil.copyfileobj(encrypted, local_copy, length=1024 * 1024)
+        return stream_decrypt_legacy_path(encoded_path, target_path, temporary_root=temporary_root)
     except Exception:
         target_path.unlink(missing_ok=True)
         raise
+    finally:
+        if encoded_path is not None:
+            encoded_path.unlink(missing_ok=True)
 
 
 def _decode_fernet_token(encoded_path: Path, decoded_path: Path, chunk_size: int = 1024 * 1024) -> None:

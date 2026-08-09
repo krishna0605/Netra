@@ -145,7 +145,7 @@ def generate_report_artifact(
     analysis = _artifact_analysis(case_id, analysis, case)
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
-    from common.analysis import build_report_html
+    from common.report_rendering import build_report_html
     html = _insert_report_supplement(build_report_html(analysis, language), _render_report_supplement(custody, legal))
     artifact = write_text_artifact(
         html,
@@ -183,7 +183,7 @@ def generate_pdf_report_artifact(
 
 
 def generate_export_artifact(case_id: str, export_type: str, analysis: dict, actor: Actor, export_id: str | None = None) -> dict:
-    from common.analysis import build_alert_csv, build_evidence_bundle
+    from common.report_rendering import build_alert_csv, build_evidence_bundle
 
     export_id = export_id or f"exp-{uuid4().hex[:8]}"
     normalized_type = (export_type or "json").lower()
