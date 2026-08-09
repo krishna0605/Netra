@@ -44,7 +44,7 @@
   --surface-muted: rgba(233, 224, 209, 0.06);
   --text: var(--cream-primary);
   --text-strong: var(--cream-bright);
-  --muted: rgba(204, 189, 159, 0.72);
+  --muted: rgba(204, 189, 159, 0.8);
   --border: var(--hairline);
   --border-strong: var(--hairline-strong);
   --ink: var(--cream-bright);
