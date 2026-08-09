@@ -87,9 +87,12 @@ try {
         docker compose -p $PostgresProject -f docker-compose.test-postgres.yml down --volumes | Out-Null
     }
 
-    Invoke-Checked { python -m pip_audit --require-hashes -r backend/requirements.api.txt } "API dependency audit"
-    Invoke-Checked { python -m pip_audit --require-hashes -r backend/requirements.worker.txt } "Worker dependency audit"
-    Invoke-Checked { python -m pip_audit --require-hashes -r sensor-agent/requirements.txt } "Sensor dependency audit"
+    # These locks are compiled for the Linux/Python 3.13 production runtime.
+    # Audit the committed, hashed graph directly so the Windows release host
+    # cannot introduce platform-only dependencies while resolving it.
+    Invoke-Checked { python -m pip_audit --disable-pip --require-hashes -r backend/requirements.api.txt } "API dependency audit"
+    Invoke-Checked { python -m pip_audit --disable-pip --require-hashes -r backend/requirements.worker.txt } "Worker dependency audit"
+    Invoke-Checked { python -m pip_audit --disable-pip --require-hashes -r sensor-agent/requirements.txt } "Sensor dependency audit"
 
     Invoke-Checked { python scripts/validate_workflows.py } "Workflow policy"
     Invoke-Checked { python scripts/validate_github_governance.py } "GitHub governance policy"
