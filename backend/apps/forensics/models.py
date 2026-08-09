@@ -630,7 +630,7 @@ class AnomalyRecord(TimeStampedModel):
     hypothesis = models.CharField(max_length=160)
     top_features = models.JSONField(default=list, blank=True)
     recommended_action = models.TextField(blank=True)
-    model_version = models.CharField(max_length=80, default="scikit-v1")
+    model_version = models.CharField(max_length=80, default="detector-registry-v1")
 
 
 class ZeekLogSummary(TimeStampedModel):

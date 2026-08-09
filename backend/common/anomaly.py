@@ -13,12 +13,3 @@ def z_score_deviation(baseline: list[float], observed: float) -> dict:
         "deviation": f"{round(score, 2)} sigma",
         "confidence": min(99, int(score * 18)),
     }
-
-
-def isolation_forest_ready() -> bool:
-    try:
-        from sklearn.ensemble import IsolationForest  # noqa: F401
-
-        return True
-    except Exception:
-        return False

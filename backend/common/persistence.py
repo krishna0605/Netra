@@ -253,6 +253,7 @@ def _replace_records(case: Case, analysis: dict[str, Any], evidence: EvidenceFil
             hypothesis=row.get("hypothesis", ""),
             top_features=row.get("topFeatures", []),
             recommended_action=row.get("recommendedAction", ""),
+            model_version="detector-registry-v1",
         )
         for row in analysis.get("anomalies", [])
     ])
