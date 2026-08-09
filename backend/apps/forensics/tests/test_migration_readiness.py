@@ -9,7 +9,7 @@ class FreePlanMigrationReadinessTests(TestCase):
         NETRA_REALTIME_PROVIDER="sse",
         NETRA_STORAGE_DEEP_HEALTHCHECK=False,
         NETRA_STORAGE_ROOT="/app/storage",
-        NETRA_QUEUE_PROVIDER="supabase-pgmq",
+        NETRA_QUEUE_PROVIDER="postgres-row-lock",
     )
     def test_egress_guards_pass_for_target_configuration(self):
         checks = {item["name"]: item for item in deployment_readiness_payload()["checks"]}

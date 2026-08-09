@@ -83,7 +83,7 @@ Phase 3 is repository-only. No crypto migration was executed against Supabase, n
 | Finding | Status | Phase 3 control | Regression evidence |
 |---|---|---|---|
 | NTR-005 | Verified locally | Legacy Fernet derivation is isolated behind a decrypt-only reader. All durable producers use authenticated `netra-artifact-v2.1` manifests, artifact-specific HKDF domains, random data keys, AES-256-GCM chunks, and immutable object paths. | `test_crypto_v2.py`, `test_crypto_migration.py`, artifact security and worker tests |
-| NTR-017 | Verified locally; PostgreSQL stress gate pending | Custody append locks the parent Case, resolves the previous event by `-created_at,-id`, and verification uses `created_at,id` with one canonical payload. External anchors use privacy-minimal Ed25519 signatures. | `test_custody_concurrency.py`; 50-writer test is PostgreSQL-only |
+| NTR-017 | Superseded by Phase 4 correction | Phase 3's timestamp/random-ID ordering failed under tied timestamps. Phase 4 replaces it with a migrated monotonic per-case `chain_index`. | See the Phase 4 verification record below. |
 | NTR-027 | Verified locally | v2.1 encryption and legacy migration use bounded chunk processing; temporary plaintext is permission-restricted and removed in `finally`. | Empty, boundary, multi-chunk, no-`read_bytes`, authentication-failure, and resume safety tests |
 | NTR-029 | Verified locally | The persistent encrypted cache verifies local size/hash, collapses parallel misses, holds entry leases, performs LRU eviction, preserves a hard free-space reserve, and prohibits uncached fallback. | `test_storage_provider.py` zero-second-GET, concurrency, corruption, capacity, lease, and stale-partial tests |
 | Public documentation | Verified locally | Root README uses Netra-only branding, synthetic content, five locally decoded direct QR assets, explicit controlled-demo limitations, and no committed source reports/decks. | `docs/assets/readme/ASSET_PROVENANCE.md` and staged-asset audit |
@@ -102,7 +102,7 @@ Phase 3 is repository-only. No crypto migration was executed against Supabase, n
 ### Phase 3 acceptance evidence
 
 - Focused crypto, migration, anchor, and cache unit tests pass locally.
-- The canonical complete Django runner remains blocked before assertions by the pre-existing monolithic Windows analysis/Scapy import path; an isolated migrated-database run verifies 23 focused tests with the PostgreSQL-only stress test skipped. Full-run completion remains a no-push gate and aligns with Phase 4 parser/worker isolation work.
+- Historical note: Phase 3 initially reported a blocked monolithic Windows analysis/Scapy import. Phase 4 removes parser-heavy API imports and reruns the complete suite; current evidence is recorded below.
 - New v2.1 writes never call Fernet; legacy fixtures remain decryptable through the explicit legacy reader.
 - Plan-only crypto migration makes zero Storage calls and creates no state file.
 - Five parallel cache misses produce one mocked GET; a verified repeat read produces zero GETs.
@@ -113,3 +113,36 @@ Phase 3 is repository-only. No crypto migration was executed against Supabase, n
 ### Phase 3 deployment status
 
 Do not push or merge this branch. The real crypto migration, Railway volume persistence drill, production key provisioning, PostgreSQL locking rehearsal, Phases 4-7, CI/security scanning, and protected-main workflow remain mandatory gates.
+
+## Phase 4 verification record
+
+Phase 4 is repository-only. Migration `0015_custody_chain_index` is committed locally but has not been applied to Supabase or any hosted database. No cloud credential was loaded, no Supabase object was listed or downloaded, and no Railway, Vercel, GitHub, or Supabase configuration changed.
+
+| Finding/control | Status | Phase 4 control | Regression evidence |
+|---|---|---|---|
+| V-01 / NTR-017 | Verified locally | Custody order uses a unique monotonic `chain_index` per case. Migration backfill reconstructs only complete, unbranched hash-linked histories and aborts on ambiguity. | `test_custody_migration.py`, SQLite tied-time test, PostgreSQL 50-writer test |
+| V-02 | Verified locally | Rate-limit, queue-quota, Admin-transfer, and custody invariants run against disposable PostgreSQL 17.6. | `test_postgres_concurrency.py`, `test_custody_concurrency.py` |
+| V-03 through V-07 | Verified locally | Test documentation is current, operational contracts exist, legacy crypto labels fail closed, and recoverable cache maintenance degrades API readiness without terminating safe metadata service. | `test_phase_four_operations.py`, environment/cutover documents |
+| NTR-006 / NTR-013 | Verified locally | Production processing is worker-only; API imports no parser-heavy analysis module and cannot synchronously process a capture. | `test_processing_topology.py`, API image binary/import checks |
+| NTR-007 | Verified locally | The central parser runner uses argument arrays, an allowlisted environment, no shell, bounded output/time/resources, process-group termination, and fail-closed parsing. | `test_analysis_tooling.py` |
+| NTR-014 | Verified locally | Worker heartbeat publishes exact release/parser capabilities; readiness and admission reject missing, stale, or mismatched workers. | `test_worker_capabilities.py`, in-container version checks |
+| NTR-015 | Verified locally | Executable pickle/joblib model loading and the tracked model artifact are removed. ML readiness reports insufficient training data. | Static scans and `test_detector_registry.py` |
+| NTR-016 | Verified locally | One canonical detector registry drives evaluation, normalized findings, API metadata, and reporting labels with per-entity confidence. | `test_detector_registry.py` |
+
+### Phase 4 local commits
+
+| Commit | Purpose |
+|---|---|
+| `f4885cb` | Add deterministic per-case custody ordering and migration 0015 |
+| `926b35c` | Add PostgreSQL concurrency evidence |
+| `49cbd00` | Close Phase 0–3 operational gaps |
+| `3ea5241` | Enforce worker-only production processing |
+| `d9ddc5f` | Isolate and bound parser subprocesses |
+| `37b4f89` | Publish verified worker capacity |
+| `962f4c3` | Remove executable models and unify detector truth |
+| `27239a4` | Build separate pinned API and worker images |
+| Phase 4 verification commit | Record complete verification and handoff evidence |
+
+### Phase 4 deployment status
+
+Do not push or merge this branch. Phases 5–7, MFA enrollment/recovery UX, CI and security scanning, protected `main`, migration rehearsal, Railway service/volume verification, and a controlled deployment approval remain mandatory gates.

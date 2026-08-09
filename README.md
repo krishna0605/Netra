@@ -31,7 +31,7 @@ flowchart LR
 
 - Case-scoped evidence intake and processing jobs
 - Packet, protocol, payload, session, timeline, and communication-graph views
-- TShark and Zeek assisted analysis with rule-based and explainable anomaly signals
+- Worker-isolated TShark and Zeek analysis with deterministic, investigator-reviewable detector signals
 - Encrypted evidence, immutable artifact generations, custody history, reports, and exports
 - Organization boundaries, role-based access, AAL2 administrator operations, and audit privacy
 - Free-plan-aware Storage caching, bounded polling, and metadata-only routine health checks
@@ -56,22 +56,25 @@ The public datasets and paper are references, not bundled training data. Their r
 flowchart TB
     USER["Authorized investigator"]
     WEB["React + Vite console<br/>Vercel"]
-    API["Django API and workers<br/>Railway"]
+    API["Django API<br/>Railway"]
+    WORKER["Isolated analysis worker<br/>Railway"]
     DB["PostgreSQL<br/>Supabase"]
     AUTH["Supabase Auth"]
     OBJECTS["Private Supabase Storage"]
     CACHE["Encrypted bounded cache<br/>persistent Railway volume"]
-    QUEUE["Postgres / PGMQ jobs"]
-    TOOLS["TShark, Zeek, Scapy, ML services"]
+    QUEUE["PostgreSQL row-locked jobs"]
+    TOOLS["Pinned TShark + Zeek<br/>bounded subprocesses"]
 
     USER --> WEB --> API
     WEB --> AUTH
     API --> AUTH
     API --> DB
     API --> QUEUE
+    QUEUE --> WORKER
     API --> CACHE
     CACHE -->|"first verified immutable read only"| OBJECTS
-    API --> TOOLS
+    WORKER --> CACHE
+    WORKER --> TOOLS
 ```
 
 The browser does not receive a Supabase service-role key and does not query application tables directly. Netra application access is mediated by authenticated Django endpoints. Browser-facing Supabase Realtime is disabled; authenticated API refreshes and SSE provide application state.
@@ -86,6 +89,8 @@ Netra’s remediation work is organized as independently verified phases. The cu
 - AES-256-GCM chunked artifact encryption with artifact-specific HKDF domains;
 - a deterministic case-locked custody ledger with optional Ed25519 external anchors;
 - a persistent encrypted object cache with LRU eviction and hard capacity gates.
+- worker-only production PCAP processing with bounded parser execution and exact tool capabilities;
+- a canonical detector registry with executable pickle/joblib models removed.
 
 New durable artifacts use immutable generation-specific paths. Legacy Fernet artifacts are decrypt-only and can be migrated only through an explicit, resumable, byte-capped command. Custody records are **tamper-evident**, not tamper-proof; direct database administrator access crosses that trust boundary.
 
@@ -173,8 +178,9 @@ storage/              Runtime volume layout; generated content is Git-ignored
 
 ## Current limitations
 
-- Phases 4-7 of the security remediation remain incomplete.
-- Parser/worker isolation, integration truthfulness, MFA enrollment/recovery UX, CI scanning, and branch protection are later-phase gates.
+- Phase 4 is locally complete; Phases 5-7 remain incomplete.
+- Integration truthfulness, MFA enrollment/recovery UX, CI scanning, and branch protection are later-phase gates.
+- The current deterministic detector registry is active; ML production approval is intentionally withheld because representative held-out training/evaluation evidence is insufficient.
 - This branch must not be merged directly into `main`; Railway and Vercel are connected to the repository and could automatically deploy an incomplete intermediate phase.
 - The persistent Railway `/app/storage` volume and production key material still require external verification.
 - No production crypto migration has been executed, and no legacy object has been deleted.
@@ -186,6 +192,9 @@ storage/              Runtime volume layout; generated content is Git-ignored
 - [Security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md)
 - [Key rotation and recovery](docs/KEY_ROTATION_AND_RECOVERY.md)
 - [Production migration missing inputs](docs/PRODUCTION_MIGRATION_MISSING.md)
+- [Parser threat model](docs/PARSER_THREAT_MODEL.md)
+- [Worker operations runbook](docs/WORKER_OPERATIONS_RUNBOOK.md)
+- [Phase 4 verification](docs/PHASE_4_VERIFICATION.md)
 - [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 
 ## Responsible use

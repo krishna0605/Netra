@@ -52,7 +52,13 @@ class CustodyChainMigrationBackfillTests(TransactionTestCase):
         Case = old_apps.get_model("forensics", "Case")
         CustodyLedgerEvent = old_apps.get_model("forensics", "CustodyLedgerEvent")
 
-        organization = Organization.objects.get(pk=NETRA_ORGANIZATION_ID)
+        # TransactionTestCase flushes data between tests, while migration state
+        # is retained. Recreate the deterministic seed explicitly so this test
+        # remains independent of execution order.
+        organization, _ = Organization.objects.get_or_create(
+            pk=NETRA_ORGANIZATION_ID,
+            defaults={"name": "Netra", "slug": "netra", "max_queued_analyses": 5},
+        )
         case = Case.objects.create(
             id="CASE-CUSTODY-MIGRATION",
             organization_id=organization.pk,

@@ -182,3 +182,54 @@ NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS
 These variables belong on Railway/backend services only. None may use a `VITE_` prefix. Startup performs bounded stale-partial cleanup and never downloads an object. Routine health checks remain metadata-only.
 
 See `KEY_ROTATION_AND_RECOVERY.md` for the future key rollout, retention, restore drill, and explicit retirement approval process.
+
+## Phase 4 local verification
+
+Phase 4 adds migration `0015_custody_chain_index`, worker-only processing, bounded parser execution, exact worker capabilities, a canonical detector registry, and separate API/worker images. It remains local-only.
+
+```mermaid
+flowchart LR
+    API["API without parser tools"] --> CAPACITY["Compatible worker check"]
+    CAPACITY --> JOB["Queued ProcessingJob"]
+    JOB -->|"row lock + skip_locked"| WORKER["Pinned non-root worker"]
+    WORKER --> RUNNER["Bounded parser runner"]
+    RUNNER --> RESULTS["Validated detector results"]
+    RESULTS --> CUSTODY["Monotonic custody chain"]
+```
+
+Use the disposable local PostgreSQL profile for locking evidence:
+
+```powershell
+docker compose -f docker-compose.test-postgres.yml up -d --wait
+$env:NETRA_TEST_POSTGRES = '1'
+$env:POSTGRES_DB = 'netra_test'
+$env:POSTGRES_USER = 'netra_test'
+$env:POSTGRES_PASSWORD = 'netra_test_local_only'
+$env:POSTGRES_HOST = '127.0.0.1'
+$env:POSTGRES_PORT = '55432'
+Set-Location backend
+python manage.py test apps.forensics.tests.test_postgres_concurrency apps.forensics.tests.test_custody_concurrency
+```
+
+These values are disposable localhost-only credentials. They must never be pointed at Supabase or reused in a hosted environment.
+
+Build and inspect the isolated images:
+
+```powershell
+docker build -f backend/Dockerfile -t netra-api:phase4 .
+docker build -f backend/Dockerfile.worker -t netra-worker:phase4 .
+docker run --rm --entrypoint sh netra-api:phase4 -c 'test ! -x /usr/bin/tshark; test ! -x /usr/bin/zeek; python manage.py check'
+docker run --rm --entrypoint sh netra-worker:phase4 -c 'id; tshark --version; zeek --version; ! command -v gcc; ! command -v cmake'
+docker sbom netra-worker:phase4 --format spdx-json
+```
+
+Production runtime contract:
+
+```text
+NETRA_RUNTIME_ROLE=api|worker
+NETRA_PROCESSING_MODE=postgres-worker
+NETRA_QUEUE_PROVIDER=postgres-row-lock
+NETRA_SYNC_FALLBACK_ENABLED=0
+```
+
+The API must return `503 analysis_capacity_unavailable` before durable PCAP promotion when no recent compatible worker exists. Parser errors are job failures with stable codes; raw stderr and capture contents never enter client responses. See `PARSER_THREAT_MODEL.md`, `WORKER_OPERATIONS_RUNBOOK.md`, and `WORKER_IMAGE_SUPPLY_CHAIN.md`.

@@ -23,7 +23,7 @@ class Command(BaseCommand):
             raise CommandError("No matching case exists.")
         root = Path(options["output_directory"]).expanduser().resolve()
         for case in cases.iterator():
-            latest = case.custody_ledger.order_by("-created_at", "-id").first()
+            latest = case.custody_ledger.order_by("-chain_index").first()
             suffix = latest.id if latest else "empty"
             target = root / f"{case.id}-{suffix}.json"
             uri = write_anchor(case, target, upload=options["upload"])

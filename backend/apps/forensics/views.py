@@ -927,7 +927,7 @@ def custody_ledger(request, case_id: str):
     denied = require_permission(request, "compliance", case=case, resource_type="CustodyLedger", resource_id=case_id)
     if denied:
         return denied
-    rows = [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-created_at", "-id")]
+    rows = [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("-chain_index")]
     payload = _paged(rows, request)
     payload["caseId"] = case_id
     payload["verification"] = verify_case_ledger(case)
@@ -955,7 +955,7 @@ def custody_export(request, case_id: str):
     denied = require_permission(request, "compliance", case=case, resource_type="CustodyLedger", resource_id=case_id)
     if denied:
         return denied
-    payload = {"caseId": case_id, "verification": verify_case_ledger(case), "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("created_at", "id")]}
+    payload = {"caseId": case_id, "verification": verify_case_ledger(case), "events": [custody_event_dict(row) for row in CustodyLedgerEvent.objects.filter(case=case).order_by("chain_index")]}
     return JsonResponse(payload)
 
 
