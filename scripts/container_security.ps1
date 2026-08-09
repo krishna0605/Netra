@@ -14,5 +14,5 @@ foreach ($Image in $Images) {
     docker image inspect $Image | Out-Null
     $SafeName = $Image.Replace(":", "-").Replace("/", "-")
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${ResolvedOutput}:/output" $SyftImage $Image -o "cyclonedx-json=/output/$SafeName.cdx.json"
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock $TrivyImage image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed $Image
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v netra-trivy-cache:/root/.cache/ $TrivyImage image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed $Image
 }

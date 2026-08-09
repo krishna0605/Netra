@@ -87,7 +87,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 htmlcov/
-artifacts/sbom/
+/artifacts/
 
 # Logs and process files
 logs/
