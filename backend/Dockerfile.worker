@@ -34,4 +34,4 @@ RUN mkdir -p /app/storage \
 
 USER 10001:10001
 
-CMD ["python", "manage.py", "run_postgres_worker"]
+CMD ["sh", "-c", "test \"${NETRA_RUNTIME_ROLE:-worker}\" = worker && python manage.py maintain_storage_cache --startup && exec python manage.py run_postgres_worker"]

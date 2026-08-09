@@ -19,7 +19,6 @@ from django.utils import timezone as django_timezone
 from scapy.all import PcapReader, PcapWriter
 
 from apps.forensics.models import CaptureChunk, CaptureJob, Case, OperationalEvent, Sensor, WorkerHeartbeat
-from common.analysis import analyze_pcap
 from common.audit import Actor
 from common.hashing import sha256_file
 from common.identifiers import validate_case_id
@@ -249,6 +248,9 @@ def _merge_chunks(job: CaptureJob) -> tuple[Path, list[Path]]:
 
 
 def finalize_capture(job: CaptureJob, actor: Actor | str = "Netra capture engine") -> dict[str, Any]:
+    if getattr(settings, "NETRA_RUNTIME_ROLE", "api") != "worker":
+        raise RuntimeError("Capture finalization is available only in the dedicated worker runtime.")
+    from common.analysis import analyze_pcap
     if job.final_evidence_file_id:
         return capture_job_payload(job)
     merged = None

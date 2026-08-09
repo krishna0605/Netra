@@ -27,7 +27,7 @@ from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule,
 from apps.forensics.services.administration import AdministrationProblem, ensure_admin_mutation_allowed, transfer_administrator
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
-from common.analysis import analyze_pcap, empty_analysis, validate_bpf_expression
+from common.analysis import empty_analysis, validate_bpf_expression
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact, report_analysis_from_snapshot
 from common.async_pipeline import queue_uploaded_evidence
 from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case, workspace_status_payload
@@ -41,7 +41,7 @@ from common.queue_limits import OrganizationQueueLimit
 from common.rate_limit_middleware import rate_limit_response
 from common.rate_limits import RateLimitSpec, consume_rate_limits, request_byte_count
 from common.pcap import available_packet_tools
-from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export
+from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, record_export
 from common.postgres_jobs import request_job_cancellation, retry_job
 from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload, storage_cache_status_payload
 from common.hashing import sha256_file, sha256_text
@@ -51,11 +51,11 @@ from common.operations import capture_job_payload, create_capture_job, emit_oper
 from common.storage_provider import storage_provider
 from common.storage import save_uploaded_file, write_text_artifact
 from common.safe_paths import generated_artifact_filename
-from common.structured_analysis import analyze_structured_evidence
 from common.tenancy import netra_organization
 from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
 from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
 from common.vault_v2 import verify_evidence_v2
+from common.worker_capacity import analysis_admission_available
 
 
 logger = logging.getLogger(__name__)
@@ -1142,6 +1142,11 @@ def evidence_upload_sessions(request):
     )
     if limited:
         return limited
+    if not analysis_admission_available():
+        return JsonResponse(
+            {"error": "Analysis capacity is temporarily unavailable.", "code": "analysis_capacity_unavailable"},
+            status=503,
+        )
     if len(request.body) > 64 * 1024:
         return JsonResponse({"error": "Upload session metadata is too large.", "code": "upload_metadata_too_large"}, status=413)
     try:
@@ -1248,6 +1253,11 @@ def evidence_upload(request):
     filter_error = _analysis_filter_error(request, normalization_result.normalized_type, requested_bpf)
     if filter_error:
         return filter_error
+    if not analysis_admission_available():
+        return JsonResponse(
+            {"error": "Analysis capacity is temporarily unavailable.", "code": "analysis_capacity_unavailable"},
+            status=503,
+        )
     try:
         intake_flags = json.loads(request.POST.get("flags") or "[]")
         approved_flags = validated_case_flags(intake_flags)
@@ -1300,58 +1310,19 @@ def evidence_upload(request):
         for key in ("filename", "size_bytes", "sha256", "plaintext_sha256", "encrypted_sha256", "normalization")
         if key in public_saved
     } | {"keyId": settings.NETRA_EVIDENCE_KEY_ID}
-    if settings.NETRA_PROCESSING_MODE in {"postgres-worker", "async-primary"}:
-        try:
-            job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
-        except OrganizationQueueLimit:
-            response = JsonResponse(
-                {"error": "The organization analysis queue is full.", "code": "organization_queue_limit"},
-                status=429,
-            )
-            response["Retry-After"] = "60"
-            return response
-        if settings.NETRA_PROCESSING_MODE == "postgres-worker":
-            Path(saved["analysis_path"]).unlink(missing_ok=True)
-            return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
-        event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "processingMode": settings.NETRA_PROCESSING_MODE, "saved": public_saved, "intake": saved["intake"]}
-        if publish_event("netra.pcap.uploaded", event, key=job_id):
-            Path(saved["analysis_path"]).unlink(missing_ok=True)
-            return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "async-workers", "job": job_status_payload(job), **client_saved}, status=202)
     try:
-        analysis = (
-            analyze_pcap(saved["analysis_path"], case_id, evidence_id, job_id, saved)
-            if normalization_result.normalized_type == EvidenceFile.EvidenceType.PCAP
-            else analyze_structured_evidence(saved["analysis_path"], case_id, evidence_id, job_id, saved)
+        job = queue_uploaded_evidence(saved, case_id, evidence_id, job_id, actor, idempotency_key=idempotency_key)
+    except OrganizationQueueLimit:
+        response = JsonResponse(
+            {"error": "The organization analysis queue is full.", "code": "organization_queue_limit"},
+            status=429,
         )
-        analysis["processingPath"] = "sync-fallback"
-        if settings.NETRA_PROCESSING_MODE == "async-primary":
-            analysis["fallbackReason"] = "kafka-publish-failed"
-        job = persist_analysis(analysis, saved, actor)
-    except Exception:
-        logger.exception("PCAP analysis failed for job %s", job_id)
-        return JsonResponse({"error": "PCAP analysis failed.", "id": evidence_id, "caseId": case_id, "jobId": job_id, **client_saved}, status=422)
+        response["Retry-After"] = "60"
+        return response
     finally:
         if saved.get("analysis_path"):
             Path(saved["analysis_path"]).unlink(missing_ok=True)
-    event = {"type": "pcap.uploaded", "caseId": case_id, "evidenceId": evidence_id, "jobId": job_id, "summary": analysis["summary"], "processingMode": settings.NETRA_PROCESSING_MODE, **public_saved}
-    publish_event("netra.pcap.uploaded", event)
-    return JsonResponse(
-        {
-            "id": evidence_id,
-            "caseId": case_id,
-            "routeRef": str(job.case.route_ref),
-            "jobId": job_id,
-            "status": "verified",
-            "analysis": analysis["summary"],
-            "job": job_status_payload(job),
-            "detectedAttackClasses": analysis.get("detectedAttackClasses", []),
-            "topAlerts": analysis.get("alerts", [])[:3],
-            "riskLevel": analysis.get("riskLevel", "low"),
-            "toolStatus": analysis.get("toolStatus", available_packet_tools()),
-            **client_saved,
-        },
-        status=201,
-    )
+    return JsonResponse({"id": evidence_id, "caseId": case_id, "routeRef": str(job.case.route_ref), "jobId": job_id, "status": "queued", "processingPath": "postgres-worker", "job": job_status_payload(job), **client_saved}, status=202)
 
 
 def evidence_manifest(_request, evidence_id: str):

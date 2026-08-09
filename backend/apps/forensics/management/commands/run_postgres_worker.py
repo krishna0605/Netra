@@ -16,6 +16,7 @@ from apps.forensics.models import WorkerHeartbeat
 from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import claim_next_job, mark_job_failure, renew_job_lease
 from common.quarantine_cleanup import cleanup_worker_artifacts
+from common.worker_capacity import invalidate_worker_capacity_cache
 
 
 class Command(BaseCommand):
@@ -26,6 +27,10 @@ class Command(BaseCommand):
         parser.add_argument("--worker-id", default="", help="Stable worker instance identifier.")
 
     def handle(self, *args, **options):
+        if settings.NETRA_RUNTIME_ROLE != "worker":
+            raise RuntimeError("run_postgres_worker requires NETRA_RUNTIME_ROLE=worker")
+        if settings.NETRA_PROCESSING_MODE != "postgres-worker" or settings.NETRA_QUEUE_PROVIDER != "postgres-row-lock":
+            raise RuntimeError("The production worker requires postgres-worker and postgres-row-lock")
         worker_id = options["worker_id"] or os.getenv("RAILWAY_REPLICA_ID") or f"{socket.gethostname()}-{uuid4().hex[:8]}"
         self._start_health_server()
         cleanup_worker_artifacts()
@@ -73,11 +78,13 @@ class Command(BaseCommand):
                 "last_seen_at": timezone.now(),
                 "current_job_id": current_job_id,
                 "details_json": {
+                    "runtimeRole": "worker",
                     "queueProvider": "postgres-row-lock",
                     "processingMode": "postgres-worker",
                 },
             },
         )
+        invalidate_worker_capacity_cache()
 
     @classmethod
     def _job_heartbeat_loop(cls, stop: threading.Event, worker_id: str, job_id: str) -> None:

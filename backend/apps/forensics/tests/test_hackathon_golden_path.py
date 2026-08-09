@@ -8,11 +8,13 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from scapy.all import DNS, DNSQR, Ether, IP, TCP, UDP, PcapNgWriter, PcapWriter
 
-from apps.forensics.models import Case, ProcessingJob, UserProfile
+from apps.forensics.models import Case, ProcessingJob, UserProfile, WorkerHeartbeat
 from apps.forensics.tests.factories import netra_organization
+from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import JobCancellationRequested, claim_next_job, mark_job_failure, request_job_cancellation
 
 
@@ -25,7 +27,7 @@ SECURE_GOLDEN_SETTINGS = override_settings(
     NETRA_DEPLOYMENT_PROFILE="hackathon-core",
     NETRA_ENABLE_PCAP_REPLAY=True,
     NETRA_ENABLE_SENSOR_CAPTURE=False,
-    NETRA_PROCESSING_MODE="sync",
+    NETRA_PROCESSING_MODE="postgres-worker",
     NETRA_STORAGE_PROVIDER="local",
     NETRA_SEARCH_PROVIDER="postgres",
     NETRA_EVIDENCE_KEY="golden-path-test-evidence-key",
@@ -50,6 +52,13 @@ class HackathonGoldenPathTests(TestCase):
         )
         token = str(RefreshToken.for_user(user).access_token)
         self.headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+        WorkerHeartbeat.objects.create(
+            worker_name="postgres-analysis",
+            instance_id="golden-worker",
+            status="healthy",
+            last_seen_at=timezone.now(),
+            details_json={"runtimeRole": "worker", "processingMode": "postgres-worker", "queueProvider": "postgres-row-lock"},
+        )
 
     @staticmethod
     def _packets():
@@ -104,15 +113,17 @@ class HackathonGoldenPathTests(TestCase):
                     **self.headers,
                 )
 
-                self.assertEqual(upload.status_code, 201, upload.content)
+                self.assertEqual(upload.status_code, 202, upload.content)
                 payload = upload.json()
-                self.assertEqual(payload["status"], "verified")
+                self.assertEqual(payload["status"], "queued")
                 self.assertEqual(payload["normalization"]["detectedType"], "PCAP")
                 self.assertEqual(payload["normalization"]["parser"], "pcap")
-                self.assertEqual(payload["analysis"]["packets"], 1)
-                self.assertIn("anomalies", payload["analysis"])
                 self.assertNotIn("analysis_path", payload)
                 self.assertNotIn("stored_path", payload)
+
+                claimed = claim_next_job("golden-worker")
+                self.assertIsNotNone(claimed)
+                process_claimed_job(claimed)
 
                 case = Case.objects.get(pk="CASE-GOLDEN-PCAP")
                 self.assertEqual(case.investigator, "Golden Investigator")
@@ -207,11 +218,15 @@ class HackathonGoldenPathTests(TestCase):
                     **self.headers,
                 )
 
-                self.assertEqual(response.status_code, 201, response.content)
+                self.assertEqual(response.status_code, 202, response.content)
                 payload = response.json()
                 self.assertEqual(payload["normalization"]["detectedType"], "PCAP")
                 self.assertIn("magic:pcapng", payload["normalization"]["signals"])
-                self.assertEqual(payload["analysis"]["packets"], 3)
+                claimed = claim_next_job("golden-worker")
+                self.assertIsNotNone(claimed)
+                process_claimed_job(claimed)
+                job = ProcessingJob.objects.get(pk=payload["jobId"])
+                self.assertEqual(job.stats["analysis"]["summary"]["packets"], 3)
 
     def test_bpf_is_rejected_when_offline_filtering_is_disabled(self):
         with self.settings(NETRA_BPF_FILTER_ENABLED=False):
@@ -348,8 +363,12 @@ class HackathonGoldenPathTests(TestCase):
                     **self.headers,
                 )
 
-        self.assertEqual(response.status_code, 201, response.content)
-        payload = response.json()
+                self.assertEqual(response.status_code, 202, response.content)
+                payload = response.json()
+                claimed = claim_next_job("golden-worker")
+                self.assertIsNotNone(claimed)
+                process_claimed_job(claimed)
+
         self.assertEqual(payload["normalization"]["normalizedType"], "Mixed Evidence")
         job = ProcessingJob.objects.get(pk=payload["jobId"])
         structured = job.stats["analysis"]["structuredEvidence"]
