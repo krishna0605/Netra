@@ -1,7 +1,6 @@
 import csv
 import html
 import json
-import shlex
 import shutil
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -14,52 +13,15 @@ from django.conf import settings
 
 from common.pcap import available_packet_tools
 from common.parser_runner import ParserLimits, run_parser
+from common.detection import detector_definition
+from common.analysis_contract import empty_analysis
+from common.bpf import bpf_tokens
 from netra_ml.features import extract_features
 from netra_ml.scoring import score_anomalies
 
 
 MAX_PACKETS = 5000
 SENSITIVE_PORTS = {21, 22, 23, 25, 80, 1099, 135, 139, 443, 445, 1098, 3306, 3389, 3632, 5900, 6667, 8009, 8080}
-
-def empty_analysis() -> dict[str, Any]:
-    return {
-        "caseId": "",
-        "jobId": "",
-        "evidenceId": "",
-        "createdAt": "",
-        "riskLevel": "low",
-        "topAttackClass": "Normal Baseline",
-        "detectedAttackClasses": [],
-        "toolStatus": available_packet_tools(),
-        "zeek": _empty_zeek("not-run"),
-        "features": {"hosts": [], "services": [], "dns": [], "timing": [], "zeek": [], "summary": {}},
-        "chainOfCustody": [],
-        "evidence": None,
-        "case": None,
-        "packets": [],
-        "sessions": [],
-        "decodedProtocols": [],
-        "payloadFindings": [],
-        "alerts": [],
-        "detectionMatches": [],
-        "anomalies": [],
-        "trafficTimeline": [],
-        "protocolChartData": [],
-        "graph": {"nodes": [], "edges": []},
-        "summary": {
-            "packets": 0,
-            "sessions": 0,
-            "protocolsDecoded": 0,
-            "payloadFindings": 0,
-            "alerts": 0,
-            "anomalies": 0,
-            "topAttackClass": "Normal Baseline",
-            "riskLevel": "low",
-            "toolStatus": available_packet_tools(),
-            "zeek": _empty_zeek("not-run"),
-        },
-    }
-
 
 def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: str, saved: dict[str, Any]) -> dict[str, Any]:
     source_path = Path(pcap_path)
@@ -107,18 +69,6 @@ def analyze_pcap(pcap_path: str | Path, case_id: str, evidence_id: str, job_id: 
             filtered_path.unlink(missing_ok=True)
 
 
-def _bpf_tokens(expression: str) -> list[str]:
-    if not expression or len(expression) > 255 or any(ord(character) < 32 for character in expression):
-        raise ValueError("BPF filter must contain 1 to 255 printable characters.")
-    try:
-        tokens = shlex.split(expression, posix=True)
-    except ValueError as exc:
-        raise ValueError("BPF filter contains invalid quoting.") from exc
-    if not tokens or len(tokens) > 64:
-        raise ValueError("BPF filter is empty or too complex.")
-    return tokens
-
-
 def validate_bpf_expression(expression: str) -> None:
     tcpdump = shutil.which("tcpdump")
     if not tcpdump:
@@ -127,7 +77,7 @@ def validate_bpf_expression(expression: str) -> None:
     work.mkdir(parents=True, exist_ok=True)
     probe = work / "bpf-validation.input"
     probe.touch(exist_ok=True)
-    result = run_parser(tool="tcpdump", arguments=["-d", *_bpf_tokens(expression)], input_path=probe, working_directory=work, limits=ParserLimits.configured(timeout_seconds=10))
+    result = run_parser(tool="tcpdump", arguments=["-d", *bpf_tokens(expression)], input_path=probe, working_directory=work, limits=ParserLimits.configured(timeout_seconds=10))
     if result.returncode != 0:
         raise ValueError("BPF filter syntax is invalid.")
 
@@ -138,7 +88,7 @@ def apply_offline_bpf(path: Path, expression: str) -> Path:
         raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
     with NamedTemporaryFile(delete=False, suffix=".pcap") as handle:
         target = Path(handle.name)
-    result = run_parser(tool="tcpdump", arguments=["-nn", "-r", str(path), "-w", str(target), *_bpf_tokens(expression)], input_path=path, working_directory=path.parent)
+    result = run_parser(tool="tcpdump", arguments=["-nn", "-r", str(path), "-w", str(target), *bpf_tokens(expression)], input_path=path, working_directory=path.parent)
     if result.returncode != 0:
         target.unlink(missing_ok=True)
         raise ValueError("BPF filter could not be applied to this capture.")
@@ -716,6 +666,7 @@ def _behavior_candidates(features: dict[str, Any], zeek: dict[str, Any]) -> list
 
 
 def _candidate(attack_class: str, severity: str, confidence: int, finding_type: str, rule_id: str, features: dict[str, Any], sessions: list[dict[str, Any]] | None, port: int = 0, protocol: str = "") -> dict[str, Any]:
+    definition = detector_definition(rule_id)
     hosts = features.get("hosts", [])
     services = features.get("services", [])
     service = next((item for item in services if port and item.get("port") == port), services[0] if services else {})
@@ -735,22 +686,22 @@ def _candidate(attack_class: str, severity: str, confidence: int, finding_type: 
         f"max port fan-out: {features.get('summary', {}).get('maxPortFanout', 0)}",
     ]
     return {
-        "severity": severity,
-        "attackClass": attack_class,
-        "type": finding_type,
+        "severity": definition.severity,
+        "attackClass": definition.attack_class,
+        "type": definition.title,
         "sourceIp": source,
         "destination": destination,
         "protocol": protocol or service.get("service") or host.get("topProtocol") or "TCP",
         "confidence": min(99, confidence),
         "ruleId": rule_id,
-        "category": _category_for_class(attack_class),
+        "category": definition.category,
         "matchedEntity": f"{source} -> {destination}{':' + str(port) if port else ''}",
         "evidenceSessionIds": evidence_sessions[:8],
         "explanation": explanation,
         "recommendedAction": recommended,
         "observedSignals": observed_signals,
         "confidenceFactors": [{"signal": signal, "weight": max(10, confidence // len(observed_signals))} for signal in observed_signals],
-        "limitations": "PCAP metadata indicates suspicious network behavior but must be correlated with endpoint and server logs before attribution.",
+        "limitations": " ".join(definition.limitations),
     }
 
 

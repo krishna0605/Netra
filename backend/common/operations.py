@@ -15,7 +15,6 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, transaction
 from django.utils import timezone as django_timezone
-from scapy.all import PcapReader, PcapWriter
 
 from apps.forensics.models import CaptureChunk, CaptureJob, Case, OperationalEvent, Sensor, WorkerHeartbeat
 from common.audit import Actor
@@ -290,6 +289,7 @@ def start_replay(job: CaptureJob, encrypted_source: str, speed: str = "max") -> 
 
 
 def _run_replay(job_id: str, encrypted_source: str, speed: str) -> None:
+    from scapy.all import PcapReader, PcapWriter
     close_old_connections()
     job = CaptureJob.objects.get(id=job_id)
     source_dir = Path(tempfile.mkdtemp(prefix=f"netra-replay-{job_id}-"))

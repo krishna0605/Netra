@@ -7,7 +7,7 @@ from uuid import uuid4
 from django.template.loader import render_to_string
 
 from apps.forensics.models import Case, CustodyLedgerEvent
-from common.analysis import build_alert_csv, build_evidence_bundle, build_report_html, empty_analysis
+from common.analysis_contract import empty_analysis
 from common.audit import Actor
 from common.custody import custody_event_dict, verify_case_ledger
 from common.persistence import record_export, record_report
@@ -145,6 +145,7 @@ def generate_report_artifact(
     analysis = _artifact_analysis(case_id, analysis, case)
     custody = (analysis.get("custodyLedger") or {}).get("verification", {})
     legal = legal_review_checklist(case) if case else {"status": "unavailable", "items": []}
+    from common.analysis import build_report_html
     html = _insert_report_supplement(build_report_html(analysis, language), _render_report_supplement(custody, legal))
     artifact = write_text_artifact(
         html,
@@ -182,6 +183,8 @@ def generate_pdf_report_artifact(
 
 
 def generate_export_artifact(case_id: str, export_type: str, analysis: dict, actor: Actor, export_id: str | None = None) -> dict:
+    from common.analysis import build_alert_csv, build_evidence_bundle
+
     export_id = export_id or f"exp-{uuid4().hex[:8]}"
     normalized_type = (export_type or "json").lower()
     analysis = _artifact_analysis(case_id, analysis)

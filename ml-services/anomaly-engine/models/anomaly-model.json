@@ -1,46 +1,17 @@
 {
-  "version": "netra-anomaly-20260616180955",
-  "modelType": "RandomForestClassifier",
-  "trainedAt": "2026-06-16T18:09:55.573256+00:00",
-  "featureNames": [
-    "internalHostCount",
-    "externalHostCount",
-    "uniquePorts",
-    "maxDestinationFanout",
-    "maxPortFanout",
-    "largestSessionBytes",
-    "longestDnsQuery",
-    "averageDnsQueryLength",
-    "repeatedDnsDomainCount",
-    "icmpLargePacketCount",
-    "beaconPairs",
-    "sshConnectionCount",
-    "dnsQueryCount",
-    "hostRiskHintCount",
-    "serviceRiskHintCount"
-  ],
-  "experimental": true,
-  "trustPolicy": "sha256-and-feature-schema",
-  "artifactSha256": "8bd6dd64edbfd27bcdff6bf773489b3b47faa16bb5940f7d74d437ebc5b37cf3",
+  "status": "insufficient_training_data",
   "trainingRows": 6,
-  "metrics": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1": 1.0,
-    "confusionMatrix": [
-      [
-        1,
-        0
-      ],
-      [
-        0,
-        5
-      ]
-    ]
-  },
-  "limitations": [
-    "Experimental hackathon model: results support investigator triage and are not a standalone evidentiary conclusion.",
-    "This model is trained on the available local benchmark manifest and is not independent legal certification.",
-    "Fallback explainable scoring remains active when the model artifact is unavailable."
+  "precision": null,
+  "recall": null,
+  "f1": null,
+  "productionApproved": false,
+  "executableModelLoading": false,
+  "requirementsForActivation": [
+    "ONNX artifact format",
+    "representative held-out evaluation",
+    "signed artifact provenance",
+    "model hash allowlist",
+    "false-positive and false-negative review",
+    "explicit production approval"
   ]
 }

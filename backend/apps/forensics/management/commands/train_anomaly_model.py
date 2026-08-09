@@ -59,7 +59,7 @@ class Command(BaseCommand):
             )
         if len(rows) < 2:
             raise CommandError("Need at least two manifest rows to train the anomaly model.")
-        model_path = model_dir / "anomaly-model.pkl"
+        model_path = model_dir / "anomaly-model.onnx"
         metadata_path = model_dir / "anomaly-model.json"
         result = train_model(rows, model_path, metadata_path)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

@@ -27,7 +27,8 @@ from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule,
 from apps.forensics.services.administration import AdministrationProblem, ensure_admin_mutation_allowed, transfer_administrator
 from common.audit import access_log_dict, actor_from_request, add_history, can, can_actor_access_case, log_access, require_permission, sync_supabase_actor, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
-from common.analysis import empty_analysis, validate_bpf_expression
+from common.analysis_contract import empty_analysis
+from common.bpf import validate_bpf_syntax
 from common.artifacts import generate_export_artifact, generate_pdf_report_artifact, generate_report_artifact, report_analysis_from_snapshot
 from common.async_pipeline import queue_uploaded_evidence
 from common.case_workspace import analysis_status_for_case, bump_case_list_cache_version, case_list_cache_version, workspace_for_case, workspace_status_payload
@@ -40,7 +41,6 @@ from common.kafka import probe_supabase_queue, publish_event
 from common.queue_limits import OrganizationQueueLimit
 from common.rate_limit_middleware import rate_limit_response
 from common.rate_limits import RateLimitSpec, consume_rate_limits, request_byte_count
-from common.pcap import available_packet_tools
 from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, record_export
 from common.postgres_jobs import request_job_cancellation, retry_job
 from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload, storage_cache_status_payload
@@ -740,7 +740,7 @@ def dashboard_summary_payload(case_id: str) -> dict:
     return analysis["summary"] | {
         "topAttackClass": analysis.get("topAttackClass", analysis["summary"].get("topAttackClass", "Normal Baseline")),
         "riskLevel": analysis.get("riskLevel", analysis["summary"].get("riskLevel", "low")),
-        "toolStatus": analysis.get("toolStatus", analysis["summary"].get("toolStatus", available_packet_tools())),
+        "toolStatus": analysis.get("toolStatus", analysis["summary"].get("toolStatus", {})),
     }
 
 
@@ -1096,7 +1096,7 @@ def _analysis_filter_error(request, normalized_type: str, requested_bpf: str) ->
         if requested_bpf:
             if normalized_type != EvidenceFile.EvidenceType.PCAP:
                 raise ValueError("BPF filters can only be applied to PCAP or PCAPNG evidence.")
-            validate_bpf_expression(requested_bpf)
+            validate_bpf_syntax(requested_bpf)
     except (TypeError, ValueError, RuntimeError) as exc:
         return JsonResponse({"error": str(exc), "code": "invalid_analysis_filter"}, status=400)
     return None
@@ -2634,7 +2634,7 @@ def report_preview(request, case_id: str):
             "anomalies": analysis.get("anomalies", []),
             "evidence": analysis.get("evidence"),
             "zeek": analysis.get("zeek", {}),
-            "toolStatus": analysis.get("toolStatus", available_packet_tools()),
+            "toolStatus": analysis.get("toolStatus", {}),
             "chainOfCustody": analysis.get("chainOfCustody", []),
             "custodyLedger": custody,
             "legalReview": legal_review_checklist(case) if case else {},

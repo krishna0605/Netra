@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -282,49 +280,10 @@ def deployment_readiness_payload() -> dict[str, Any]:
 
 
 def ml_model_status_payload() -> dict[str, Any]:
-    model_dir = Path(settings.BASE_DIR).parent / "ml-services" / "anomaly-engine" / "models"
-    metadata_path = model_dir / "anomaly-model.json"
-    model_path = model_dir / "anomaly-model.pkl"
-    if not metadata_path.exists() or not model_path.exists():
-        return {
-            "status": "fallback",
-            "modelAvailable": False,
-            "modelPath": str(model_path),
-            "metadataPath": str(metadata_path),
-            "detail": "No trained anomaly model artifact is present. Netra is using explainable scoring fallback.",
-        }
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return {"status": "degraded", "modelAvailable": False, "detail": f"Model metadata could not be read: {exc}"}
-    expected_hash = str(metadata.get("artifactSha256") or "").strip().lower()
-    actual_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    expected_features = [
-        "internalHostCount", "externalHostCount", "uniquePorts", "maxDestinationFanout", "maxPortFanout",
-        "largestSessionBytes", "longestDnsQuery", "averageDnsQueryLength", "repeatedDnsDomainCount",
-        "icmpLargePacketCount", "beaconPairs", "sshConnectionCount", "dnsQueryCount", "hostRiskHintCount",
-        "serviceRiskHintCount",
-    ]
-    if len(expected_hash) != 64 or not hmac.compare_digest(expected_hash, actual_hash):
-        return {"status": "degraded", "modelAvailable": False, "experimental": True, "trustedArtifact": False, "detail": "Experimental model disabled because its SHA-256 is not trusted."}
-    if metadata.get("featureNames") != expected_features:
-        return {"status": "degraded", "modelAvailable": False, "experimental": True, "trustedArtifact": False, "detail": "Experimental model disabled because its feature schema does not match the runtime."}
     return {
-        "status": "experimental-model",
-        "modelAvailable": True,
-        "experimental": True,
-        "trustedArtifact": True,
-        "artifactSha256": actual_hash,
-        "modelPath": str(model_path),
-        "metadataPath": str(metadata_path),
-        "version": metadata.get("version", "unknown"),
-        "modelType": metadata.get("modelType", "unknown"),
-        "trainedAt": metadata.get("trainedAt", ""),
-        "trainingRows": metadata.get("trainingRows", 0),
-        "metrics": metadata.get("metrics", {}),
-        "featureNames": metadata.get("featureNames", []),
-        "limitations": metadata.get("limitations", []),
-        "detail": "Experimental anomaly model is active; its artifact hash and feature schema match the trusted demo build.",
+        "status": "insufficient_training_data", "modelAvailable": False, "trainingRows": 6,
+        "precision": None, "recall": None, "f1": None, "productionApproved": False,
+        "detail": "Executable model loading is disabled. Explainable per-entity heuristics support investigator triage.",
     }
 
 
@@ -340,8 +299,8 @@ def status_matrix_payload() -> dict[str, Any]:
         _status("Structured evidence analysis", "Working / Validated", "Firewall, DNS, TLS metadata, and safe mixed archives normalize into network events for session, detection, anomaly, report, and export flows.", ["evidence/normalize-preview", "structured-analysis"]),
         _status("tshark parsing", "Working / Validated", "Packet tool health and analysis validators exercise tshark parsing.", ["packet-tools", "netra:validate:dpi"]),
         _status("Zeek analysis", "Working / Validated", "Zeek is integrated in the analysis path with tolerant failure messaging.", ["packet-tools", "zeek-summary"]),
-        _status("Threat detection", "Working / Validated for demo", "Rule/behavior detection has a benchmark corpus and precision/recall report.", ["netra:validate:detection"]),
-        _status("AI anomaly detection", "Experimental / Trusted artifact" if ml_status["modelAvailable"] else "Working fallback / model unavailable", "Experimental model hash and feature schema are verified; output remains triage support only." if ml_status["modelAvailable"] else "Explainable fallback scoring remains active.", ["netra:benchmark:ml"]),
+        _status("Threat detection", "Deterministic / investigator review", "One canonical registry drives the active behavior detectors, API labels, and reports.", ["detector-registry"]),
+        _status("AI anomaly detection", "Heuristic triage / model disabled", "Executable model loading is disabled because the six-row training set is insufficient for production claims.", ["model-readiness"]),
         _status("Payload inspection / DPI", "Working metadata-DPI / Validated", "Protocol-specific metadata clues are validated without claiming TLS decryption.", ["netra:validate:dpi"]),
         _status("Suspicious Activity page", "Working / Validated", "Page merges alerts, anomalies, and suspicious flows with empty states.", ["frontend-build", "case-data"]),
         _status("Traffic Evidence page", "Working / Validated", "Packets, sessions, protocols, payload clues, and graph tabs are case-scoped.", ["frontend-build", "case-data"]),
