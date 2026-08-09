@@ -145,7 +145,7 @@ python manage.py test apps.forensics.tests.test_crypto_v2 apps.forensics.tests.t
 
 The custody concurrency module skips its fifty-writer test on SQLite. Run that test against an approved disposable PostgreSQL 17 database before any push; do not use a Supabase free-plan project as the rehearsal database.
 
-On this Windows workstation, the canonical complete Django runner currently stalls before assertions while importing the pre-existing monolithic analysis/Scapy URL stack. Do not reinterpret that as a passing full suite. The focused Phase 3 suite can run against a disposable database through Django's migration executor, but completing the canonical full run remains a no-push gate and a Phase 4 isolation concern.
+The 8 August 2026 verification run discovered that the earlier “blocked full runner” statement was stale: the suite completed with 111 tests discovered, 110 passing, and the PostgreSQL-only custody stress test skipped. Phase 4 adds a disposable PostgreSQL 17 profile so database-locking invariants are exercised directly. Parser import isolation and a fresh complete-suite run remain Phase 4 completion gates.
 
 Safe operational commands:
 

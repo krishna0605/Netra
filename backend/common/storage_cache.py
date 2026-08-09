@@ -16,6 +16,10 @@ from common.file_lock import FileLock
 from common.hashing import sha256_file
 
 
+class StorageCacheUnavailable(RuntimeError):
+    """The encrypted cache cannot currently satisfy its safety contract."""
+
+
 @dataclass(frozen=True)
 class CacheStatus:
     enabled: bool
@@ -181,6 +185,22 @@ class EncryptedObjectCache:
         self, uri: str, *, expected_sha256: str = "", expected_size: int | None = None,
         downloader: Callable[[Path], None],
     ) -> Path:
+        try:
+            return self._materialize(
+                uri,
+                expected_sha256=expected_sha256,
+                expected_size=expected_size,
+                downloader=downloader,
+            )
+        except StorageCacheUnavailable:
+            raise
+        except (OSError, RuntimeError, TimeoutError) as exc:
+            raise StorageCacheUnavailable("The encrypted Storage cache is temporarily unavailable.") from exc
+
+    def _materialize(
+        self, uri: str, *, expected_sha256: str = "", expected_size: int | None = None,
+        downloader: Callable[[Path], None],
+    ) -> Path:
         if not self.enabled:
             raise RuntimeError("Encrypted Storage cache is disabled; uncached fallback is prohibited.")
         self._ensure()
@@ -235,7 +255,7 @@ class EncryptedObjectCache:
         )
         lease = FileLock(self.locks / f"{path.name}.lock", timeout=settings.NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS)
         if not lease.acquire():
-            raise TimeoutError("Timed out acquiring an encrypted cache entry lease.")
+            raise StorageCacheUnavailable("The encrypted Storage cache is temporarily unavailable.")
         try:
             return _LeasedFile(path.open("rb"), lease)
         except Exception:

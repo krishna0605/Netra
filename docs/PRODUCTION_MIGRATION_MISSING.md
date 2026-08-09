@@ -2,7 +2,7 @@
 
 Audit date: 7 August 2026 (Asia/Kolkata)
 
-Phase 2 local update: 8 August 2026. The Phase 2 tenancy migration and code are local only. Production remains on the previously deployed 49-table schema; migration `0014`, its two new tables, and the new environment names have not been applied to Supabase or Railway.
+Phase 4 local update: 9 August 2026. The tenancy and custody-ordering migrations are local only. Production remains on the previously deployed schema; migrations `0014` and `0015`, their schema changes, and the new environment names have not been applied to Supabase or Railway.
 
 Current decision: **the application stack is switched to the new Supabase
 project, but production evidence writes remain NO-GO until the two owner

@@ -28,6 +28,20 @@ from apps.forensics.models import (
     UserProfile,
 )
 from common.custody import custody_event_dict, verify_case_ledger
+from common.storage_cache import storage_cache
+
+
+def storage_cache_status_payload() -> dict[str, Any]:
+    try:
+        return {**storage_cache.status().as_dict(), "available": True}
+    except Exception:
+        return {
+            "available": False,
+            "enabled": bool(getattr(settings, "NETRA_STORAGE_CACHE_ENABLED", False)),
+            "root": str(getattr(storage_cache, "root", "")),
+            "detail": "Encrypted cache metadata is temporarily unavailable.",
+            "deepStorageCheckEnabled": False,
+        }
 
 
 def incident_readiness_payload(organization_id=None) -> dict[str, Any]:
@@ -147,6 +161,7 @@ def audit_export_payload(case: Case | None = None, *, organization_id=None) -> d
 
 
 def deployment_readiness_payload() -> dict[str, Any]:
+    cache_status = storage_cache_status_payload()
     organizations = list(Organization.objects.values_list("id", flat=True))
     invalid_admin_organizations = [
         str(organization_id)
@@ -213,6 +228,13 @@ def deployment_readiness_payload() -> dict[str, Any]:
             "Mount a persistent Railway volume at /app/storage and set NETRA_STORAGE_ROOT=/app/storage.",
             required=True,
         ),
+        _deployment_check(
+            "storage-cache-accessible",
+            bool(cache_status.get("available")),
+            "Encrypted Storage cache metadata is accessible.",
+            "Restore the persistent cache volume or permissions before evidence operations resume.",
+            required=True,
+        ),
         _deployment_check("service-role-backend", bool(getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")), "Backend service-role key is configured.", "Set SUPABASE_SERVICE_ROLE_KEY only on the backend.", required=True),
         _deployment_check("dev-role-headers-disabled", not getattr(settings, "NETRA_DEV_ROLE_HEADERS", False), "Development role headers are disabled.", "Set NETRA_DEV_ROLE_HEADERS=0.", required=True),
         _deployment_check(
@@ -252,6 +274,7 @@ def deployment_readiness_payload() -> dict[str, Any]:
         "checks": checks,
         "requiredFailures": [item["name"] for item in required_failures],
         "warnings": [item["name"] for item in warnings],
+        "cache": cache_status,
         "recommendation": "Ready for deployment smoke tests." if status == "ready" else ("Fix required deployment checks before sharing Netra." if status == "blocked" else "Usable for supervised deployment after reviewing warnings."),
     }
 

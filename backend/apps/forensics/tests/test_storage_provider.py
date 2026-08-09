@@ -9,7 +9,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from common.storage_provider import SupabaseStorageProvider
-from common.storage_cache import EncryptedObjectCache
+from common.storage_cache import EncryptedObjectCache, StorageCacheUnavailable
 
 
 class SupabaseStorageEgressTests(SimpleTestCase):
@@ -163,7 +163,7 @@ class BoundedEncryptedCacheTests(SimpleTestCase):
             )
             try:
                 second = b"abcdef"
-                with self.assertRaisesRegex(OSError, "capacity"):
+                with self.assertRaisesRegex(StorageCacheUnavailable, "temporarily unavailable"):
                     cache.materialize(
                         "supabase://bucket/new", expected_sha256=hashlib.sha256(second).hexdigest(),
                         expected_size=len(second), downloader=lambda target: target.write_bytes(second),

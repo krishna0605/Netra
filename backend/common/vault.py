@@ -84,6 +84,9 @@ def temporary_decrypted_copy(encrypted_path: str | Path) -> str:
 
 
 def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
+    encryption_algorithm = str(saved.get("encryption_algorithm") or "").strip()
+    if settings.NETRA_EVIDENCE_ENCRYPTION == "on" and not encryption_algorithm:
+        raise ValueError("Encrypted artifacts must declare their versioned encryption algorithm.")
     payload = {
         "id": f"manifest-{evidence_id}",
         "caseId": case_id,
@@ -93,7 +96,7 @@ def build_manifest_payload(saved: dict, evidence_id: str, case_id: str) -> dict:
         "sizeBytes": saved["size_bytes"],
         "plaintextSha256": saved["plaintext_sha256"],
         "encryptedSha256": saved["encrypted_sha256"],
-        "encryptionAlgorithm": saved.get("encryption_algorithm") or ("Fernet-AES128-CBC-HMAC" if settings.NETRA_EVIDENCE_ENCRYPTION == "on" else "none"),
+        "encryptionAlgorithm": encryption_algorithm or "none",
         "keyId": saved.get("key_id") or settings.NETRA_EVIDENCE_KEY_ID,
     }
     if saved.get("normalization"):

@@ -43,7 +43,7 @@ from common.rate_limits import RateLimitSpec, consume_rate_limits, request_byte_
 from common.pcap import available_packet_tools
 from common.persistence import VALIDATOR_CASE_PREFIXES, analysis_for_case, latest_job_for_case, persist_analysis, record_export
 from common.postgres_jobs import request_job_cancellation, retry_job
-from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload
+from common.readiness import audit_export_payload, deployment_readiness_payload, incident_readiness_payload, legal_review_checklist, ml_model_status_payload, status_matrix_payload, storage_cache_status_payload
 from common.hashing import sha256_file, sha256_text
 from common.identifiers import InvalidCaseId, generate_case_id, validate_case_id
 from common.fleet import backpressure_allows_new_capture, capacity_payload, ensure_default_retention_policy, execute_safe_retention, kafka_lag_payload, queue_schedule_run, retention_policy_payload, retention_preview, retention_run_payload, schedule_payload, sensor_group_payload
@@ -2086,7 +2086,7 @@ def system_health_deep(request):
         "actor": getattr(settings, "NETRA_TRUSTED_LAN_ACTOR", "Local Investigator"),
         "role": getattr(settings, "NETRA_TRUSTED_LAN_ROLE", "LAN Operator"),
     }
-    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access, "incidentReadiness": incident_readiness_payload(actor_from_request(request).organization_id)})
+    return JsonResponse({"status": status, "checkedAt": datetime.now(timezone.utc).isoformat(), "checks": checks, "database": db, "access": access, "cache": storage_cache_status_payload(), "incidentReadiness": incident_readiness_payload(actor_from_request(request).organization_id)})
 
 
 def system_incident_readiness(request):

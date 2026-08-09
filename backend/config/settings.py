@@ -42,6 +42,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "common.api_auth.NetraApiAuthMiddleware",
     "common.rate_limit_middleware.NetraRateLimitMiddleware",
+    "common.storage_cache_middleware.StorageCacheFailureMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
