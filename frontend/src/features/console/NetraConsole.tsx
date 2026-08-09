@@ -1595,7 +1595,7 @@ function LoginPage() {
           <h1 className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
           <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
         </div>
-        {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then rebuild the frontend.</Alert>}
+        {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the frontend.</Alert>}
         {checkingSession && <Alert>Checking whether this browser already has an active Netra session.</Alert>}
         {hasSession && (
           <div className="mt-4 grid gap-3">

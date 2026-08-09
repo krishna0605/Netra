@@ -10,12 +10,13 @@ const reviewedRoutes = [
 ] as const;
 
 for (const [path, heading] of reviewedRoutes) {
-  test(`${path} has no serious or critical automated accessibility findings`, async ({ page, isMobile }) => {
-    test.skip(Boolean(isMobile), "The authoritative axe gate runs once at the reviewed desktop viewport; mobile routes have separate functional coverage.");
+  test(`${path} has no serious or critical automated accessibility findings`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(path);
     await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
-    const results = await new AxeBuilder({ page }).analyze();
+    const results = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+      .analyze();
     const blocking = results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""));
     expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
   });
