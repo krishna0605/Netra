@@ -2,6 +2,7 @@ from django.urls import path
 
 from apps.forensics import views
 from apps.forensics.api import analysis as analysis_views
+from apps.forensics.api import authentication as auth_views
 from apps.forensics.api import features as feature_views
 from apps.forensics.api import integrations as integration_views
 from apps.forensics.api import events as event_views
@@ -11,14 +12,14 @@ urlpatterns = [
     path("health", views.health),
     path("setup/status", views.setup_status),
     path("setup/admin", views.setup_admin),
-    path("auth/login", views.auth_login),
-    path("auth/refresh", views.auth_refresh),
-    path("auth/logout", views.auth_logout),
-    path("auth/me", views.auth_me),
+    path("auth/login", auth_views.auth_login),
+    path("auth/refresh", auth_views.auth_refresh),
+    path("auth/logout", auth_views.auth_logout),
+    path("auth/me", auth_views.auth_me),
     path("capabilities", views.capabilities),
-    path("users", views.users),
-    path("users/<str:user_id>", views.user_detail),
-    path("admin/organizations/<uuid:organization_id>/admin-transfer", views.admin_transfer),
+    path("users", auth_views.users),
+    path("users/<str:user_id>", auth_views.user_detail),
+    path("admin/organizations/<uuid:organization_id>/admin-transfer", auth_views.admin_transfer),
     path("cases", views.cases),
     path("cases/<str:case_id>", views.case_detail),
     path("cases/<str:case_id>/workspace", views.case_workspace),
