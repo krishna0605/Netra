@@ -101,6 +101,23 @@ def _terminate(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _unlink_temporary_file(path: Path, *, timeout_seconds: float = 1.0) -> None:
+    """Remove a parser temporary file after Windows releases inherited handles."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
 
 
 def run_parser(
@@ -168,5 +185,5 @@ def run_parser(
     finally:
         stdout_file.close()
         stderr_file.close()
-        stdout_path.unlink(missing_ok=True)
-        stderr_path.unlink(missing_ok=True)
+        _unlink_temporary_file(stdout_path)
+        _unlink_temporary_file(stderr_path)
