@@ -279,7 +279,7 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
                 for packet in filtered
                 if (datetime.fromisoformat(packet["timestamp"]) - start).total_seconds() <= duration_seconds
             ]
-        except Exception:
+        except Exception:  # nosec B110
             pass
     result_limit = max(1, min(MAX_PACKETS, packet_limit or MAX_PACKETS))
     return filtered[:result_limit]

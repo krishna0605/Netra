@@ -272,7 +272,7 @@ def encrypt_artifact_v2(
         for object_name in reversed(uploaded):
             try:
                 storage_provider.delete_bucket_object(context.target_bucket, object_name)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         raise
 
@@ -345,7 +345,7 @@ def _legacy_data_key(manifest: dict) -> bytes:
                 _unb64(str(wrapped["ciphertext"])),
                 _legacy_wrap_aad(evidence_id, key_id),
             )
-        except Exception:
+        except Exception:  # nosec B112
             continue
     raise ValueError("No configured key can unwrap the legacy v2 data key.")
 

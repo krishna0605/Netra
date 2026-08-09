@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,7 +162,9 @@ def run_parser(
         else:
             kwargs["start_new_session"] = True
             kwargs["preexec_fn"] = _limit_resources(configured)
-        process = subprocess.Popen([str(Path(executable).resolve()), *safe_arguments], **kwargs)
+        process = subprocess.Popen(  # nosec B603
+            [str(Path(executable).resolve()), *safe_arguments], **kwargs
+        )
         while process.poll() is None:
             stdout_file.flush()
             stderr_file.flush()

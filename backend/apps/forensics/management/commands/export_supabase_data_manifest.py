@@ -33,14 +33,16 @@ class Command(BaseCommand):
                     (details.get("columns") or [] for details in constraints.values() if details.get("primary_key")),
                     [],
                 )
-                cursor.execute(f"select count(*) from {quote(table)}")
+                # Both identifiers come from Django's database introspection and
+                # are quoted by the active backend, never from operator input.
+                cursor.execute(f"select count(*) from {quote(table)}")  # nosec B608
                 row_count = cursor.fetchone()[0]
                 digest = None
                 if primary_key:
                     key_expression = "concat_ws(chr(31), " + ", ".join(f"{quote(column)}::text" for column in primary_key) + ")"
                     order_expression = ", ".join(quote(column) for column in primary_key)
                     cursor.execute(
-                        f"select md5(coalesce(string_agg({key_expression}, chr(30) order by {order_expression}), '')) "
+                        f"select md5(coalesce(string_agg({key_expression}, chr(30) order by {order_expression}), '')) "  # nosec B608
                         f"from {quote(table)}"
                     )
                     digest = cursor.fetchone()[0]

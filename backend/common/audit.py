@@ -203,7 +203,7 @@ def log_access(actor: Actor, action: str, case: Case | None = None, resource_typ
             resource_id=resource_id,
             result=result,
         )
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
 

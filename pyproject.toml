@@ -3,7 +3,9 @@ exclude_dirs = [
   "backend/apps/forensics/tests",
   "backend/apps/forensics/migrations",
 ]
-skips = ["B101"]
+# Empty-string credential migration checks and comparisons against the explicit
+# development-only sentinel are not embedded production credentials.
+skips = ["B101", "B105", "B106"]
 
 [tool.netra-dependencies]
 pip_tools_version = "7.5.3"

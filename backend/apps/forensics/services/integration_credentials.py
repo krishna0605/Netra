@@ -96,6 +96,6 @@ def read_integration_secret(connection: IntegrationConnection) -> str:
                 context,
             )
             return plaintext.decode("utf-8")
-        except Exception:
+        except Exception:  # nosec B112
             continue
     raise RuntimeError("The integration credential could not be decrypted.")

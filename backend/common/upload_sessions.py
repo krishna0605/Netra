@@ -286,7 +286,7 @@ def _delete_quarantine_object(session: EvidenceUploadSession) -> None:
         storage_provider.delete(
             f"supabase://{settings.SUPABASE_STORAGE_BUCKET_EVIDENCE_QUARANTINE}/{session.storage_path}"
         )
-    except Exception:
+    except Exception:  # nosec B110
         # Cleanup is retried by the orphan-cleanup command in the worker phase.
         pass
 

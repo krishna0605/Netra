@@ -104,7 +104,7 @@ class Command(BaseCommand):
                 if not renew_job_lease(job_id, worker_id):
                     return
                 self._heartbeat(worker_id, job_id)
-            except Exception:
+            except Exception:  # nosec B112
                 # A transient database error is retried on the next bounded
                 # heartbeat interval; the main worker still owns the job lease.
                 continue
@@ -133,5 +133,7 @@ class Command(BaseCommand):
             def log_message(self, _format, *_args):
                 return
 
-        server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+        # Railway must reach the container health port; the handler exposes only
+        # a fixed, non-sensitive status document.
+        server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)  # nosec B104
         threading.Thread(target=server.serve_forever, name="worker-health", daemon=True).start()

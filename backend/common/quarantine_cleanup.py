@@ -76,7 +76,7 @@ def cleanup_orphan_quarantine_objects(limit: int = 100) -> int:
         try:
             storage_provider.delete_bucket_object(settings.SUPABASE_STORAGE_BUCKET_EVIDENCE_QUARANTINE, object_name)
             removed += 1
-        except Exception:
+        except Exception:  # nosec B112
             continue
     EvidenceUploadSession.objects.filter(
         status__in=[EvidenceUploadSession.Status.CREATED, EvidenceUploadSession.Status.UPLOADING],

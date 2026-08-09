@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import threading
 import time
 from collections import defaultdict
@@ -190,8 +191,10 @@ def supabase_queue_depths() -> dict[str, int]:
         )
         tables = [row[0] for row in cursor.fetchall()]
         for table in tables:
+            if not re.fullmatch(r"q_[a-z0-9_]+", table):
+                continue
             queue_name = table.removeprefix("q_")
-            cursor.execute(f'select count(*) from pgmq."{table}"')
+            cursor.execute(f'select count(*) from pgmq."{table}"')  # nosec B608
             depths[queue_name] = int(cursor.fetchone()[0])
     return depths
 

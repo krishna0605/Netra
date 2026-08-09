@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db import connection
 
 from common.kafka import TOPIC_QUEUE_MAP
+from common.http_transport import bounded_read, normalized_https_origin, open_same_origin
 from common.supabase_keys import elevated_api_headers
 
 
@@ -127,17 +128,18 @@ class Command(BaseCommand):
 
     def _storage_request(self, path: str, method: str, body: bytes | None = None) -> str:
         key = settings.SUPABASE_SECRET_KEY
+        origin = normalized_https_origin(settings.SUPABASE_URL)
         request = urllib.request.Request(
-            f"{settings.SUPABASE_URL.rstrip('/')}{path}",
+            f"{origin}{path}",
             method=method,
             data=body,
             headers=elevated_api_headers(key, content_type="application/json"),
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return response.read().decode("utf-8")
+            with open_same_origin(request, origin=origin, timeout=30) as response:
+                return bounded_read(response, 131072).decode("utf-8")
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            detail = bounded_read(exc, 131072).decode("utf-8", errors="replace")
             if exc.code == 409:
                 return "[]"
             raise RuntimeError(f"Supabase Storage bootstrap HTTP {exc.code}: {detail}") from exc
@@ -145,21 +147,22 @@ class Command(BaseCommand):
     def _probe_bucket(self, bucket: str) -> None:
         key = settings.SUPABASE_SECRET_KEY
         object_name = f"bootstrap/netra-bootstrap-probe-{uuid.uuid4().hex}.txt"
-        url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_name}"
+        origin = normalized_https_origin(settings.SUPABASE_URL)
+        url = f"{origin}/storage/v1/object/{bucket}/{object_name}"
         headers = {**elevated_api_headers(key, content_type="text/plain"), "x-upsert": "true"}
         upload = urllib.request.Request(url, method="POST", data=b"netra-bootstrap-probe", headers=headers)
         download = urllib.request.Request(url, method="GET", headers=elevated_api_headers(key))
         delete = urllib.request.Request(url, method="DELETE", headers=elevated_api_headers(key, content_type="application/json"))
         try:
-            with urllib.request.urlopen(upload, timeout=30) as response:
-                response.read()
-            with urllib.request.urlopen(download, timeout=30) as response:
-                content = response.read()
+            with open_same_origin(upload, origin=origin, timeout=30) as response:
+                bounded_read(response, 131072)
+            with open_same_origin(download, origin=origin, timeout=30) as response:
+                content = bounded_read(response, 1024)
                 if content != b"netra-bootstrap-probe":
                     raise RuntimeError(f"Supabase Storage bootstrap probe failed for {bucket}: content mismatch")
         finally:
             try:
-                with urllib.request.urlopen(delete, timeout=30) as response:
-                    response.read()
-            except Exception:
+                with open_same_origin(delete, origin=origin, timeout=30) as response:
+                    bounded_read(response, 131072)
+            except Exception:  # nosec B110
                 pass

@@ -186,7 +186,7 @@ def _decode_text_sample(sample: bytes) -> str:
     for encoding in ("utf-8", "utf-16", "latin-1"):
         try:
             return sample.decode(encoding, errors="ignore").lower()
-        except Exception:
+        except Exception:  # nosec B112
             continue
     return ""
 

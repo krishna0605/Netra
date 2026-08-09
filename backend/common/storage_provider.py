@@ -14,6 +14,7 @@ from pathlib import Path
 from django.conf import settings
 
 from common.hashing import sha256_file
+from common.http_transport import bounded_read, normalized_https_origin, open_same_origin
 from common.storage_cache import EncryptedObjectCache
 from common.supabase_keys import elevated_api_headers
 
@@ -141,7 +142,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
     def _base_url(self) -> str:
         if not settings.SUPABASE_URL:
             raise RuntimeError("SUPABASE_URL is required when NETRA_STORAGE_PROVIDER=supabase.")
-        return settings.SUPABASE_URL.rstrip("/")
+        return normalized_https_origin(settings.SUPABASE_URL)
 
     def _service_key(self) -> str:
         if not settings.SUPABASE_SECRET_KEY:
@@ -263,7 +264,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
         digest = hashlib.sha256()
         written = 0
         try:
-            with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as handle:
+            with open_same_origin(request, origin=self._base_url(), timeout=60) as response, target.open("wb") as handle:
                 os.chmod(target, 0o600)
                 while True:
                     chunk = response.read(1024 * 1024)
@@ -306,7 +307,7 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
     def _download_to_path_uncached(self, bucket: str, object_name: str, target: Path) -> None:
         url = self._object_url(bucket, object_name)
         request = urllib.request.Request(url, method="GET", headers=self._headers())
-        with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
+        with open_same_origin(request, origin=self._base_url(), timeout=60) as response, target.open("wb") as output:
             if response.status != 200:
                 raise RuntimeError(f"Supabase Storage returned HTTP {response.status}.")
             while True:
@@ -342,13 +343,13 @@ class SupabaseStorageProvider(LocalFilesystemStorageProvider):
 
     def _request(self, request: urllib.request.Request, expected: set[int]) -> bytes:
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                content = response.read()
+            with open_same_origin(request, origin=self._base_url(), timeout=30) as response:
+                content = bounded_read(response, 131072)
                 if response.status not in expected:
                     raise RuntimeError(f"Supabase Storage returned HTTP {response.status}: {content[:200]!r}")
                 return content
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            detail = bounded_read(exc, 131072).decode("utf-8", errors="replace")
             if exc.code in expected:
                 return detail.encode("utf-8")
             if "signature verification failed" in detail.lower() or exc.code in {401, 403}:
