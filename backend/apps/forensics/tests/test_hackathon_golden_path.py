@@ -197,7 +197,11 @@ class HackathonGoldenPathTests(TestCase):
                 self.assertEqual(report_payload["status"], "ready")
                 download = self.client.get(report_payload["downloadUrl"], **self.headers)
                 self.assertEqual(download.status_code, 200)
-                self.assertTrue(download.content.startswith(b"%PDF"))
+                try:
+                    downloaded_pdf = b"".join(download.streaming_content)
+                finally:
+                    download.close()
+                self.assertTrue(downloaded_pdf.startswith(b"%PDF"))
 
     def test_server_profile_identity_and_case_flag_allowlist_are_enforced(self):
         response = self.client.post(
