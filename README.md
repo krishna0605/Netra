@@ -178,7 +178,7 @@ storage/              Runtime volume layout; generated content is Git-ignored
 
 ## Current limitations
 
-- Phases 1–6 are implemented and verified locally; Phase 7 CI, dependency/JWT/header hardening, scanning, and branch protection remain incomplete.
+- Phases 1–6 and the Phase 7 JWT/header/dependency/container/CI controls are implemented and verified locally. The final Phase 7 feature-family decomposition gate remains open, and GitHub/platform activation has not occurred.
 - Invitation, recovery, and Administrator TOTP journeys are implemented with local provider mocks, but production redirects, custom SMTP, enrollment, and recovery drills remain deployment gates.
 - The current deterministic detector registry is active; ML production approval is intentionally withheld because representative held-out training/evaluation evidence is insufficient.
 - This branch must not be merged directly into `main`; Railway and Vercel are connected to the repository and could automatically deploy an incomplete intermediate phase.
@@ -196,6 +196,7 @@ storage/              Runtime volume layout; generated content is Git-ignored
 - [Worker operations runbook](docs/WORKER_OPERATIONS_RUNBOOK.md)
 - [Phase 4 verification](docs/PHASE_4_VERIFICATION.md)
 - [Phase 6 verification](docs/PHASE_6_VERIFICATION.md)
+- [Phase 7 verification](docs/PHASE_7_VERIFICATION.md)
 - [MFA and account recovery](docs/MFA_RECOVERY_RUNBOOK.md)
 - [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 

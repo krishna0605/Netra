@@ -360,7 +360,7 @@ export function PublicHomePage({ languageControl }: PublicPageProps) {
         <section className="overview-section section-grid">
           <div><SectionLabel>Overview</SectionLabel><h2>One evidence chain from intake to report.</h2><p>Each stage keeps the active case and original evidence close, so investigators can move from a signal back to supporting traffic.</p></div>
           <div className="workflow-stack">
-            {workflow.map(([title, body], index) => <motion.article key={title} initial={{ opacity: .35, x: 20 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}><span>0{index + 1}</span><div><strong>{title}</strong><p>{body}</p></div></motion.article>)}
+            {workflow.map(([title, body], index) => <motion.article key={title} initial={{ x: 20 }} whileInView={{ x: 0 }} viewport={{ once: true }}><span>0{index + 1}</span><div><strong>{title}</strong><p>{body}</p></div></motion.article>)}
           </div>
         </section>
 
@@ -404,13 +404,13 @@ export function PublicHomePage({ languageControl }: PublicPageProps) {
         <section className="scenario-section section-grid ticket-panel" id="home-5">
           <div><SectionLabel index="05">Investigation scenario</SectionLabel><h2>A suspicious workstation leaves more than one clue.</h2><p>A documented example replaces marketing testimonials with an inspectable evidence story.</p></div>
           <div className="scenario-path">
-            {["Periodic DNS queries", "Long encoded labels", "Repeated TLS timing", "Linked destination risk", "Case timeline and report"].map((label, index) => <motion.div key={label} initial={{ opacity: .2 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: index * .08 }}><span>0{index + 1}</span><i /><strong>{label}</strong><Check /></motion.div>)}
+            {["Periodic DNS queries", "Long encoded labels", "Repeated TLS timing", "Linked destination risk", "Case timeline and report"].map((label, index) => <motion.div key={label} initial={{ x: 12 }} whileInView={{ x: 0 }} viewport={{ once: true }} transition={{ delay: index * .08 }}><span>0{index + 1}</span><i /><strong>{label}</strong><Check /></motion.div>)}
           </div>
         </section>
 
         <section className="faq-section section-grid ticket-panel" id="home-6">
           <div><SectionLabel index="06">FAQ</SectionLabel><h2>Important limits,<br />stated plainly.</h2><p>Still need technical detail? The repository documentation covers deployment, detection, forensics, and operational readiness.</p></div>
-          <div className="faq-list">{faqRows.map((row, index) => <button type="button" key={row.question} onClick={() => setOpenFaq(openFaq === index ? -1 : index)} aria-expanded={openFaq === index}><span>0{index + 1}</span><strong>{row.question}</strong><ChevronDown />{openFaq === index && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}>{row.answer}</motion.p>}</button>)}</div>
+          <div className="faq-list">{faqRows.map((row, index) => <button type="button" key={row.question} onClick={() => setOpenFaq(openFaq === index ? -1 : index)} aria-expanded={openFaq === index}><span>0{index + 1}</span><strong>{row.question}</strong><ChevronDown />{openFaq === index && <p>{row.answer}</p>}</button>)}</div>
         </section>
           </div>
         </div>

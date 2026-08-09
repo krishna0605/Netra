@@ -202,3 +202,24 @@ Phase 6 is repository-only and adds no schema object. Expected state remains 53 
 | Phase 1–5 closure | Verified locally | Capability state remains authoritative; no synchronous processing or database Realtime frontend path returned. | Static scans and complete regression suites |
 
 Complete evidence and remaining gates are recorded in `PHASE_6_VERIFICATION.md`. Do not push or merge: Phase 7 scanning currently includes unresolved production dependency advisories, and all hosted Auth/migration/platform gates remain outstanding.
+
+## Phase 7 verification record
+
+Phase 7 adds no schema object. Expected state remains 53 public tables and 16
+forensics migrations.
+
+| Finding/control | Status | Phase 7 control | Evidence |
+|---|---|---|---|
+| NTR-021 | Verified locally | Exact frontend origins replace wildcard CSP sources; API headers and CORS have explicit cross-origin contracts. | Header unit/browser tests and `frontend/vercel.json` policy test |
+| NTR-023 | Verified locally | ES256 tokens are locally signature/claim verified through bounded cached JWKS; privileged mutations additionally validate the live remote session. | `test_jwt_verification.py`, Auth/admin regressions |
+| NTR-026 | Verified locally | Canonical publishable/secret variable names are used and generic migration examples require operator-supplied references. | Environment/static checks and built-asset secret scan |
+| NTR-025, Phase 7 scope | Open | Public entry facades are small, but `api/legacy_views.py` and `ConsoleApplication.tsx` still contain concentrated compatibility implementations. | Module-size inventory in `PHASE_7_VERIFICATION.md` |
+| Supply-chain control | Verified locally | npm advisories are cleared; Python runtime graphs are hashed; runtime images are pinned, non-root, SBOM-capable, and scan-gated. | npm/pip audits, image runtime checks, Trivy/SBOM tooling |
+| Delivery governance | Implemented locally; external activation pending | Deterministic workflows, CODEOWNERS, Dependabot, and no-bypass ruleset contract are committed. | Local workflow/governance validators |
+| Phase 1–6 closure | Verified locally | Complete backend, PostgreSQL, frontend, bundle, browser and desktop/mobile accessibility gates remain green. | `PHASE_7_VERIFICATION.md` |
+
+The branch remains unpushed. Repository-level NTR-021/NTR-023/NTR-026 controls
+are complete, but NTR-025 prevents the controlled branch-push approval. Hosted
+JWT activation, GitHub ruleset activation, SMTP/MFA drills, migrations,
+platform sizing/volume proof, and data migration remain separate external
+gates.

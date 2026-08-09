@@ -13,6 +13,8 @@ This checklist is documentation only during Phase 4. It does not authorize a dep
 - Confirm target environment names without exposing values in logs or frontend builds.
 - Record Supabase egress before the window; do not start legacy-object transfer before quota approval.
 - Keep Realtime and recurring deep Storage checks disabled.
+- Verify the target signing key is EC P-256/ES256, inspect the bounded public JWKS, and retain `NETRA_SUPABASE_JWT_MODE=remote` until that check is approved.
+- Confirm the GitHub main ruleset matches `infra/github/main-ruleset.json` and every required policy-gate context has reported successfully.
 
 ## Cutover
 
@@ -21,6 +23,7 @@ This checklist is documentation only during Phase 4. It does not authorize a dep
 - Deploy API with workers stopped and confirm liveness/readiness.
 - Deploy one worker and verify its pinned capability heartbeat.
 - Run read-only authentication, database and case-boundary checks.
+- Activate `asymmetric-jwks` only after ordinary-token, key-rotation, cached-outage, and privileged remote-validation smoke tests pass.
 - Verify password login, Administrator TOTP challenge, invitation acceptance, recovery global sign-out, and rejection of an AAL1 Admin mutation.
 - Run one tiny explicit Storage probe only when the migration runbook authorizes it.
 - Reopen workers gradually, then reopen writes after every acceptance gate passes.

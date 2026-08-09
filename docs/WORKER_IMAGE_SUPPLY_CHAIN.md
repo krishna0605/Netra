@@ -22,3 +22,17 @@ Verified on 9 August 2026 without loading production credentials:
 The worker image passed 12 in-container analysis-tooling, detector-registry, and worker-capability tests using synthetic data. A local SPDX 2.3 SBOM was generated and inspected with `docker sbom`; it is intentionally not committed because it is a generated build artifact. `docker history` contained none of the reviewed secret-variable names.
 
 These local image IDs are evidence for this workstation build, not portable release identifiers. A later controlled build must record registry digests, its own SBOM, vulnerability-scan results, and provenance before deployment.
+
+## Local Phase 7 verification
+
+| Image | Local image ID | Runtime contract |
+|---|---|---|
+| `netra-api:phase7` | `sha256:f0294fe8fd0b92258126b4494e3c55b9b56f5b43e4e49b3781bcf77a6f103cf8` | UID/GID 10001; no TShark, Zeek, or tcpdump |
+| `netra-worker:phase7` | `sha256:6f5a2fc4323d1a1c01098b8a91000e03617c4e7f74614cdf392e35f6d477286d` | UID/GID 10001; TShark 4.6.7; Zeek 8.2.1 |
+| `netra-frontend:phase7` | `sha256:6e5dc432f39a016bc5fa44a8ea5bbc5b1b7def4d306b45210cca5c5af8737428` | UID/GID 101; unprivileged Nginx runtime |
+
+Every Docker base and scanner image is digest-pinned. Local CycloneDX SBOMs
+were generated for all three images and intentionally ignored as build output.
+Trivy found no fixable high/critical finding under the committed policy. The
+worker base retains visible unfixed operating-system findings; they are not
+silently suppressed from reports and do not receive an unowned VEX waiver.

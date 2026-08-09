@@ -310,8 +310,23 @@ npm run test:e2e
 npm run test:a11y
 ```
 
-Browser tests provide fake Supabase URL/publishable values and intercept the reviewed Auth request. They must not use a real project URL or key. The authoritative axe gate is desktop; mobile public/Auth behavior has separate functional coverage. Automated axe results do not constitute accessibility certification.
+Browser tests provide fake Supabase URL/publishable values and intercept the reviewed Auth request. They must not use a real project URL or key. Desktop and Pixel 7 accessibility scans are both required; neither viewport may be blanket-skipped. Automated axe results do not constitute accessibility certification.
 
 Production Auth activation requires the exact Site URL and redirect allowlist, custom SMTP, one current Administrator TOTP enrollment, one controlled non-Admin invitation, and the recovery drill in `MFA_RECOVERY_RUNBOOK.md`. Keep `NETRA_AUTH_INVITATIONS_ENABLED=0` until those gates pass.
 
-Phase 7 must clear the current production dependency advisories, add CI/scanning and branch protection, and complete JWT/header hardening before the branch is pushed.
+## Phase 7 local verification
+
+Phase 7 adds cached local ES256/JWKS verification, privileged live-session
+validation, exact-origin headers, hash-locked dependencies, pinned non-root
+images, SBOM/scan policy, CI workflows, and a declarative protected-main
+contract. Use `PHASE_7_VERIFICATION.md` for exact evidence and limitations.
+
+Do not activate `asymmetric-jwks` until the target signing key is asymmetric and
+its public JWKS is verified in the controlled platform phase. Ordinary requests
+may use the cached local verifier afterward; privileged mutations always retain
+the second bounded remote session validation.
+
+Do not push yet. The backend/frontend compatibility implementations still need
+true feature-family decomposition. After that gate and explicit owner approval,
+push only the remediation branch, run the workflows, apply the audited ruleset,
+and open an unmerged draft PR.

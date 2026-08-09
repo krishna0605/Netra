@@ -222,10 +222,11 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
 }
 
 @media (max-width: 760px) {
-  .public-header { grid-template-columns: 130px 1fr auto; }
+  .public-header { grid-template-columns: minmax(0, 1fr) 60px; }
   .desktop-public-nav, .header-actions > button[role="combobox"], .header-cta { display: none !important; }
   .mobile-menu-button { display: grid; }
-  .brand-block { justify-content: flex-start; padding-left: 1.2rem; }
+  .brand-block { width: 100%; min-width: 0; justify-content: flex-start; padding-left: 1.2rem; }
+  .header-actions { grid-column: 2; }
   .hero-section { display: block; }
   .hero-audience { display: none; }
   .hero-copy { min-height: calc(100vh - 60px); padding: 2rem 1.2rem 0; border-right: 0; }
@@ -467,6 +468,7 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
 .faq-section { grid-template-columns: .9fr 1.1fr; min-height: 600px; gap: 54px; }
 .faq-list { border-color: rgba(29,29,29,.22); }
 .faq-list button { color: var(--charcoal-deep); border-color: rgba(29,29,29,.22); }
+.faq-list button > span { color: var(--signal-orange-dark); }
 .faq-list button > p { color: rgba(29,29,29,.66); }
 
 .public-footer { padding-top: 80px; background: #242424; border-top: 0; }
@@ -1324,3 +1326,23 @@ a:hover .text-roll > span:last-child, button:hover .text-roll > span:last-child 
 /* Remove the decorative arcs banner shown above the footer Pages/Social columns (all public pages). */
 .footer-links > .footer-arcs { display: none; }
 .footer-links { grid-template-rows: auto; }
+
+/* Accessible identity treatment on the light ticket panels. */
+.home-public-site .cream-section .section-label > span,
+.home-public-site .capability-table article > span,
+.home-public-site .feature-list article > span,
+.home-public-site .integration-grid svg,
+.home-public-site .scenario-path span,
+.home-public-site .faq-list button > span,
+.home-public-site .features-section .section-label > span,
+.home-public-site .scenario-section .section-label > span,
+.home-public-site .faq-section .section-label > span {
+  color: #843014;
+}
+
+@media (max-width: 760px) {
+  .public-site .public-header { grid-template-columns: minmax(0, 1fr) 60px; }
+  .public-site .brand-block { width: auto; min-width: 0; clip-path: none; }
+  .public-site .header-actions { grid-column: 2; }
+  .public-site .mobile-menu-button { position: relative; z-index: 2; min-width: 60px; min-height: 60px; }
+}

@@ -1,8 +1,9 @@
 # Netra Supabase migration runbook
 
-This runbook migrates durable Netra data from `kirctxhxcmnncpuxjknw` to
-`frjzewpyjgirorbguegm` while keeping metered transfer below the free-plan
-budget. It intentionally excludes Supabase sessions, refresh tokens, Django
+This runbook migrates durable Netra data from `SOURCE_PROJECT_REF` to
+`TARGET_PROJECT_REF` while keeping metered transfer below the free-plan
+budget. Resolve both references from the approved operator manifest outside
+Git. It intentionally excludes Supabase sessions, refresh tokens, Django
 sessions, PGMQ messages, PGMQ archives, and Realtime publications.
 
 ## Hard stop conditions
@@ -74,13 +75,13 @@ python manage.py export_supabase_schema_manifest --output '<encrypted-work-dir>\
 Pop-Location
 ```
 
-Apply the Supabase infrastructure migrations only after all 49 public tables
+Apply the Supabase infrastructure migrations only after all 53 public tables
 exist. Inspect the current CLI flags before use:
 
 ```powershell
 npx --yes supabase@latest db push --help
 npx --yes supabase@latest login
-npx --yes supabase@latest link --workdir infra --project-ref frjzewpyjgirorbguegm
+npx --yes supabase@latest link --workdir infra --project-ref $env:TARGET_PROJECT_REF
 npx --yes supabase@latest db push --workdir infra --linked --dry-run
 npx --yes supabase@latest db push --workdir infra --linked
 ```
@@ -172,7 +173,7 @@ the dashboard delta reaches 0.75 GiB even if the local meter is lower.
 
 Before reopening writes, verify:
 
-- 49 public tables and 13 Netra Django migrations.
+- 53 public application tables and 16 Netra Django migrations.
 - Source and target data manifests match.
 - One Auth user and one identity exist; sessions and refresh tokens are empty.
 - Seven private buckets and 608 hash-verified objects exist.

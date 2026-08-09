@@ -89,6 +89,23 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 | `NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES` | `65536` |
 | `NETRA_AUTH_ADMIN_LIST_PAGE_SIZE` | Maximum `100` |
 
+### Railway JWT verification variables
+
+| Variable | Reviewed contract |
+|---|---|
+| `SUPABASE_URL` | Exact project API origin; also derives the issuer/JWKS origin |
+| `SUPABASE_PUBLISHABLE_KEY` | Publishable Auth key; never treated as a secret |
+| `SUPABASE_SECRET_KEY` | Backend-only modern secret key; never enters Vercel |
+| `NETRA_SUPABASE_JWT_MODE` | `remote` until Phase 8 key verification; then `asymmetric-jwks` |
+| `NETRA_SUPABASE_JWKS_CACHE_SECONDS` | `600` |
+| `NETRA_SUPABASE_JWKS_TIMEOUT_SECONDS` | `3` |
+| `NETRA_SUPABASE_JWKS_RESPONSE_MAX_BYTES` | `131072` |
+| `NETRA_SUPABASE_JWT_AUDIENCE` | `authenticated` |
+| `NETRA_SUPABASE_PRIVILEGED_VERIFY_TIMEOUT_SECONDS` | `3` |
+
+Do not configure a legacy JWT secret or any obsolete anonymous/service-role
+alias. The application never performs local HS256 verification.
+
 The Auth Admin adapter uses the existing backend-only Supabase service-role/secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON.
 
 ## Vercel frontend

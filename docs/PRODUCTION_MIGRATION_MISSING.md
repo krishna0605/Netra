@@ -44,7 +44,7 @@ This file records names and status only. Never add credential values here.
 | Railway API | `https://netra-api-production.up.railway.app/api/health` returns HTTP 200. Target Postgres, Auth, Storage, encryption, and worker checks pass. |
 | Railway worker | `netra-worker` is online and its latest deployment is successful. |
 | Vercel | Production and Preview use the new Supabase URL/publishable key, the Railway API URL, Realtime disabled, and direct upload disabled. |
-| Production bundle | HTTP 200; contains target ref `frjzewpyjgirorbguegm` and does not contain legacy ref `kirctxhxcmnncpuxjknw`. |
+| Production bundle | HTTP 200; contains the approved target reference and does not contain `LEGACY_PROJECT_REF`. |
 | GitHub | Migration PR #1 merged to `main`; CodeRabbit and Vercel checks passed. |
 | Egress | No legacy database export or Storage object download was performed. Legacy migration egress consumed by this fresh-start cutover: zero. |
 
@@ -58,7 +58,7 @@ This file records names and status only. Never add credential values here.
 | `DATABASE_CONN_MAX_AGE` | `0` for the pooler. |
 | `SUPABASE_PROJECT_REF` | `frjzewpyjgirorbguegm`. |
 | `SUPABASE_URL` | New project API URL. |
-| `SUPABASE_ANON_KEY` | New publishable key; compatibility variable used by the backend. |
+| `SUPABASE_PUBLISHABLE_KEY` | New publishable key used by backend Auth integration. |
 | `SUPABASE_SECRET_KEY` | Dedicated `sb_secret_...` backend key; Railway only. |
 | `NETRA_DATABASE_PROVIDER` / `NETRA_DATABASE_MODE` | `supabase`. |
 | `NETRA_STORAGE_PROVIDER` | `supabase`. |
@@ -101,9 +101,9 @@ The following remain secret-manager-only and were rotated for the fresh target:
 - `NETRA_SENSOR_SHARED_KEY`
 - per-integration webhook HMAC credentials, provisioned through the AAL2 API after integrations are approved
 
-The stale aliases `SUPABASE_POOLER_DATABASE_URL`,
-`SUPABASE_DIRECT_DATABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` have been
-removed from Railway so they cannot override the target.
+Stale database/key aliases from the pre-Phase-7 contract have been removed
+from Railway so they cannot override the target. The canonical backend secret
+name is `SUPABASE_SECRET_KEY`.
 
 ### Railway service-specific variables
 
@@ -123,7 +123,7 @@ removed from Railway so they cannot override the target.
 | `VITE_API_BASE_URL` | `https://netra-api-production.up.railway.app/api` |
 | `VITE_DEPLOYMENT_PROFILE` | `hackathon-core` |
 | `VITE_SUPABASE_URL` | New target project API URL. |
-| `VITE_SUPABASE_ANON_KEY` | New target publishable key. |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | New target publishable key. |
 | Supabase database Realtime variable | Not present; Phase 5 removed all browser database-channel code. |
 | `VITE_DIRECT_UPLOAD_ENABLED` | `0` |
 | `VITE_MAX_UPLOAD_MB` | `25` |
