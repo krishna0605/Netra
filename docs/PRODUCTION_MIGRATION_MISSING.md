@@ -2,7 +2,7 @@
 
 Audit date: 7 August 2026 (Asia/Kolkata)
 
-Phase 4 local update: 9 August 2026. The tenancy and custody-ordering migrations are local only. Production remains on the previously deployed schema; migrations `0014` and `0015`, their schema changes, and the new environment names have not been applied to Supabase or Railway.
+Phase 5 local update: 9 August 2026. The tenancy, custody-ordering, and durable feature migrations are local only. Production remains on the previously deployed schema; migrations `0014` through `0016`, their schema changes, and the new environment names have not been applied to Supabase or Railway. The expected repository schema after those migrations is 53 public application tables and 16 forensics migrations.
 
 Current decision: **the application stack is switched to the new Supabase
 project, but production evidence writes remain NO-GO until the two owner
@@ -21,7 +21,10 @@ This file records names and status only. Never add credential values here.
 | Local test environment | Disposable PostgreSQL 17 concurrency evidence | Completed locally against a disposable PostgreSQL 17.6 container; no Supabase connection was used. | Repeat in Phase 7 CI using an isolated service container. Never substitute a Supabase free-plan project. |
 | Phase 4 activation | Separate Railway API and worker services | Local images are split and pinned, but the Phase 4 topology has not been deployed or sized on Railway Hobby. | Confirm service separation, CPU/memory limits, worker persistent volume, and expected Hobby usage before preview deployment. |
 | Phase 4 activation | Migration `0015` rehearsal | Hash-link backfill and failure cases pass locally, but production data has not been rehearsed. | Rehearse migrations `0014` and `0015` on an encrypted disposable copy, review every chain, and approve the migration window. |
-| Release governance | Phase 7 CI and branch protection | Phase 4 is locally implemented, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 5–7 before pushing this branch or opening the production PR. |
+| Phase 5 activation | Migration `0016` rehearsal | Durable references, imports, and tenant-owned integration changes pass locally but are not present in the hosted database. | Rehearse migrations `0014` through `0016` on an encrypted disposable copy and approve the migration window. |
+| Phase 5 activation | Integration allowlist and consumer approval | Integration delivery is implemented but intentionally disabled without exact approved hosts and worker capacity. | Supply exact HTTPS hostnames, approve the worker consumer, and keep generic external sync disabled until a reviewed adapter exists. |
+| Phase 6 activation | Auth redirects, SMTP, and TOTP | Invitation, password-recovery, and Administrator MFA flows require exact redirects, production email delivery, and an enrolled factor. | Configure the exact invite/recovery redirects and custom SMTP, then complete a controlled TOTP/recovery drill without recording secrets. |
+| Release governance | Phase 7 CI and branch protection | Phases 1–5 are locally implemented, but required CI/security scans and protected-main workflow are not yet installed. | Complete Phases 6–7 before pushing this branch or opening the production PR. |
 | Phase 3 activation | Evidence encryption key material | v2.1 writers require high-entropy active key material and a stable non-secret key ID; legacy artifacts require decrypt-only prior keys during rollback. | Provision `NETRA_EVIDENCE_KEY`, `NETRA_EVIDENCE_KEY_ID`, and reviewed previous keys through Railway secrets. Never place values in this file or Vercel. |
 | Phase 3 activation | Custody signing material | External anchors cannot be signed without a 32-byte raw Ed25519 private key and stable key ID. | Provision the base64 private key and key ID through Railway secrets, enable anchors only afterward, and preserve public keys with exported anchors. |
 | Phase 3 activation | Crypto migration rehearsal | The resumable command is locally implemented but has not been exercised against the target sequence or any Supabase object. | Rehearse with fake/local Storage, approve the 0.75 GB window after quota reset, then run plan-only inventory before any execution. |
@@ -32,7 +35,7 @@ This file records names and status only. Never add credential values here.
 | Area | Verified state |
 |---|---|
 | Target Supabase | Healthy project `frjzewpyjgirorbguegm` in Sydney (`ap-southeast-2`). |
-| Database | 49 public tables, 31 Django migration rows including all 13 forensics migrations, and RLS enabled on all 49 tables. |
+| Hosted database snapshot | 49 public tables and the previously deployed migration set. Local migrations `0014`–`0016` are not included in this hosted snapshot. Do not describe the hosted target as 53 tables until the reviewed migration sequence is applied and verified. |
 | Data API security | Public/`anon`/`authenticated` privileges revoked; Netra tables are not published to Supabase Realtime. |
 | Storage | Seven private buckets exist, zero objects for the fresh start, and routine health checks are metadata-only. |
 | Queues | Fourteen canonical PGMQ queues exist empty. Production processing currently uses the reviewed `postgres-row-lock` worker because only one matching Railway worker is deployed. |
@@ -68,12 +71,15 @@ This file records names and status only. Never add credential values here.
 | `NETRA_STORAGE_DEEP_HEALTHCHECK` | `0`. |
 | `NETRA_DIRECT_UPLOAD_ENABLED` | `0`. |
 | `NETRA_STORAGE_ROOT` | `/app/storage`; requires the owner volume action above. |
-| `NETRA_STORAGE_CACHE_ENABLED` | Future Phase 3 value `1`; startup must fail closed when disabled in production. |
-| `NETRA_STORAGE_CACHE_MAX_BYTES` / `NETRA_STORAGE_CACHE_MIN_FREE_BYTES` | Future defaults `629145600` / `209715200`; Railway backend only. |
-| `NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS` / `NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS` / `NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS` | Future cache-maintenance values `3600` / `60` / `30`; Railway backend only. |
-| `NETRA_EVIDENCE_WRITE_FORMAT` / `NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES` | Future Phase 3 values `v2` / `8388608`; Railway backend only. |
-| `NETRA_CUSTODY_ANCHORS_ENABLED` | Future value `1` only after signing material is provisioned and verified. |
-| `NETRA_CUSTODY_SIGNING_PRIVATE_KEY` / `NETRA_CUSTODY_SIGNING_KEY_ID` | Future Phase 3 signing material; Railway secret/backend scope only. |
+| `NETRA_STORAGE_CACHE_ENABLED` | Phase 3 contract value `1`; production activation still requires the persistent-volume proof. |
+| `NETRA_STORAGE_CACHE_MAX_BYTES` / `NETRA_STORAGE_CACHE_MIN_FREE_BYTES` | Phase 3 defaults `629145600` / `209715200`; Railway backend only. |
+| `NETRA_STORAGE_CACHE_STALE_TEMP_SECONDS` / `NETRA_STORAGE_CACHE_TOUCH_INTERVAL_SECONDS` / `NETRA_STORAGE_CACHE_LOCK_TIMEOUT_SECONDS` | Phase 3 cache-maintenance values `3600` / `60` / `30`; Railway backend only. |
+| `NETRA_EVIDENCE_WRITE_FORMAT` / `NETRA_EVIDENCE_ENCRYPTION_CHUNK_BYTES` | Phase 3 values `v2` / `8388608`; Railway backend only. |
+| `NETRA_CUSTODY_ANCHORS_ENABLED` | Value `1` only after signing material is provisioned and verified. |
+| `NETRA_CUSTODY_SIGNING_PRIVATE_KEY` / `NETRA_CUSTODY_SIGNING_KEY_ID` | Phase 3 signing material; Railway secret/backend scope only. |
+| `NETRA_MFA_POLICY` | Phase 6 value `admin_required`; backend-owned and never a `VITE_` variable. |
+| `NETRA_AUTH_INVITATIONS_ENABLED` | Keep `0` until exact redirect URLs and custom SMTP are verified. |
+| `NETRA_AUTH_INVITE_REDIRECT_URL` | Exact approved frontend `/auth/invite` URL; backend only. |
 | `NETRA_DEPLOYMENT_PROFILE` | `hackathon-core`. |
 | `NETRA_DEPLOYMENT_ENV` | `production`. |
 | `NETRA_DEV_ROLE_HEADERS` | `0`. |
@@ -132,15 +138,14 @@ compiled browser bundle.
   match the fresh-start contract.
 - Authenticated production `/api/auth/me` returned HTTP 200 with a temporary,
   explicitly server-provisioned Admin profile.
-- Production deep health passed Postgres, target Storage metadata access,
-  encryption, Auth/RBAC, and the deployed worker. Zeek is not installed in the
-  hackathon image and is reported as an optional degraded packet tool.
-- Frontend tests: 10/10 passed; production build passed.
-- Targeted backend migration/security tests: 28/28 passed.
-- Full backend suite: 35/37 passed locally; only the two `tshark`-dependent
-  PCAP tests failed because this workstation lacks the executable.
-
-Phase 2 local verification supersedes the old workstation result above: Wireshark 4.6.6 is now available and the complete backend suite passes 90/90. PostgreSQL concurrency rehearsal remains outstanding for the separate credential reason listed above.
+- The Phase 4 worker image contract pins TShark 4.6.7 and Zeek 8.2.1. Neither
+  tool is optional for a worker advertising full PCAP capability.
+- Phase 5 local verification recorded 166 successful backend tests with four
+  environment-specific skips, 20 PostgreSQL tests, and 18 frontend tests.
+- Frontend lint had no errors and one Phase 6 hook warning; the production
+  build passed but exceeded the Phase 6 initial-bundle budget.
+- These are local repository results, not evidence that migrations `0014`–`0016`
+  or the split worker topology have been activated in production.
 
 Production evidence writes may open only after the permanent Admin and
 persistent Railway volume are verified. No source-data migration is implied by
