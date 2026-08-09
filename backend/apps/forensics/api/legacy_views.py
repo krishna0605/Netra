@@ -32,7 +32,6 @@ from common.case_workspace import analysis_status_for_case, bump_case_list_cache
 from common.custody import custody_event_dict, record_custody_event, verify_case_ledger
 from common.detection import classify_detection, load_rules
 from common.evidence_normalization import NORMALIZATION_PREVIEW_BYTES, normalize_evidence_upload
-from common.indexing import search_index
 from common.capabilities import public_capabilities
 from apps.forensics.api.errors import api_error
 from common.jobs import job_status_payload
@@ -77,16 +76,6 @@ def _specialized_rate_limit(request, route_key: str, user_limit: int, *, organiz
     return None if result.allowed else rate_limit_response(result)
 
 
-def _filter_rows(rows: list[dict], params, field_map: dict[str, str]) -> list[dict]:
-    filtered = rows
-    for query_key, row_key in field_map.items():
-        value = params.get(query_key)
-        if not value or value == "all":
-            continue
-        filtered = [row for row in filtered if value.lower() in str(row.get(row_key, "")).lower()]
-    return filtered
-
-
 def _paged(rows: list[dict], request) -> dict:
     try:
         limit = max(1, min(500, int(request.GET.get("limit", "100"))))
@@ -98,22 +87,17 @@ def _paged(rows: list[dict], request) -> dict:
     return {"count": len(rows), "limit": limit, "offset": offset, "nextOffset": next_offset, "results": sliced}
 
 
-def _analysis(case_id: str) -> dict:
-    return analysis_for_case(case_id) or empty_analysis()
+def _case_scoped_analysis(*, case_id: str) -> dict:
+    """Load analysis for one already-authorized case.
 
-
-def _selected_case_id(request) -> str:
-    requested = (request.GET.get("caseId") or request.POST.get("caseId") or "").strip()
-    if requested:
-        return requested
-    actor = actor_from_request(request)
-    if actor.role == "Admin":
-        return ""
-    return visible_cases_for_actor(actor).order_by("-updated_at").values_list("id", flat=True).first() or ""
-
-
-def _results(key: str, request) -> list[dict]:
-    return _analysis(_selected_case_id(request)).get(key, [])
+    The case identifier is keyword-only and mandatory. A blank identifier used
+    to make this helper scan whichever case happened to be most recently
+    updated, which is exactly the cross-case disclosure Phase 1 closed.
+    """
+    resolved = (case_id or "").strip()
+    if not resolved:
+        raise Http404("An analysis case is required.")
+    return analysis_for_case(resolved) or empty_analysis()
 
 
 def _is_probable_validator_case(case: Case) -> bool:
@@ -447,7 +431,7 @@ def case_detail(request, case_id: str):
         return JsonResponse(_case_dict(case))
     if case:
         return JsonResponse(_case_dict(case))
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     if analysis.get("case"):
         return JsonResponse(analysis["case"])
     raise Http404("Case not found")
@@ -471,7 +455,7 @@ def case_history(_request, case_id: str):
     case = Case.objects.filter(id=case_id).first()
     if case:
         return JsonResponse({"caseId": case_id, "results": _case_dict(case)["history"]})
-    case_data = _analysis(case_id=case_id).get("case") or {}
+    case_data = _case_scoped_analysis(case_id=case_id).get("case") or {}
     return JsonResponse({"caseId": case_id, "results": case_data.get("history", [])})
 
 
@@ -507,7 +491,7 @@ def case_workspace_status(request, route_ref):
 
 
 def dashboard_summary_payload(case_id: str) -> dict:
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     return analysis["summary"] | {
         "topAttackClass": analysis.get("topAttackClass", analysis["summary"].get("topAttackClass", "Normal Baseline")),
         "riskLevel": analysis.get("riskLevel", analysis["summary"].get("riskLevel", "low")),
@@ -533,7 +517,7 @@ def case_charts(_request, case_id: str):
                 "dataQuality": charts.get("dataQuality", "No data found in this evidence file."),
             }
         )
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     alerts = analysis.get("alerts", [])
     packets = analysis.get("packets", [])
     sessions = analysis.get("sessions", [])
@@ -602,7 +586,7 @@ def case_tab(request, case_id: str, tab_name: str):
         "protocols": lambda: decoder_summary(request),
         "payloads": lambda: payloads(request),
         "graph": lambda: graph(request),
-        "timeline": lambda: JsonResponse({"results": _analysis(case_id=case_id).get("trafficTimeline", [])}),
+        "timeline": lambda: JsonResponse({"results": _case_scoped_analysis(case_id=case_id).get("trafficTimeline", [])}),
     }
     if tab_name not in mapping:
         raise Http404("Unknown case tab")
@@ -731,7 +715,7 @@ def custody_export(request, case_id: str):
 
 
 def case_linked_evidence(_request, case_id: str):
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     exports = [{"id": row.id, "type": row.export_type, "caseId": case_id, "requestedBy": row.requested_by, "timestamp": row.created_at.isoformat(), "hash": row.sha256, "status": row.status} for row in Export.objects.filter(case_id=case_id).order_by("-created_at")]
     return JsonResponse({"caseId": case_id, "packets": analysis.get("packets", [])[:20], "sessions": analysis.get("sessions", []), "payloads": analysis.get("payloadFindings", []), "exports": exports})
 
@@ -2170,125 +2154,13 @@ def _dead_letter_dict(row: DeadLetterEvent) -> dict:
     return {"id": row.id, "topic": row.topic, "workerName": row.worker_name, "jobId": row.job_id, "caseId": row.case_id, "error": row.error_message, "retryCount": row.retry_count, "status": row.status, "timestamp": row.created_at.isoformat()}
 
 
-def dashboard_summary(request):
-    analysis = _analysis(_selected_case_id(request))
-    return JsonResponse(
-        dashboard_summary_payload(request.GET.get("caseId") or analysis.get("caseId", ""))
-        | {
-            "case": analysis.get("case"),
-            "evidence": analysis.get("evidence"),
-            "zeek": analysis.get("zeek", analysis["summary"].get("zeek")),
-        }
-    )
-
-
-def traffic_timeline(request):
-    return JsonResponse({"results": _analysis(_selected_case_id(request)).get("trafficTimeline", [])})
-
-
-def protocol_distribution(request):
-    return JsonResponse({"results": _analysis(_selected_case_id(request)).get("protocolChartData", [])})
-
-
-def alerts(request):
-    rows = _filter_rows(_results("alerts", request), request.GET, {"severity": "severity", "attackClass": "attackClass", "status": "status"})
-    return JsonResponse({"results": rows})
-
-
-def packets(request):
-    fallback = _filter_rows(_results("packets", request), request.GET, {"sourceIp": "sourceIp", "destinationIp": "destinationIp", "protocol": "protocol", "sessionId": "sessionId", "severity": "severity"})
-    rows, backend = search_index("packets", _selected_case_id(request), request.GET.get("q", ""), fallback)
-    rows = _filter_rows(rows, request.GET, {"sourceIp": "sourceIp", "destinationIp": "destinationIp", "protocol": "protocol", "sessionId": "sessionId", "severity": "severity"})
-    port = request.GET.get("port")
-    if port:
-        rows = [row for row in rows if str(row["sourcePort"]) == port or str(row["destinationPort"]) == port]
-    payload = _paged(rows, request)
-    payload["searchBackend"] = backend
-    return JsonResponse(payload)
-
-
-def packet_detail(request, packet_id: str):
-    packet = next((row for row in _results("packets", request) if row["id"] == packet_id), None)
-    if not packet:
-        raise Http404("Packet not found")
-    return JsonResponse(packet)
-
-
-def sessions(request):
-    fallback = _results("sessions", request)
-    rows, backend = search_index("sessions", _selected_case_id(request), request.GET.get("q", ""), fallback)
-    rows = _filter_rows(rows, request.GET, {"source": "source", "destination": "destination", "protocol": "protocol"})
-    min_risk = request.GET.get("minRisk")
-    if min_risk:
-        rows = [row for row in rows if int(row.get("riskScore", row.get("risk_score", 0)) or 0) >= int(min_risk)]
-    payload = _paged(rows, request)
-    payload["searchBackend"] = backend
-    return JsonResponse(payload)
-
-
-def session_detail(request, session_id: str):
-    session = next((row for row in _results("sessions", request) if row["id"] == session_id), None)
-    if not session:
-        raise Http404("Session not found")
-    return JsonResponse(session | {"reconstruction": f"{session['packetCount']} packet(s) reconstructed from uploaded PCAP metadata."})
-
-
-def session_timeline(request, session_id: str):
-    session = next((row for row in _results("sessions", request) if row["id"] == session_id), None)
-    if not session:
-        return JsonResponse({"sessionId": session_id, "results": []})
-    return JsonResponse({"sessionId": session_id, "results": [{"time": session["startTime"], "event": "Session started"}, {"time": session["endTime"], "event": "Session ended"}]})
-
-
-def decoder_summary(request):
-    analysis = _analysis(_selected_case_id(request))
-    return JsonResponse(
-        {
-            "encryptedTrafficPolicy": "Encrypted content is not decrypted; metadata patterns are analyzed.",
-            "results": analysis.get("decodedProtocols", []),
-            "zeek": analysis.get("zeek", {}),
-        }
-    )
-
-
-def decoder_protocol(request, protocol: str):
-    rows = [row for row in _results("decodedProtocols", request) if protocol.lower() in row["protocol"].lower()]
-    return JsonResponse({"protocol": protocol, "results": rows})
-
-
-def payloads(request):
-    fallback = _filter_rows(_results("payloadFindings", request), request.GET, {"protocol": "protocol", "risk": "risk"})
-    rows, backend = search_index("payloads", _selected_case_id(request), request.GET.get("q", ""), fallback)
-    rows = _filter_rows(rows, request.GET, {"protocol": "protocol", "risk": "risk"})
-    return JsonResponse({"results": rows, "searchBackend": backend})
-
-
-def payload_detail(request, finding_id: str):
-    finding = next((row for row in _results("payloadFindings", request) if row["id"] == finding_id), None)
-    if not finding:
-        raise Http404("Payload finding not found")
-    return JsonResponse(finding)
-
-
 def detection_rules(_request):
     return JsonResponse({"results": load_rules()})
 
 
-def detection_matches(request):
-    category = request.GET.get("category")
-    rows = _results("detectionMatches", request)
-    if category and category != "all":
-        rows = [row for row in rows if category.lower() in row["category"].lower() or category.lower() in row["ruleName"].lower()]
-    return JsonResponse({"results": rows})
-
-
-def anomalies(request):
-    return JsonResponse({"results": _results("anomalies", request)})
-
-
 def case_anomaly_explanation(request, case_id: str):
     model = ml_model_status_payload()
-    rows = _analysis(case_id=case_id).get("anomalies", [])
+    rows = _case_scoped_analysis(case_id=case_id).get("anomalies", [])
     top_features: list[str] = []
     explanations = []
     for row in rows[:8]:
@@ -2325,31 +2197,6 @@ def case_anomaly_explanation(request, case_id: str):
     )
 
 
-def anomaly_baseline(request):
-    return JsonResponse({"results": [{"metric": row["behaviour"], "baseline": row["baseline"], "observed": row["observed"], "confidence": row["confidence"]} for row in _results("anomalies", request)]})
-
-
-def anomaly_risk_timeline(request):
-    return JsonResponse({"results": [{"time": row["time"], "risk": min(100, row.get("alerts", 0) * 20)} for row in _analysis(_selected_case_id(request)).get("trafficTimeline", [])]})
-
-
-def graph(request):
-    return JsonResponse(_analysis(_selected_case_id(request)).get("graph", {"nodes": [], "edges": []}))
-
-
-def graph_node(request, node_id: str):
-    analysis = _analysis(_selected_case_id(request))
-    node = next((row for row in analysis.get("graph", {}).get("nodes", []) if row["id"] == node_id), None)
-    related_alerts = [alert for alert in analysis.get("alerts", []) if alert["id"] in (node or {}).get("alertIds", [])]
-    return JsonResponse({"id": node_id, "riskScore": node.get("risk", 0) if node else 0, "node": node, "relatedAlerts": related_alerts})
-
-
-def graph_attack_path(request):
-    graph_data = _analysis(_selected_case_id(request)).get("graph", {"edges": []})
-    path = [graph_data["edges"][0]["source"], graph_data["edges"][0]["target"]] if graph_data.get("edges") else []
-    return JsonResponse({"path": path})
-
-
 def search(request):
     route_ref = (request.GET.get("caseRef") or "").strip()
     job_id = (request.GET.get("jobId") or "").strip()
@@ -2367,7 +2214,7 @@ def search(request):
 
 def report_preview(request, case_id: str):
     language = request.GET.get("language", "en")
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     case = Case.objects.filter(id=case_id).first()
     custody = verify_case_ledger(case) if case else {"verified": False, "eventCount": 0}
     summary = f"Netra parsed {analysis['summary']['packets']} packets, reconstructed {analysis['summary']['sessions']} sessions, and generated {analysis['summary']['alerts']} alert(s). Top class: {analysis.get('topAttackClass', 'Normal Baseline')}."
@@ -2445,7 +2292,7 @@ def report_generate(request, case_id: str):
     payload = _json_body(request)
     language = payload.get("language", "en")
     report_format = (payload.get("format") or "html").lower()
-    analysis = report_analysis_from_snapshot(case) or _analysis(case_id=case_id)
+    analysis = report_analysis_from_snapshot(case) or _case_scoped_analysis(case_id=case_id)
     if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
         extension = "pdf" if report_format == "pdf" else "html"
         report_id = generated_artifact_filename("rpt", f".{extension}")
@@ -2507,7 +2354,7 @@ def exports(request):
         denied = require_permission(request, "export", case=case, resource_type="Export", resource_id=case_id)
         if denied:
             return denied
-        analysis = _analysis(case_id=case_id)
+        analysis = _case_scoped_analysis(case_id=case_id)
         export_type = (payload.get("type") or "json").lower()
         if getattr(settings, "NETRA_SUPABASE_START_WORKERS", False) and payload.get("queued"):
             export_id = f"exp-{uuid4().hex[:8]}"
@@ -2661,7 +2508,7 @@ def integration_send_alerts(request, integration_id: str):
     case_id = str(payload.get("caseId") or "").strip()
     if not case_id:
         return JsonResponse({"error": "caseId is required.", "code": "analysis_scope_required"}, status=400)
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     case = Case.objects.filter(id=case_id).first()
     deliveries = []
     for alert in analysis.get("alerts", [])[:20]:
@@ -2726,7 +2573,7 @@ def siem_export(request):
     case = Case.objects.filter(id=case_id).first()
     if not case:
         raise Http404("Case not found")
-    analysis = _analysis(case_id=case_id)
+    analysis = _case_scoped_analysis(case_id=case_id)
     lines = [
         f"CEF:0|Netra|Network Forensics|3|{alert.get('ruleId','netra-alert')}|{alert.get('attackClass')}|{alert.get('confidence')}|src={alert.get('sourceIp')} dst={alert.get('destination')} cs1={case_id} cs1Label=caseId"
         for alert in analysis.get("alerts", [])

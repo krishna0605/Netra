@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test import Client, TestCase, override_settings
+from django.http import Http404
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.forensics.api import analysis as analysis_module
+from apps.forensics.api import legacy_views
 from apps.forensics.models import Alert, Case, CaseHistoryEvent, CaseMembership, CustodyLedgerEvent, DetectionMatch, ProcessingJob, UserProfile
 from apps.forensics.urls import urlpatterns as api_urlpatterns
 from apps.forensics.tests.factories import netra_organization
@@ -235,6 +240,24 @@ class AnalysisCaseBoundaryTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "analysis_scope_required")
 
+    def test_investigator_legacy_route_does_not_fall_back_to_most_recent_case(self):
+        """An unscoped compatibility read must never resolve an implicit case.
+
+        The retired helper selected the most recently updated visible case, so an
+        investigator with more than one case silently received whichever case had
+        been touched last.
+        """
+        second_case = self._case("CASE-ALICE-SECOND", self.alice)
+        second_job = self._job("job-alice-second", second_case, "alice-second")
+        self._findings(second_case, second_job)
+
+        for path in ("/api/dashboard/summary", "/api/packets", "/api/graph", "/api/anomalies"):
+            with self.subTest(path=path):
+                response = self.client.get(path, **self.alice_headers)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["code"], "analysis_scope_required")
+                self.assertNotIn("alice-second", response.content.decode())
+
     def test_cross_case_alert_mutation_has_no_side_effects(self):
         before_bob = self.bob_job.stats
         before_history = CaseHistoryEvent.objects.count()
@@ -285,3 +308,28 @@ class AnalysisCaseBoundaryTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_finding_status")
         self.assertEqual(Alert.objects.get(pk=f"{self.alice_job.id}-shared-alert").status, "new")
+
+
+class UnscopedAnalysisHelperTests(SimpleTestCase):
+    """Phase 1 required that no unscoped analysis helper survive anywhere."""
+
+    def _api_sources(self) -> dict[str, str]:
+        package = Path(analysis_module.__file__).parent
+        return {path.name: path.read_text(encoding="utf-8") for path in package.glob("*.py")}
+
+    def test_retired_implicit_selection_helpers_are_absent(self):
+        for name, source in self._api_sources().items():
+            with self.subTest(module=name):
+                self.assertNotIn("_selected_case_id", source)
+                self.assertNotIn("def _analysis(", source)
+                self.assertNotIn("def _results(", source)
+
+    def test_scoped_analysis_helper_requires_a_case(self):
+        with self.assertRaises(Http404):
+            legacy_views._case_scoped_analysis(case_id="")
+        with self.assertRaises(Http404):
+            legacy_views._case_scoped_analysis(case_id="   ")
+
+    def test_scoped_analysis_helper_cannot_be_called_positionally(self):
+        with self.assertRaises(TypeError):
+            legacy_views._case_scoped_analysis("CASE-ALICE-SCOPE")
