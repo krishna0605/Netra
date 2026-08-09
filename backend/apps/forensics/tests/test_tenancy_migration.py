@@ -1,14 +1,16 @@
 from datetime import timedelta
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.apps import apps
-from django.db import IntegrityError, connection, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.recorder import MigrationRecorder
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from apps.forensics.models import ApiRateLimitBucket, Case, Organization, UserProfile
+from apps.forensics.models import AnalysisReference, ApiRateLimitBucket, Case, Organization, ProcessingJob, UserProfile
+from apps.forensics.tests.migration_harness import MigrationHarnessMixin, latest_migration
 from common.tenancy import NETRA_ORGANIZATION_ID
 
 
@@ -68,7 +70,7 @@ class TenancySchemaTests(TestCase):
                 )
 
 
-class TenancyMigrationBackfillTests(TransactionTestCase):
+class TenancyMigrationBackfillTests(MigrationHarnessMixin, TransactionTestCase):
     migrate_from = [("forensics", "0013_case_route_ref_and_statuses")]
     migrate_to = [("forensics", "0014_security_tenancy_and_rate_limits")]
 
@@ -111,10 +113,6 @@ class TenancyMigrationBackfillTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_to)
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate(self.migrate_to)
-        super().tearDown()
-
     def test_legacy_rows_are_backfilled_without_losing_upload_label(self):
         apps = MigrationExecutor(connection).loader.project_state(self.migrate_to).apps
         Organization = apps.get_model("forensics", "Organization")
@@ -143,3 +141,32 @@ class TenancyMigrationBackfillTests(TransactionTestCase):
         EvidenceUploadSession = old_apps.get_model("forensics", "EvidenceUploadSession")
         self.assertEqual(EvidenceUploadSession.objects.get().organization, "Netra")
         MigrationExecutor(connection).migrate(self.migrate_to)
+
+
+class MigrationHarnessRestoresLatestSchemaTests(MigrationHarnessMixin, TransactionTestCase):
+    """Proves the harness repairs the exact breakage the old tearDown caused.
+
+    Restoring only ``migrate_to`` left 0016 unapplied, so every later test in the
+    same process ran current models against a schema without
+    ``forensics_processingjob.operation_kind``.
+    """
+
+    def test_latest_migration_tracks_the_graph_leaf(self):
+        self.assertEqual(latest_migration(), [("forensics", "0016_analysis_references_and_integration_links")])
+
+    def test_rewound_schema_breaks_current_models_and_is_restored(self):
+        MigrationExecutor(connection).migrate([("forensics", "0015_custody_chain_index")])
+        with self.assertRaises(DatabaseError):
+            ProcessingJob.objects.filter(operation_kind="analysis").count()
+
+        MigrationExecutor(connection).migrate(latest_migration())
+        self.assertEqual(ProcessingJob.objects.filter(operation_kind="analysis").count(), 0)
+        self.assertEqual(AnalysisReference.objects.count(), 0)
+        recorded = set(MigrationRecorder.Migration.objects.filter(app="forensics").values_list("name", flat=True))
+        self.assertIn(latest_migration()[0][1], recorded)
+
+    def test_no_migration_harness_restores_a_hardcoded_target(self):
+        """A future harness must not reintroduce the stale-schema tearDown."""
+        for path in Path(__file__).parent.glob("test_*migration*.py"):
+            with self.subTest(module=path.name):
+                self.assertNotIn("migrate(self.migrate_to)\n        super().tearDown()", path.read_text(encoding="utf-8"))

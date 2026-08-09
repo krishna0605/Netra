@@ -5,6 +5,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import SimpleTestCase, TransactionTestCase
 
+from apps.forensics.tests.migration_harness import MigrationHarnessMixin
 from common.tenancy import NETRA_ORGANIZATION_ID
 
 
@@ -39,7 +40,7 @@ class CustodyChainMigrationValidationTests(SimpleTestCase):
             custody_migration.ordered_chain(events, "CASE-1")
 
 
-class CustodyChainMigrationBackfillTests(TransactionTestCase):
+class CustodyChainMigrationBackfillTests(MigrationHarnessMixin, TransactionTestCase):
     migrate_from = [("forensics", "0014_security_tenancy_and_rate_limits")]
     migrate_to = [("forensics", "0015_custody_chain_index")]
 
@@ -80,10 +81,6 @@ class CustodyChainMigrationBackfillTests(TransactionTestCase):
 
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_to)
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate(self.migrate_to)
-        super().tearDown()
 
     def test_existing_chain_is_backfilled_from_hash_links(self):
         apps = MigrationExecutor(connection).loader.project_state(self.migrate_to).apps
