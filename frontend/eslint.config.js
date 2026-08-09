@@ -20,11 +20,12 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/features/console/ConsoleApplication.tsx'],
+    files: ['src/features/console/**/*.{ts,tsx}'],
     rules: {
-      // Legacy effects coordinate API hydration and authenticated route state.
+      // Console effects coordinate API hydration and authenticated route state.
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/purity': 'off',
+      'react-refresh/only-export-components': 'off',
     },
   },
 ])
