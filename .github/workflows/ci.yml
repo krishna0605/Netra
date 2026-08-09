@@ -135,6 +135,7 @@ jobs:
           python-version: "3.13"
       - run: python scripts/lint_supabase_sql.py
       - run: python scripts/validate_workflows.py
+      - run: python scripts/validate_github_governance.py
 
   ci-policy-gate:
     name: ci-policy-gate

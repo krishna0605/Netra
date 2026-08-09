@@ -1,0 +1,23 @@
+# Default owner
+* @krishna0605
+
+# Release and supply-chain controls
+/.github/ @krishna0605
+/backend/Dockerfile @krishna0605
+/backend/Dockerfile.worker @krishna0605
+/frontend/Dockerfile @krishna0605
+/frontend/vercel.json @krishna0605
+/infra/ @krishna0605
+
+# Authentication, tenancy, administration, crypto and custody
+/backend/common/supabase_auth.py @krishna0605
+/backend/common/jwt_verifier.py @krishna0605
+/backend/common/vault*.py @krishna0605
+/backend/common/custody.py @krishna0605
+/backend/apps/forensics/services/administration.py @krishna0605
+/backend/apps/forensics/migrations/ @krishna0605
+
+# Production contracts
+/.env.supabase.production.example @krishna0605
+/docs/PRODUCTION_ENVIRONMENT_CONTRACT.md @krishna0605
+/docs/CUTOVER_AND_ROLLBACK_CHECKLIST.md @krishna0605
