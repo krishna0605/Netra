@@ -3,6 +3,10 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "../Miscellaneous/tmp/playwright-results",
+  // Keep the security journeys deterministic on both local and hosted
+  // runners. A bounded worker count avoids starving the mocked Auth/API
+  // server while retaining zero retries for genuine failures.
+  workers: 2,
   use: {
     baseURL: "http://127.0.0.1:4173",
     trace: "retain-on-failure",
