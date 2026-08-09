@@ -54,9 +54,15 @@ try {
     $PreviousDatabaseUrl = $env:DATABASE_URL
     $PreviousPostgresFlag = $env:NETRA_TEST_POSTGRES
     $PreviousDatabaseTls = $env:NETRA_DATABASE_SSL_REQUIRED
+    $PreviousPostgresPort = $env:NETRA_TEST_POSTGRES_PORT
     try {
+        $PortReservation = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+        $PortReservation.Start()
+        $ReleasePostgresPort = ([Net.IPEndPoint]$PortReservation.LocalEndpoint).Port
+        $PortReservation.Stop()
+        $env:NETRA_TEST_POSTGRES_PORT = [string]$ReleasePostgresPort
         Invoke-Checked { docker compose -p $PostgresProject -f docker-compose.test-postgres.yml up -d --wait } "Disposable PostgreSQL 17 startup"
-        $env:DATABASE_URL = "postgresql://netra_test:netra_test_local_only@127.0.0.1:55432/netra_test"
+        $env:DATABASE_URL = "postgresql://netra_test:netra_test_local_only@127.0.0.1:$ReleasePostgresPort/netra_test"
         $env:NETRA_TEST_POSTGRES = "1"
         $env:NETRA_DATABASE_SSL_REQUIRED = "0"
         $env:PYTHONPATH = Join-Path $RepositoryRoot "ml-services\anomaly-engine"
@@ -76,6 +82,7 @@ try {
         $env:DATABASE_URL = $PreviousDatabaseUrl
         $env:NETRA_TEST_POSTGRES = $PreviousPostgresFlag
         $env:NETRA_DATABASE_SSL_REQUIRED = $PreviousDatabaseTls
+        $env:NETRA_TEST_POSTGRES_PORT = $PreviousPostgresPort
         $env:PYTHONPATH = $PreviousPythonPath
         docker compose -p $PostgresProject -f docker-compose.test-postgres.yml down --volumes | Out-Null
     }
