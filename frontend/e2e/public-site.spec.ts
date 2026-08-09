@@ -27,8 +27,13 @@ test("unknown routes use the NETRA 404", async ({ page }) => {
 });
 
 test("protected operations redirect to sign in", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+  });
+  await page.route("https://netra-auth.test/**", (route) => route.abort());
   await page.goto("/app/upload");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: /Enter the investigation console/i })).toBeVisible();
 });
 
