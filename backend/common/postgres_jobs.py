@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.forensics.models import EvidenceFile, EvidenceUploadSession, ProcessingJob
 from common.jobs import initial_steps
+from common.parser_runner import ParserFailure
 
 
 TERMINAL_JOB_STATUSES = {
@@ -111,8 +112,8 @@ def mark_job_failure(job_id: str, worker_id: str, exc: Exception) -> ProcessingJ
     job.lease_expires_at = None
     job.heartbeat_at = now
     safe_error = str(exc).strip()[:1000] or exc.__class__.__name__
-    job.error_code = "analysis_failed"
-    job.error_message = safe_error
+    job.error_code = exc.code if isinstance(exc, ParserFailure) else "analysis_failed"
+    job.error_message = "Packet-analysis tooling failed within its safety boundary." if isinstance(exc, ParserFailure) else safe_error
     if job.cancel_requested_at or isinstance(exc, JobCancellationRequested):
         job.status = ProcessingJob.Status.CANCELED
         job.step = "canceled"

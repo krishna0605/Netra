@@ -3,7 +3,6 @@ import html
 import json
 import shlex
 import shutil
-import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -14,6 +13,7 @@ from typing import Any
 from django.conf import settings
 
 from common.pcap import available_packet_tools
+from common.parser_runner import ParserLimits, run_parser
 from netra_ml.features import extract_features
 from netra_ml.scoring import score_anomalies
 
@@ -123,7 +123,11 @@ def validate_bpf_expression(expression: str) -> None:
     tcpdump = shutil.which("tcpdump")
     if not tcpdump:
         raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
-    result = subprocess.run([tcpdump, "-d", *_bpf_tokens(expression)], check=False, capture_output=True, text=True, timeout=10)
+    work = Path(settings.NETRA_TEMP_ROOT)
+    work.mkdir(parents=True, exist_ok=True)
+    probe = work / "bpf-validation.input"
+    probe.touch(exist_ok=True)
+    result = run_parser(tool="tcpdump", arguments=["-d", *_bpf_tokens(expression)], input_path=probe, working_directory=work, limits=ParserLimits.configured(timeout_seconds=10))
     if result.returncode != 0:
         raise ValueError("BPF filter syntax is invalid.")
 
@@ -134,13 +138,7 @@ def apply_offline_bpf(path: Path, expression: str) -> Path:
         raise RuntimeError("Offline BPF filtering requires tcpdump in the analysis image.")
     with NamedTemporaryFile(delete=False, suffix=".pcap") as handle:
         target = Path(handle.name)
-    result = subprocess.run(
-        [tcpdump, "-nn", "-r", str(path), "-w", str(target), *_bpf_tokens(expression)],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS,
-    )
+    result = run_parser(tool="tcpdump", arguments=["-nn", "-r", str(path), "-w", str(target), *_bpf_tokens(expression)], input_path=path, working_directory=path.parent)
     if result.returncode != 0:
         target.unlink(missing_ok=True)
         raise ValueError("BPF filter could not be applied to this capture.")
@@ -338,17 +336,23 @@ def _apply_intake_filters(packets: list[dict[str, Any]], intake: dict[str, Any])
 
 
 def run_zeek_analysis(pcap_path: Path, job_id: str) -> dict[str, Any]:
-    zeek_bin = shutil.which("zeek") or "/usr/local/zeek/bin/zeek"
-    if not Path(zeek_bin).exists() and shutil.which("zeek") is None:
-        return _empty_zeek("unavailable", "Zeek binary was not found.")
+    if not shutil.which("zeek"):
+        return _empty_zeek("unavailable", "Zeek is unavailable in this worker runtime.")
     output_dir = settings.NETRA_STORAGE_ROOT / "zeek" / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run([zeek_bin, "-C", "-r", str(pcap_path)], cwd=output_dir, capture_output=True, text=True, timeout=120, check=False)
+    isolated_input = output_dir / "input.pcap"
+    shutil.copyfile(pcap_path, isolated_input)
+    try:
+        result = run_parser(tool="zeek", arguments=["-C", "-r", str(isolated_input)], input_path=isolated_input, working_directory=output_dir, limits=ParserLimits.configured(timeout_seconds=120))
+    finally:
+        isolated_input.unlink(missing_ok=True)
     logs = sorted(path.name for path in output_dir.glob("*.log"))
+    if sum((output_dir / name).stat().st_size for name in logs) > settings.NETRA_PARSER_TEMP_MAX_BYTES:
+        raise ValueError("Zeek output exceeded the worker temporary-output limit.")
     parsed = {name: _parse_zeek_log(output_dir / name) for name in logs}
     summary = _summarize_zeek(parsed)
     status = "parsed" if logs else "failed"
-    error = "" if result.returncode == 0 or logs else (result.stderr.strip() or "Zeek did not produce logs.")
+    error = "" if result.returncode == 0 or logs else "Zeek did not produce valid logs."
     return {
         "status": status,
         "logDir": str(output_dir),
@@ -433,9 +437,9 @@ def _read_packets_with_tshark(path: Path) -> list[dict[str, str]]:
         "-e", "tls.handshake.ciphersuite", "-e", "icmp.type", "-e", "icmp.code", "-e", "_ws.expert.message",
         "-e", "_ws.col.Info",
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=settings.NETRA_SYNC_FALLBACK_TIMEOUT_SECONDS)
+    result = run_parser(tool="tshark", arguments=command[1:], input_path=path, working_directory=path.parent)
     if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or "tshark could not parse the PCAP")
+        raise ValueError("tshark could not parse the PCAP")
     fields = [
         "number", "time_epoch", "ip_src", "ipv6_src", "ip_dst", "ipv6_dst", "tcp_srcport", "udp_srcport",
         "tcp_dstport", "udp_dstport", "protocol", "size", "flags", "dns_query", "sni", "http_host",
@@ -498,7 +502,7 @@ def _count_observed_packets(path: Path) -> int | None:
     capinfos = shutil.which("capinfos")
     if not capinfos:
         return None
-    result = subprocess.run([capinfos, "-M", "-c", str(path)], check=False, capture_output=True, text=True, timeout=30)
+    result = run_parser(tool="capinfos", arguments=["-M", "-c", str(path)], input_path=path, working_directory=path.parent, limits=ParserLimits.configured(timeout_seconds=30))
     if result.returncode != 0:
         return None
     for line in result.stdout.splitlines():

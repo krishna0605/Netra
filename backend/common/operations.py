@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import hmac
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -24,6 +23,7 @@ from common.hashing import sha256_file
 from common.identifiers import validate_case_id
 from common.kafka import publish_event
 from common.persistence import persist_analysis
+from common.parser_runner import ParserLimits, run_parser
 from common.storage import save_uploaded_file
 from common.tenancy import netra_organization
 from common.vault import decrypt_file
@@ -173,15 +173,10 @@ def mark_capture_running(job: CaptureJob) -> None:
 
 
 def _count_packets(path: str | Path) -> int:
-    result = subprocess.run(
-        ["tshark", "-r", str(path), "-T", "fields", "-e", "frame.number"],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+    source = Path(path)
+    result = run_parser(tool="tshark", arguments=["-r", str(source), "-T", "fields", "-e", "frame.number"], input_path=source, working_directory=source.parent, limits=ParserLimits.configured(timeout_seconds=90))
     if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or "tshark could not count capture chunk packets")
+        raise ValueError("tshark could not count capture chunk packets")
     return len([line for line in result.stdout.splitlines() if line.strip()])
 
 
@@ -241,9 +236,9 @@ def _merge_chunks(job: CaptureJob) -> tuple[Path, list[Path]]:
     if len(decrypted_paths) == 1:
         shutil.copyfile(decrypted_paths[0], merged)
     else:
-        result = subprocess.run(["mergecap", "-w", str(merged), *map(str, decrypted_paths)], capture_output=True, text=True, timeout=120, check=False)
+        result = run_parser(tool="mergecap", arguments=["-w", str(merged), *map(str, decrypted_paths)], input_path=decrypted_paths[0], working_directory=working_dir, limits=ParserLimits.configured(timeout_seconds=120))
         if result.returncode != 0:
-            raise ValueError(result.stderr.strip() or "mergecap could not merge capture chunks")
+            raise ValueError("mergecap could not merge capture chunks")
     return merged, decrypted_paths
 
 
@@ -354,15 +349,9 @@ def _run_replay(job_id: str, encrypted_source: str, speed: str) -> None:
 
 def _run_fast_replay(job: CaptureJob, plain_source: Path, source_dir: Path) -> None:
     chunk_path = source_dir / "replay-00001.pcap"
-    result = subprocess.run(
-        ["tshark", "-r", str(plain_source), "-c", str(job.packet_limit), "-w", str(chunk_path)],
-        capture_output=True,
-        text=True,
-        timeout=max(60, min(180, getattr(settings, "NETRA_REPLAY_TIMEOUT_SECONDS", 180))),
-        check=False,
-    )
+    result = run_parser(tool="tshark", arguments=["-r", str(plain_source), "-c", str(job.packet_limit), "-w", str(chunk_path)], input_path=plain_source, working_directory=source_dir, limits=ParserLimits.configured(timeout_seconds=max(60, min(180, getattr(settings, "NETRA_REPLAY_TIMEOUT_SECONDS", 180)))))
     if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or "tshark could not create replay chunk")
+        raise ValueError("tshark could not create replay chunk")
     if not chunk_path.exists() or chunk_path.stat().st_size == 0:
         raise ValueError("Replay could not create a non-empty capture chunk.")
     _ingest_replay_file(job, chunk_path, 1)

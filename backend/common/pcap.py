@@ -1,6 +1,7 @@
 import shutil
-import subprocess
 from pathlib import Path
+
+from common.parser_runner import ParserLimits, run_parser
 
 
 def available_packet_tools() -> dict[str, bool]:
@@ -23,7 +24,8 @@ def tshark_protocol_summary(pcap_path: str | Path) -> list[str]:
     if shutil.which("tshark") is None:
         return []
     command = ["tshark", "-r", str(pcap_path), "-T", "fields", "-e", "_ws.col.Protocol"]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
+    source = Path(pcap_path)
+    result = run_parser(tool="tshark", arguments=command[1:], input_path=source, working_directory=source.parent, limits=ParserLimits.configured(timeout_seconds=30))
     if result.returncode != 0:
         return []
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import subprocess
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -22,6 +22,7 @@ from common.identifiers import validate_case_id
 from common.kafka import publish_event
 from common.persistence import case_origin, is_validator_case, persist_analysis
 from common.postgres_jobs import JobCancellationRequested
+from common.parser_runner import run_parser
 from common.storage import save_uploaded_file
 from common.storage_provider import storage_provider
 from common.structured_analysis import analyze_structured_evidence
@@ -340,13 +341,13 @@ def _prepare_large_analysis_chunks(job: ProcessingJob, plaintext_path: Path) -> 
         return []
     chunks: list[AnalysisChunk] = []
     with TemporaryDirectory(prefix=f"{job.id}-split-") as folder:
-        target = Path(folder) / "analysis.pcap"
-        subprocess.run(
-            ["editcap", "-c", str(settings.NETRA_ANALYSIS_CHUNK_PACKETS), str(plaintext_path), str(target)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        work = Path(folder)
+        isolated_input = work / "input.pcap"
+        shutil.copyfile(plaintext_path, isolated_input)
+        target = work / "analysis.pcap"
+        result = run_parser(tool="editcap", arguments=["-c", str(settings.NETRA_ANALYSIS_CHUNK_PACKETS), str(isolated_input), str(target)], input_path=isolated_input, working_directory=work)
+        if result.returncode != 0:
+            raise ValueError("editcap could not split the capture safely")
         for sequence, split_path in enumerate(sorted(Path(folder).glob("analysis*.pcap")), start=1):
             upload = SimpleUploadedFile(split_path.name, split_path.read_bytes(), content_type="application/vnd.tcpdump.pcap")
             chunk_id = f"{job.id}-analysis-chunk-{sequence:05d}"
