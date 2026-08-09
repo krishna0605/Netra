@@ -311,7 +311,7 @@ class AnalysisCaseBoundaryTests(TestCase):
 
 
 class UnscopedAnalysisHelperTests(SimpleTestCase):
-    """Phase 1 required that no unscoped analysis helper survive anywhere."""
+    """No unscoped analysis helper may survive anywhere."""
 
     def _api_sources(self) -> dict[str, str]:
         package = Path(analysis_module.__file__).parent

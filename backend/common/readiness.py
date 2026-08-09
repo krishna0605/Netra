@@ -244,12 +244,12 @@ def deployment_readiness_payload() -> dict[str, Any]:
         _deployment_check("dev-role-headers-disabled", not getattr(settings, "NETRA_DEV_ROLE_HEADERS", False), "Development role headers are disabled.", "Set NETRA_DEV_ROLE_HEADERS=0.", required=True),
         _deployment_check(
             "evidence-key-non-default",
-            getattr(settings, "NETRA_EVIDENCE_KEY", "") not in {"", "netra-phase3-development-evidence-key"},
+            getattr(settings, "NETRA_EVIDENCE_KEY", "") not in {"", "netra-development-evidence-key"},
             "Evidence encryption key is non-default.",
             "Rotate NETRA_EVIDENCE_KEY and keep it out of source control.",
             required=True,
         ),
-        _deployment_check("sensor-key-set", bool(getattr(settings, "NETRA_SENSOR_SHARED_KEY", "")) and settings.NETRA_SENSOR_SHARED_KEY != "netra-phase5-local-sensor-key", "Sensor shared key is non-default.", "Set a random NETRA_SENSOR_SHARED_KEY.", required=False),
+        _deployment_check("sensor-key-set", bool(getattr(settings, "NETRA_SENSOR_SHARED_KEY", "")) and settings.NETRA_SENSOR_SHARED_KEY != "netra-local-sensor-key", "Sensor shared key is non-default.", "Set a random NETRA_SENSOR_SHARED_KEY.", required=False),
         _deployment_check(
             "queue-provider",
             getattr(settings, "NETRA_QUEUE_PROVIDER", "") == "postgres-row-lock",

@@ -3,7 +3,7 @@ name: containers
 on:
   pull_request:
   push:
-    branches: [codex/netra-security-remediation]
+    branches: [main]
 
 permissions:
   contents: read
@@ -23,31 +23,31 @@ jobs:
           persist-credentials: false
       - name: Build without publishing
         run: |
-          docker build -f backend/Dockerfile -t netra-api:phase7 .
-          docker build -f backend/Dockerfile.worker -t netra-worker:phase7 .
-          docker build -f frontend/Dockerfile -t netra-frontend:phase7 frontend
+          docker build -f backend/Dockerfile -t netra-api:ci .
+          docker build -f backend/Dockerfile.worker -t netra-worker:ci .
+          docker build -f frontend/Dockerfile -t netra-frontend:ci frontend
       - name: Verify runtime contracts
         run: |
-          docker run --rm --entrypoint sh netra-api:phase7 -c 'test "$(id -u)" != 0; ! command -v tshark; ! command -v zeek; ! command -v tcpdump'
-          docker run --rm --entrypoint sh netra-worker:phase7 -c 'test "$(id -u)" != 0; tshark --version | grep -F 4.6.7; zeek --version | grep -F 8.2.1'
-          docker run --rm --entrypoint sh netra-frontend:phase7 -c 'test "$(id -u)" != 0; nginx -v'
+          docker run --rm --entrypoint sh netra-api:ci -c 'test "$(id -u)" != 0; ! command -v tshark; ! command -v zeek; ! command -v tcpdump'
+          docker run --rm --entrypoint sh netra-worker:ci -c 'test "$(id -u)" != 0; tshark --version | grep -F 4.6.7; zeek --version | grep -F 8.2.1'
+          docker run --rm --entrypoint sh netra-frontend:ci -c 'test "$(id -u)" != 0; nginx -v'
       - name: Validate VEX policy
         run: python scripts/validate_vex.py
       - name: Generate SBOMs
         run: |
           mkdir -p artifacts/sbom
-          for image in netra-api:phase7 netra-worker:phase7 netra-frontend:phase7; do
+          for image in netra-api:ci netra-worker:ci netra-frontend:ci; do
             safe="${image/:/-}"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/artifacts/sbom:/output" anchore/syft@sha256:1288ea4c8b38767b4e620c1e312c8cb26b6e887a99b4f07ab6cd19fc6f225026 "$image" -o "cyclonedx-json=/output/$safe.cdx.json"
           done
       - name: Scan fixable high and critical findings
         run: |
-          for image in netra-api:phase7 netra-worker:phase7 netra-frontend:phase7; do
+          for image in netra-api:ci netra-worker:ci netra-frontend:ci; do
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$image"
           done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: phase7-sboms
+          name: container-sboms
           path: artifacts/sbom/*.cdx.json
           retention-days: 7
 

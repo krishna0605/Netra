@@ -94,7 +94,7 @@ def _case_scoped_analysis(*, case_id: str) -> dict:
 
     The case identifier is keyword-only and mandatory. A blank identifier used
     to make this helper scan whichever case happened to be most recently
-    updated, which is exactly the cross-case disclosure Phase 1 closed.
+    updated, which would reintroduce cross-case disclosure.
     """
     resolved = (case_id or "").strip()
     if not resolved:
@@ -511,7 +511,7 @@ def _probe_security() -> dict:
     if getattr(settings, "NETRA_STORAGE_PROVIDER", "") == "supabase" and not getattr(settings, "SUPABASE_SECRET_KEY", ""):
         details.append("Supabase Storage cannot use private buckets without a backend secret key.")
         status = "failed"
-    if getattr(settings, "NETRA_EVIDENCE_KEY", "") == "netra-phase3-development-evidence-key":
+    if getattr(settings, "NETRA_EVIDENCE_KEY", "") == "netra-development-evidence-key":
         details.append("Evidence encryption key is still the development default.")
         if status == "ok":
             status = "degraded"

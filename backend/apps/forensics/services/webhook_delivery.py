@@ -191,7 +191,7 @@ def process_delivery(delivery: IntegrationDelivery) -> IntegrationDelivery:
         signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "Netra/phase5",
+            "User-Agent": "Netra/1.0",
             "Idempotency-Key": delivery.idempotency_key or str(delivery.pk),
             "X-Netra-Signature": signature,
         }

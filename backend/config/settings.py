@@ -229,7 +229,7 @@ NETRA_STORAGE_DEEP_HEALTHCHECK = os.getenv("NETRA_STORAGE_DEEP_HEALTHCHECK", "0"
 NETRA_TRUSTED_LAN_ACTOR = os.getenv("NETRA_TRUSTED_LAN_ACTOR", "Local Investigator")
 NETRA_TRUSTED_LAN_ROLE = os.getenv("NETRA_TRUSTED_LAN_ROLE", "LAN Operator")
 NETRA_EVIDENCE_ENCRYPTION = os.getenv("NETRA_EVIDENCE_ENCRYPTION", "on")
-NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-phase3-development-evidence-key")
+NETRA_EVIDENCE_KEY = os.getenv("NETRA_EVIDENCE_KEY", "netra-development-evidence-key")
 NETRA_EVIDENCE_KEY_ID = os.getenv("NETRA_EVIDENCE_KEY_ID", "dev-key-001")
 NETRA_STORAGE_CACHE_ENABLED = os.getenv("NETRA_STORAGE_CACHE_ENABLED", "1") == "1"
 NETRA_STORAGE_CACHE_MAX_BYTES = int(os.getenv("NETRA_STORAGE_CACHE_MAX_BYTES", str(600 * 1024 * 1024)))
@@ -291,7 +291,7 @@ NETRA_JOB_POLL_SECONDS = max(1, int(os.getenv("NETRA_JOB_POLL_SECONDS", "2")))
 NETRA_JOB_HEARTBEAT_SECONDS = max(5, min(int(os.getenv("NETRA_JOB_HEARTBEAT_SECONDS", "10")), 15))
 NETRA_QUARANTINE_ORPHAN_SECONDS = max(3600, int(os.getenv("NETRA_QUARANTINE_ORPHAN_SECONDS", "3600")))
 NETRA_CLEANUP_INTERVAL_SECONDS = max(300, int(os.getenv("NETRA_CLEANUP_INTERVAL_SECONDS", "900")))
-NETRA_SENSOR_SHARED_KEY = os.getenv("NETRA_SENSOR_SHARED_KEY", "netra-phase5-local-sensor-key")
+NETRA_SENSOR_SHARED_KEY = os.getenv("NETRA_SENSOR_SHARED_KEY", "netra-local-sensor-key")
 NETRA_WEBHOOK_ALLOWED_HOSTS = [
     value.strip()
     for value in os.getenv("NETRA_WEBHOOK_ALLOWED_HOSTS", "").split(",")
@@ -377,7 +377,7 @@ if not DEBUG:
             raise RuntimeError("Hosted invitations require Supabase Auth and a backend secret key")
         if not NETRA_AUTH_INVITE_REDIRECT_URL.startswith("https://"):
             raise RuntimeError("NETRA_AUTH_INVITE_REDIRECT_URL must be an exact HTTPS URL")
-    if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-phase3-development-evidence-key":
+    if NETRA_EVIDENCE_ENCRYPTION == "on" and NETRA_EVIDENCE_KEY == "netra-development-evidence-key":
         raise RuntimeError("NETRA_EVIDENCE_KEY must be replaced outside local development")
     if NETRA_EVIDENCE_ENCRYPTION != "on" or NETRA_EVIDENCE_WRITE_FORMAT != "v2":
         raise RuntimeError("Hosted deployments require encrypted v2 artifact writes")
@@ -398,5 +398,5 @@ if not DEBUG:
             raise RuntimeError("Direct evidence upload requires Supabase Auth and Storage")
         if not SUPABASE_SECRET_KEY:
             raise RuntimeError("SUPABASE_SECRET_KEY is required for quarantine validation")
-    if NETRA_DEPLOYMENT_PROFILE == "full" and NETRA_SENSOR_SHARED_KEY == "netra-phase5-local-sensor-key":
+    if NETRA_DEPLOYMENT_PROFILE == "full" and NETRA_SENSOR_SHARED_KEY == "netra-local-sensor-key":
         raise RuntimeError("NETRA_SENSOR_SHARED_KEY must be replaced for the full deployment profile")

@@ -40,4 +40,4 @@ if (@($Ruleset.bypass_actors).Count -ne 0) {
     throw "Unexpected main-ruleset bypass actors are configured."
 }
 
-Write-Host "Main protection is active with PR-only changes, no bypass actors, and all Phase 7 policy gates."
+Write-Host "Main protection is active with PR-only changes, no bypass actors, and all required policy gates."

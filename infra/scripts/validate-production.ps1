@@ -6,13 +6,13 @@ $api = "http://localhost:8080/api"
 $prodCompose = Join-Path $repoRoot "infra\docker\compose.netra-production.yml"
 $prodExample = Join-Path $repoRoot ".env.supabase.production.example"
 
-Write-Host "Validating Phase 11 deployment readiness..." -ForegroundColor Cyan
+Write-Host "Validating production deployment readiness..." -ForegroundColor Cyan
 
 python -m py_compile backend\common\cors.py backend\common\readiness.py backend\apps\forensics\views.py
 Write-Host "[PASS] deployment readiness modules compile"
 
 foreach ($path in @($prodCompose, $prodExample)) {
-  if (-not (Test-Path $path)) { throw "Missing required Phase 11 artifact: $path" }
+  if (-not (Test-Path $path)) { throw "Missing required production artifact: $path" }
 }
 Write-Host "[PASS] production compose and env template exist"
 
@@ -58,4 +58,4 @@ $deep = Invoke-RestMethod "$api/system/health/deep"
 if (-not $deep.incidentReadiness) { throw "Deep health is missing incident readiness." }
 Write-Host "[PASS] deep health still includes incident readiness"
 
-Write-Host "Phase 11 deployment readiness validation passed." -ForegroundColor Green
+Write-Host "Production deployment readiness validation passed." -ForegroundColor Green

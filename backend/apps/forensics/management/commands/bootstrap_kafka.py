@@ -21,7 +21,7 @@ TOPICS = {
 
 
 class Command(BaseCommand):
-    help = "Provision Phase 7 Kafka topics idempotently for the local fleet stack."
+    help = "Provision Kafka topics idempotently for the local fleet stack."
 
     def handle(self, *args, **options):
         from kafka.admin import KafkaAdminClient, NewPartitions, NewTopic

@@ -1,8 +1,9 @@
 # Netra Anomaly Engine
 
-This folder is reserved for the Phase 1 AI-assisted anomaly implementation.
+This package contains worker-only feature extraction, deterministic anomaly
+signals, and investigator-facing explanations. The Django API does not import
+this package; analysis workers load it through the isolated processing path.
 
-Phase 0 keeps runtime behavior unchanged. Phase 1 will move feature extraction,
-statistical scoring, and investigator-facing explanations into the `netra_ml`
-package so the Django backend can call the logic without mixing ML code into
-views.
+Executable pickle and joblib models are not supported. Any future learned model
+must use the reviewed portable-model, provenance, evaluation, and approval
+contract documented by the main repository.

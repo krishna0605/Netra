@@ -1,4 +1,4 @@
-"""Deprecated compatibility adapters pending telemetry-based Phase 11 removal."""
+"""Deprecated compatibility adapters pending telemetry-based removal."""
 
 import json
 import logging

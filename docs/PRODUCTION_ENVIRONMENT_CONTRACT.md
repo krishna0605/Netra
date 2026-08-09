@@ -97,7 +97,7 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 | `SUPABASE_URL` | Exact project API origin; also derives the issuer/JWKS origin |
 | `SUPABASE_PUBLISHABLE_KEY` | Publishable Auth key; never treated as a secret |
 | `SUPABASE_SECRET_KEY` | Backend-only modern secret key; never enters Vercel |
-| `NETRA_SUPABASE_JWT_MODE` | `remote` until Phase 8 key verification; then `asymmetric-jwks` |
+| `NETRA_SUPABASE_JWT_MODE` | `remote` until hosted key verification; then `asymmetric-jwks` |
 | `NETRA_SUPABASE_JWKS_CACHE_SECONDS` | `600` |
 | `NETRA_SUPABASE_JWKS_TIMEOUT_SECONDS` | `3` |
 | `NETRA_SUPABASE_JWKS_RESPONSE_MAX_BYTES` | `131072` |
@@ -110,7 +110,7 @@ alias. The application never performs local HS256 verification.
 ### Retired aliases
 
 Database/topology aliases abort startup when they disagree with their canonical
-variable and must be removed during Phase 8 activation. The retired
+variable and must be removed during platform activation. The retired
 `SUPABASE_SERVICE_ROLE_KEY` secret alias is stricter: its presence always aborts
 startup, even if its value matches `SUPABASE_SECRET_KEY`.
 
@@ -126,7 +126,7 @@ The Auth Admin adapter uses the existing backend-only Supabase service-role/secr
 
 ## Vercel frontend
 
-Vercel receives only the public API URL, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel. No `VITE_SUPABASE_REALTIME_ENABLED` variable exists after Phase 5.
+Vercel receives only the public API URL, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, and webhook secrets must never use a `VITE_` prefix or enter Vercel. `VITE_SUPABASE_REALTIME_ENABLED` is retired and must not be reintroduced.
 
 ## Local concurrency tests
 
@@ -137,4 +137,4 @@ Vercel receives only the public API URL, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUB
 - Hosted startup fails on default application secrets, disabled encryption, non-v2 writes, or conflicting runtime roles.
 - API cache-maintenance failure is degraded but Storage-dependent operations fail closed.
 - Worker cache or parser-capability failure blocks worker readiness.
-- Production variables are changed only during an approved deployment phase.
+- Production variables are changed only during an approved deployment window.

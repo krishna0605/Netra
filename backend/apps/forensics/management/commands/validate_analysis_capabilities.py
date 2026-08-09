@@ -12,7 +12,7 @@ from common.tool_capabilities import worker_capabilities
 
 
 class Command(BaseCommand):
-    help = "Validate Phase 7 DPI metadata clues and Phase 8 large-PCAP completeness markers."
+    help = "Validate DPI metadata clues and large-PCAP completeness markers."
 
     def add_arguments(self, parser):
         parser.add_argument("--mode", choices=["dpi", "large", "all"], default="all")
@@ -51,8 +51,8 @@ class Command(BaseCommand):
         results["failures"] = failures
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        json_path = output_dir / f"phase7-8-analysis-validation-{stamp}.json"
-        md_path = output_dir / f"phase7-8-analysis-validation-{stamp}.md"
+        json_path = output_dir / f"analysis-capability-validation-{stamp}.json"
+        md_path = output_dir / f"analysis-capability-validation-{stamp}.md"
         json_path.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
         md_path.write_text(self._markdown(results), encoding="utf-8")
 
@@ -60,7 +60,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Wrote {md_path}")
         if failures:
             raise CommandError("; ".join(failures))
-        self.stdout.write(self.style.SUCCESS("Phase 7/8 analysis capability validation passed."))
+        self.stdout.write(self.style.SUCCESS("Analysis capability validation passed."))
 
     def _validate_dpi(self, pcap_root: Path) -> dict:
         cases = [
@@ -137,7 +137,7 @@ class Command(BaseCommand):
 
     def _markdown(self, results: dict) -> str:
         lines = [
-            "# Phase 7/8 Analysis Capability Validation",
+            "# Analysis Capability Validation",
             "",
             f"- Checked at: `{results['checkedAt']}`",
             f"- Packet metadata limit: `{results['packetMetadataLimit']}`",

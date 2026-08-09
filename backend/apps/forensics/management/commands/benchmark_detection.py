@@ -155,8 +155,8 @@ class Command(BaseCommand):
             ],
         }
         stamp = completed.strftime("%Y%m%d-%H%M%S")
-        json_path = output_dir / f"phase6-detection-benchmark-{stamp}.json"
-        md_path = output_dir / f"phase6-detection-benchmark-{stamp}.md"
+        json_path = output_dir / f"detection-benchmark-{stamp}.json"
+        md_path = output_dir / f"detection-benchmark-{stamp}.md"
         json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         md_path.write_text(_markdown(result), encoding="utf-8")
         self.stdout.write(self.style.SUCCESS(f"Benchmark JSON: {json_path}"))
@@ -180,7 +180,7 @@ def _safe_div(numerator: int, denominator: int) -> float:
 
 def _markdown(result: dict[str, Any]) -> str:
     lines = [
-        "# Netra Phase 6 Detection Benchmark",
+        "# Netra Detection Benchmark",
         "",
         f"- Version: `{result['version']}`",
         f"- Started: `{result['startedAt']}`",

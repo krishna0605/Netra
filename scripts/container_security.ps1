@@ -1,5 +1,5 @@
 param(
-    [string[]]$Images = @("netra-api:phase7", "netra-worker:phase7", "netra-frontend:phase7"),
+    [string[]]$Images = @("netra-api:local", "netra-worker:local", "netra-frontend:local"),
     [string]$OutputDirectory = "artifacts/sbom"
 )
 

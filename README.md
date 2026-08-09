@@ -81,7 +81,7 @@ The browser does not receive a Supabase service-role key and does not query appl
 
 ## Security model
 
-Netra’s remediation work is organized as independently verified phases. The current local branch includes:
+Netra's security model includes:
 
 - workspace/job-scoped analysis reads and exact transactional finding mutations;
 - strict case identifiers, contained artifact paths, and autoescaped reports;
@@ -96,9 +96,7 @@ Netra’s remediation work is organized as independently verified phases. The cu
 
 New durable artifacts use immutable generation-specific paths. Legacy Fernet artifacts are decrypt-only and can be migrated only through an explicit, resumable, byte-capped command. Custody records are **tamper-evident**, not tamper-proof; direct database administrator access crosses that trust boundary.
 
-See [security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md), the [remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md), and [production migration blockers](docs/PRODUCTION_MIGRATION_MISSING.md) before treating any environment as production-ready.
-
-Phase 8A is verified locally at 53 public application tables and 17 forensics migrations. Phase 8B platform activation, Phase 9 migration, and the controlled production rollout remain incomplete; the remediation branch is not approved for `main`.
+The repository is verified locally at 53 public application tables and 17 forensics migrations. Hosted platform activation, production migration, and controlled rollout remain separate owner-approved operations. Review the [platform activation runbook](docs/PLATFORM_ACTIVATION_RUNBOOK.md) before treating any environment as production-ready.
 
 ## Free-plan safeguards
 
@@ -182,27 +180,26 @@ storage/              Runtime volume layout; generated content is Git-ignored
 
 ## Current limitations
 
-- Phases 1–6 and the Phase 7 JWT/header/dependency/container/CI controls are implemented and verified locally. The final Phase 7 feature-family decomposition gate remains open, and GitHub/platform activation has not occurred.
+- Repository security, tenancy, cryptography, worker isolation, authentication, accessibility, dependency, container, and CI controls are implemented and verified locally. GitHub and hosted-platform activation have not occurred.
 - Invitation, recovery, and Administrator TOTP journeys are implemented with local provider mocks, but production redirects, custom SMTP, enrollment, and recovery drills remain deployment gates.
 - The current deterministic detector registry is active; ML production approval is intentionally withheld because representative held-out training/evaluation evidence is insufficient.
-- This branch must not be merged directly into `main`; Railway and Vercel are connected to the repository and could automatically deploy an incomplete intermediate phase.
+- Do not deploy until the platform activation, migration, backup, and rollback gates have been completed with sanitized evidence.
 - The persistent Railway `/app/storage` volume and production key material still require external verification.
 - No production crypto migration has been executed, and no legacy object has been deleted.
 
 ## Documentation
 
 - [Supabase migration runbook](docs/NETRA_SUPABASE_MIGRATION_RUNBOOK.md)
-- [Security remediation runbook](docs/SECURITY_REMEDIATION_RUNBOOK.md)
-- [Security finding traceability](docs/SECURITY_FINDING_TRACEABILITY.md)
+- [Platform activation runbook](docs/PLATFORM_ACTIVATION_RUNBOOK.md)
 - [Key rotation and recovery](docs/KEY_ROTATION_AND_RECOVERY.md)
-- [Production migration missing inputs](docs/PRODUCTION_MIGRATION_MISSING.md)
+- [Production environment contract](docs/PRODUCTION_ENVIRONMENT_CONTRACT.md)
+- [Cutover and rollback checklist](docs/CUTOVER_AND_ROLLBACK_CHECKLIST.md)
 - [Parser threat model](docs/PARSER_THREAT_MODEL.md)
 - [Worker operations runbook](docs/WORKER_OPERATIONS_RUNBOOK.md)
-- [Phase 4 verification](docs/PHASE_4_VERIFICATION.md)
-- [Phase 6 verification](docs/PHASE_6_VERIFICATION.md)
-- [Phase 7 verification](docs/PHASE_7_VERIFICATION.md)
+- [Worker image supply chain](docs/WORKER_IMAGE_SUPPLY_CHAIN.md)
+- [Analysis scoping contract](docs/api/analysis-scoping.md)
+- [Tenancy and administrator API](docs/api/TENANCY_AND_ADMIN_API.md)
 - [MFA and account recovery](docs/MFA_RECOVERY_RUNBOOK.md)
-- [README asset provenance](docs/assets/readme/ASSET_PROVENANCE.md)
 
 ## Responsible use
 

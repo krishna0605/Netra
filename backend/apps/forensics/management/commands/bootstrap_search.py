@@ -6,7 +6,7 @@ from common.indexing import bootstrap_search_resources
 
 
 class Command(BaseCommand):
-    help = "Create Phase 7 Elasticsearch lifecycle policies, templates, aliases, and today's backing indexes."
+    help = "Create Elasticsearch lifecycle policies, templates, aliases, and today's backing indexes."
 
     def handle(self, *args, **options):
         result = bootstrap_search_resources()

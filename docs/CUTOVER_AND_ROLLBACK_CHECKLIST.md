@@ -1,10 +1,10 @@
 # Netra cutover and rollback checklist
 
-This checklist is documentation only during Phase 4. It does not authorize a deployment.
+This checklist is documentation only. It does not authorize a deployment.
 
 ## Before cutover
 
-- Complete Phases 4–7, protect `main`, and obtain green CI/security checks.
+- Protect `main` and obtain green CI, security, and container checks.
 - Rehearse Django migrations `0014` through the then-current migration on a disposable PostgreSQL 17 copy.
 - Confirm the current repository target is migration `0017_phase8_security_closure`, 53 application tables, and zero materialized views.
 - Export an encrypted logical backup outside Git before any hosted schema change; Supabase Free automatic backups are not treated as a recoverable operator backup.

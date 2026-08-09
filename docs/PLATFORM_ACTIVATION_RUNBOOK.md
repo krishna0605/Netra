@@ -1,10 +1,10 @@
-# Phase 8B platform activation contract
+# Platform activation runbook
 
-This is an owner-executed runbook. Repository preparation does not authorize a push, hosted migration, deployment, Auth change, or Storage read. Keep a local byte ledger and stop all Phase 8 Supabase work at 60 MB.
+This is an owner-executed runbook. Repository preparation does not authorize a push, hosted migration, deployment, Auth change, or Storage read. Keep a local byte ledger and stop all activation-related Supabase work at 60 MB.
 
 ```mermaid
 flowchart LR
-    LOCAL["Phase 8A offline gates"]
+    LOCAL["Offline repository gates"]
     ISOLATE["Confirm branch deployment isolation"]
     PUSH["Push remediation branch only"]
     CI["Three policy gates"]
@@ -24,7 +24,7 @@ flowchart LR
 3. Enable Vercel Authentication for preview deployments where available on Hobby.
 4. Confirm no backend/database/evidence/custody secret exists in Vercel or GitHub workflow variables.
 5. Record organization-wide Supabase usage and initialize the local byte ledger.
-6. Push only `codex/netra-security-remediation` after explicit approval. Never push `main`.
+6. Publish only the reviewed, consolidated release after explicit approval. Never force-push protected `main`.
 
 ## GitHub activation
 
@@ -33,11 +33,11 @@ flowchart LR
 - Apply `infra/github/main-ruleset.json` only after all contexts have reported.
 - Enable CodeQL, Dependabot alerts/security updates, secret scanning, and push protection.
 - Verify protection with `infra/github/verify-repository-protection.ps1`.
-- Open a draft PR and keep it unmerged through Phases 9 and 10.
+- Open a draft PR and keep it unmerged through migration and rollout verification.
 
 ## Hosted maintenance and backup gate
 
-- Confirm the target is empty: zero cases, evidence rows, Storage objects, and target-only ownership records. Any durable target data moves this work to Phase 9.
+- Confirm the target is empty: zero cases, evidence rows, Storage objects, and target-only ownership records. Any durable target data moves this work to the controlled migration procedure.
 - Enter maintenance/read-only mode and stop all old writers/workers.
 - Export an encrypted logical schema/data backup outside Git.
 - Record Django/Supabase migration history, table row counts, and primary-key digests without recording credentials or user metadata.

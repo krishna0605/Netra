@@ -19,7 +19,7 @@ class PhaseFiveSchemaTests(TestCase):
             id="CASE-PHASE5-SCHEMA",
             organization=self.organization,
             display_reference="CASE-PHASE5-SCHEMA",
-            title="Phase 5 schema",
+            title="Feature schema",
             investigator="Synthetic Investigator",
         )
         self.job = ProcessingJob.objects.create(id="job-phase5-schema", case=self.case)
@@ -66,4 +66,3 @@ class PhaseFiveSchemaTests(TestCase):
                     case=self.case,
                     integration=connection,
                 )
-

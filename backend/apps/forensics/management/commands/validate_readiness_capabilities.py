@@ -13,7 +13,7 @@ from common.tenancy import netra_organization
 
 
 class Command(BaseCommand):
-    help = "Validate Phase 9 operational readiness and Phase 10 legal evidence readiness helpers."
+    help = "Validate operational and legal-evidence readiness helpers."
 
     def add_arguments(self, parser):
         parser.add_argument("--mode", choices=["operations", "legal", "all"], default="all")
@@ -64,15 +64,15 @@ class Command(BaseCommand):
         root = Path(output_dir)
         root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        json_path = root / f"phase9-10-readiness-validation-{stamp}.json"
-        md_path = root / f"phase9-10-readiness-validation-{stamp}.md"
+        json_path = root / f"readiness-validation-{stamp}.json"
+        md_path = root / f"readiness-validation-{stamp}.md"
         json_path.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
         md_path.write_text(self._markdown(results), encoding="utf-8")
         self.stdout.write(f"Wrote {json_path}")
         self.stdout.write(f"Wrote {md_path}")
         if results["failures"]:
             raise CommandError("; ".join(results["failures"]))
-        self.stdout.write(self.style.SUCCESS("Phase 9/10 readiness validation passed."))
+        self.stdout.write(self.style.SUCCESS("Readiness validation passed."))
 
     def _ensure_case(self) -> Case:
         suffix = uuid4().hex[:8]
@@ -81,7 +81,7 @@ class Command(BaseCommand):
             id=f"CYB-GJ-READY-{suffix}",
             organization=organization,
             display_reference=f"CYB-GJ-READY-{suffix}",
-            title="Phase 9/10 readiness validation case",
+            title="Readiness validation case",
             investigator="Netra readiness validator",
             department="Gujarat Cyber Crime Cell",
             status=Case.Status.OPEN,
@@ -122,7 +122,7 @@ class Command(BaseCommand):
 
     def _markdown(self, results: dict) -> str:
         lines = [
-            "# Phase 9/10 Readiness Validation",
+            "# Readiness Validation",
             "",
             f"- Checked at: `{results['checkedAt']}`",
             f"- Case: `{results['caseId']}`",

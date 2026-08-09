@@ -17,6 +17,7 @@ credentials/
 
 # Local-only project material
 /Miscellaneous/
+/Unwanted Files/
 /database/
 /output/
 /security-audit/
@@ -29,16 +30,28 @@ credentials/
 /Netra-Security-and-Production-Readiness-Audit.pdf
 /NETRA_Detailed_Project_Report.pdf
 /NETRA_Solution_Document.pdf
+*.partial
+*.part
 *.ppt
 *.pptx
 **/malicious*/
 **/malware*/
 
+# Internal development history (do not broaden these patterns to migrations)
+/docs/PHASE_*.md
+/docs/SECURITY_FINDING_TRACEABILITY.md
+/docs/SECURITY_REMEDIATION_RUNBOOK.md
+/docs/PRODUCTION_MIGRATION_MISSING.md
+/docs/assets/readme/ASSET_PROVENANCE.md
+/backend/common/phase*_validation_matrix.json
+/infra/scripts/*phase*.ps1
+/security/container-vex.openvex.json
+
 # Keep only the current public production workflow scripts
 /infra/scripts/*.ps1
 !/infra/scripts/start-netra-production.ps1
 !/infra/scripts/stop-netra.ps1
-!/infra/scripts/validate-production-phase11.ps1
+!/infra/scripts/validate-production.ps1
 !/infra/scripts/migrate-netra-database.ps1
 
 # Packet captures, evidence, and generated forensic artifacts

@@ -1,4 +1,4 @@
-# Phase 2 tenancy and administrator API contract
+# Tenancy and administrator API contract
 
 ## Additive identity fields
 
