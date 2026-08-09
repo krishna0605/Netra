@@ -44,9 +44,45 @@ try {
         Invoke-Checked { npm run lint } "Frontend lint"
         Invoke-Checked { npm run build } "Frontend production build"
         Invoke-Checked { npm run check:bundle } "Frontend bundle budget"
+        Invoke-Checked { npm run test:e2e } "Browser security journeys"
+        Invoke-Checked { npm run test:a11y } "Desktop and mobile accessibility journeys"
         Invoke-Checked { npm audit --omit=dev --audit-level=high } "Frontend production dependency audit"
         Invoke-Checked { npm audit --audit-level=high } "Frontend complete dependency audit"
     } finally { Pop-Location }
+
+    $PostgresProject = "netra-release-postgres"
+    $PreviousDatabaseUrl = $env:DATABASE_URL
+    $PreviousPostgresFlag = $env:NETRA_TEST_POSTGRES
+    $PreviousDatabaseTls = $env:NETRA_DATABASE_SSL_REQUIRED
+    try {
+        Invoke-Checked { docker compose -p $PostgresProject -f docker-compose.test-postgres.yml up -d --wait } "Disposable PostgreSQL 17 startup"
+        $env:DATABASE_URL = "postgresql://netra_test:netra_test_local_only@127.0.0.1:55432/netra_test"
+        $env:NETRA_TEST_POSTGRES = "1"
+        $env:NETRA_DATABASE_SSL_REQUIRED = "0"
+        $env:PYTHONPATH = Join-Path $RepositoryRoot "ml-services\anomaly-engine"
+        Push-Location backend
+        try {
+            Invoke-Checked {
+                python manage.py test `
+                    apps.forensics.tests.test_postgres_concurrency `
+                    apps.forensics.tests.test_custody_concurrency `
+                    apps.forensics.tests.test_admin_invariants `
+                    apps.forensics.tests.test_user_provisioning `
+                    apps.forensics.tests.test_integration_delivery `
+                    apps.forensics.tests.test_jwt_verification
+            } "PostgreSQL-backed security invariants"
+        } finally { Pop-Location }
+    } finally {
+        $env:DATABASE_URL = $PreviousDatabaseUrl
+        $env:NETRA_TEST_POSTGRES = $PreviousPostgresFlag
+        $env:NETRA_DATABASE_SSL_REQUIRED = $PreviousDatabaseTls
+        $env:PYTHONPATH = $PreviousPythonPath
+        docker compose -p $PostgresProject -f docker-compose.test-postgres.yml down --volumes | Out-Null
+    }
+
+    Invoke-Checked { python -m pip_audit --require-hashes -r backend/requirements.api.txt } "API dependency audit"
+    Invoke-Checked { python -m pip_audit --require-hashes -r backend/requirements.worker.txt } "Worker dependency audit"
+    Invoke-Checked { python -m pip_audit --require-hashes -r sensor-agent/requirements.txt } "Sensor dependency audit"
 
     Invoke-Checked { python scripts/validate_workflows.py } "Workflow policy"
     Invoke-Checked { python scripts/validate_github_governance.py } "GitHub governance policy"
@@ -62,6 +98,16 @@ try {
         Invoke-Checked { docker run --rm --entrypoint sh netra-api:release -c 'test "$(id -u)" != 0; ! command -v tshark; ! command -v zeek; ! command -v tcpdump' } "API runtime isolation"
         Invoke-Checked { docker run --rm --entrypoint sh netra-worker:release -c 'test "$(id -u)" != 0; tshark --version | grep -F 4.6.7; zeek --version | grep -F 8.2.1' } "Worker parser versions"
         Invoke-Checked { docker run --rm --entrypoint sh netra-frontend:release -c 'test "$(id -u)" != 0; nginx -v' } "Frontend non-root runtime"
+        Invoke-Checked {
+            docker run --rm -v "${RepositoryRoot}:/workspace" -w /workspace `
+                python:3.13-slim-bookworm@sha256:de89ed8283721548f7f9c8acfd19d638f435fa3870693a017890e94be5d37fc6 `
+                sh -c "python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r backend/requirements.dev.txt >/dev/null && bandit -q -c pyproject.toml -r backend && semgrep --config .semgrep.yml --error"
+        } "Bandit and Semgrep"
+        Invoke-Checked {
+            & (Join-Path $RepositoryRoot "scripts\container_security.ps1") `
+                -Images @("netra-api:release", "netra-worker:release", "netra-frontend:release") `
+                -OutputDirectory "artifacts/sbom"
+        } "SBOM and fixable high/critical image scans"
     }
 
     Write-Host "All local release gates passed for $(git rev-parse HEAD)."

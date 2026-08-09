@@ -31,14 +31,34 @@ test("skip navigation reaches the main landmark", async ({ page }) => {
   await expect(page.locator("#main-content").first()).toBeInViewport();
 });
 
-test("forgot-password response remains enumeration resistant", async ({ page }) => {
-  await page.route("https://netra-auth.test/auth/v1/recover**", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+test("disabled password recovery makes no provider request", async ({ page }) => {
+  const recoveryRequests: string[] = [];
+  await page.route("**/api/capabilities", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        results: {
+          password_recovery: {
+            key: "password_recovery",
+            implemented: true,
+            enabled: false,
+            state: "disabled",
+            reason: "Password recovery requires an approved custom SMTP domain.",
+            requires_aal2: false,
+            durable_consumer: null,
+          },
+        },
+      }),
+    });
+  });
+  page.on("request", (request) => {
+    if (/\/auth\/v1\/recover/.test(request.url())) recoveryRequests.push(request.url());
   });
   await page.goto("/auth/forgot-password");
-  await page.getByLabel("Email").fill("unknown@example.test");
-  await page.getByRole("button", { name: "Send recovery instructions" }).click();
-  await expect(page.getByText(/If an eligible account exists/i)).toBeVisible();
+  await expect(page.getByText(/Password recovery requires an approved custom SMTP domain/i)).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveCount(0);
+  expect(recoveryRequests).toEqual([]);
 });
 
 test("authentication pages do not persist token-shaped local storage", async ({ page }) => {
