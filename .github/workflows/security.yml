@@ -1,0 +1,107 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [codex/netra-security-remediation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.txt
+      - run: npm ci && npm audit --omit=dev --audit-level=high && npm audit --audit-level=high
+        working-directory: frontend
+      - run: "python -m pip install --require-hashes --only-binary=:all: -r backend/requirements.dev.txt"
+      - run: |
+          python -m pip_audit --require-hashes -r backend/requirements.api.txt
+          python -m pip_audit --require-hashes -r backend/requirements.worker.txt
+          python -m pip_audit --require-hashes -r sensor-agent/requirements.txt
+      - name: Verify generated Python locks are current
+        working-directory: backend
+        run: |
+          pip-compile --quiet --strip-extras --generate-hashes --allow-unsafe --resolver=backtracking --output-file requirements.api.txt requirements.api.in
+          pip-compile --quiet --strip-extras --generate-hashes --allow-unsafe --resolver=backtracking --output-file requirements.worker.txt requirements.worker.in
+          pip-compile --quiet --strip-extras --generate-hashes --allow-unsafe --resolver=backtracking --output-file requirements.dev.txt requirements.dev.in
+          git diff --exit-code -- requirements.api.txt requirements.worker.txt requirements.dev.txt
+
+  sast-and-secrets:
+    name: sast-and-secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.txt
+      - run: "python -m pip install --require-hashes --only-binary=:all: -r backend/requirements.dev.txt"
+      - run: bandit -c pyproject.toml -r backend
+      - run: semgrep --config .semgrep.yml --error
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Enforce Netra static boundaries
+        shell: bash
+        run: |
+          ! rg 'postgres_changes|\.channel\(|WebSocket' frontend/src
+          ! rg 'shell\s*=\s*True|pickle\.load|joblib\.load' backend ml-services
+          ! rg 'SUPABASE_(ANON_KEY|SERVICE_ROLE_KEY)|VITE_SUPABASE_ANON_KEY' --glob '!docs/**' .
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+
+  security-policy-gate:
+    name: security-policy-gate
+    if: always()
+    needs: [dependency-audit, sast-and-secrets, codeql]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - env:
+          DEPENDENCIES: ${{ needs.dependency-audit.result }}
+          SAST: ${{ needs.sast-and-secrets.result }}
+          CODEQL: ${{ needs.codeql.result }}
+        run: test "$DEPENDENCIES$SAST$CODEQL" = "successsuccesssuccess"
