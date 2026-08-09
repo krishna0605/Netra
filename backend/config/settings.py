@@ -262,12 +262,12 @@ NETRA_REQUIRE_HTTPS = os.getenv("NETRA_REQUIRE_HTTPS", "0") == "1"
 NETRA_RELEASE_ID = os.getenv("NETRA_RELEASE_ID", "local-dev")
 NETRA_ALLOWED_STACK = [
     "Django/Gunicorn on Railway",
-    "Supabase Postgres/Auth/Storage/PGMQ",
+    "Supabase Postgres/Auth/Storage",
     "React/Vite on Vercel",
-    "Scapy",
-    "tshark/Wireshark",
-    "Zeek (when present in the selected image)",
-    "Scikit-learn",
+    "PostgreSQL row-locked processing jobs",
+    "TShark 4.6.7",
+    "Zeek 8.2.1",
+    "Deterministic detector registry",
 ]
 
 REST_FRAMEWORK = {

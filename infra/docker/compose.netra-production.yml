@@ -19,15 +19,14 @@ x-production-env: &production-env
     NETRA_FREE_PLAN_GUARD: ${NETRA_FREE_PLAN_GUARD:-1}
     NETRA_DATABASE_MODE: supabase
     NETRA_STORAGE_PROVIDER: supabase
-    NETRA_QUEUE_PROVIDER: supabase-pgmq
+    NETRA_QUEUE_PROVIDER: postgres-row-lock
     NETRA_REALTIME_PROVIDER: ${NETRA_REALTIME_PROVIDER:-sse}
     NETRA_AUTH_PROVIDER: supabase
     NETRA_ACCESS_MODE: supabase-auth
     NETRA_DEV_ROLE_HEADERS: "0"
     NETRA_SEARCH_PROVIDER: postgres
-    NETRA_PROCESSING_MODE: ${NETRA_SUPABASE_PROCESSING_MODE:-hybrid}
-    NETRA_SUPABASE_START_WORKERS: ${NETRA_SUPABASE_START_WORKERS:-0}
-    NETRA_SYNC_FALLBACK_ENABLED: "1"
+    NETRA_PROCESSING_MODE: postgres-worker
+    NETRA_SYNC_FALLBACK_ENABLED: "0"
     NETRA_STORAGE_ROOT: /app/storage
     NETRA_EVIDENCE_ENCRYPTION: "on"
     NETRA_EVIDENCE_KEY: ${NETRA_EVIDENCE_KEY:?NETRA_EVIDENCE_KEY is required}
@@ -44,20 +43,7 @@ x-production-env: &production-env
     NETRA_PUBLIC_BASE_URL: ${NETRA_PUBLIC_BASE_URL:?NETRA_PUBLIC_BASE_URL is required}
     NETRA_REQUIRE_HTTPS: ${NETRA_REQUIRE_HTTPS:-0}
     NETRA_RELEASE_ID: ${NETRA_RELEASE_ID:-manual-production}
-
-x-worker-service: &worker-service
-  image: netra-production-backend:latest
-  build:
-    context: ../..
-    dockerfile: backend/Dockerfile
-  <<: *production-env
-  volumes:
-    - netra-production-storage:/app/storage
-  depends_on:
-    - backend
-  restart: unless-stopped
-  profiles:
-    - workers
+    NETRA_RUNTIME_ROLE: api
 
 services:
   frontend:
@@ -68,7 +54,6 @@ services:
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?VITE_SUPABASE_ANON_KEY is required}
-        VITE_SUPABASE_REALTIME_ENABLED: ${VITE_SUPABASE_REALTIME_ENABLED:-0}
         VITE_NETRA_FREE_PLAN_GUARD: ${VITE_NETRA_FREE_PLAN_GUARD:-1}
     ports:
       - "${NETRA_HTTP_BIND:-0.0.0.0}:8080:80"
@@ -89,49 +74,20 @@ services:
       - netra-production-storage:/app/storage
     restart: unless-stopped
 
-  capture-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker capture
-
-  pcap-ingestion-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker pcap-ingestion
-
-  parser-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker parser
-
-  decoder-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker decoder
-
-  session-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker session
-
-  detection-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker detection
-
-  anomaly-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker anomaly
-
-  analysis-finalizer-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker analysis-finalizer
-
-  report-export-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_worker report-export
-
-  scheduler-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_scheduler
-
-  retention-worker:
-    <<: *worker-service
-    command: python manage.py run_netra_retention
+  analysis-worker:
+    image: netra-production-worker:phase5
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile.worker
+    <<: *production-env
+    command: sh -c "export NETRA_RUNTIME_ROLE=worker; exec python manage.py run_postgres_worker"
+    volumes:
+      - netra-production-storage:/app/storage
+    depends_on:
+      - backend
+    restart: unless-stopped
+    profiles:
+      - workers
 
 volumes:
   netra-production-storage:
