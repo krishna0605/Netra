@@ -20,7 +20,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/App.tsx'],
+    files: ['src/features/console/NetraConsole.tsx'],
     rules: {
       // Legacy effects coordinate API hydration and authenticated route state.
       'react-hooks/set-state-in-effect': 'off',
