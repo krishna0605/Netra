@@ -27,7 +27,7 @@ if ($Ruleset.enforcement -ne "active") {
 }
 
 $RuleTypes = @($Ruleset.rules | ForEach-Object { $_.type })
-$RequiredTypes = @("deletion", "non_fast_forward", "required_linear_history", "required_review_thread_resolution", "pull_request", "required_status_checks")
+$RequiredTypes = @("deletion", "non_fast_forward", "required_linear_history", "required_signatures", "required_review_thread_resolution", "required_status_checks")
 foreach ($Type in $RequiredTypes) {
     if ($Type -notin $RuleTypes) { throw "Required rule is missing: $Type" }
 }
@@ -40,4 +40,8 @@ if (@($Ruleset.bypass_actors).Count -ne 0) {
     throw "Unexpected main-ruleset bypass actors are configured."
 }
 
-Write-Host "Main protection is active with PR-only changes, no bypass actors, and all required policy gates."
+if ("pull_request" -in $RuleTypes) {
+    throw "The permanent main-only workflow must not require a pull request."
+}
+
+Write-Host "Main protection is active with signed commits, exact policy gates, and no bypass actors."

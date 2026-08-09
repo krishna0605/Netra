@@ -16,6 +16,8 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         if "pull_request_target:" in text or "permissions: write-all" in text:
             raise ValueError(f"{path}: unsafe trigger or broad permissions")
+        if "release-candidate-*" not in text or "branches: [main]" not in text:
+            raise ValueError(f"{path}: main and signed candidate-tag push gates are required")
         uses = USES_LINE.findall(text)
         pinned = ACTION_PATTERN.findall(text)
         if len(uses) != len(pinned):
