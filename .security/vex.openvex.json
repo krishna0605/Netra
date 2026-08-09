@@ -1,0 +1,9 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/krishna0605/Netra/security/vex/phase7",
+  "author": "Netra security maintainers",
+  "role": "Document Creator",
+  "timestamp": "2026-08-09T00:00:00Z",
+  "version": 1,
+  "statements": []
+}

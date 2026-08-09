@@ -12,7 +12,7 @@ x-production-env: &production-env
     DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-0}
     SUPABASE_PROJECT_REF: ${SUPABASE_PROJECT_REF:?SUPABASE_PROJECT_REF is required}
     SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL is required}
-    SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
+    SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?SUPABASE_PUBLISHABLE_KEY is required}
     SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?SUPABASE_SECRET_KEY is required}
     NETRA_DATABASE_PROVIDER: supabase
     NETRA_DEPLOYMENT_PROFILE: ${NETRA_DEPLOYMENT_PROFILE:-hackathon-core}
@@ -44,26 +44,26 @@ x-production-env: &production-env
     NETRA_DEPLOYMENT_ENV: production
     NETRA_PUBLIC_BASE_URL: ${NETRA_PUBLIC_BASE_URL:?NETRA_PUBLIC_BASE_URL is required}
     NETRA_REQUIRE_HTTPS: ${NETRA_REQUIRE_HTTPS:-0}
-    NETRA_RELEASE_ID: ${NETRA_RELEASE_ID:-manual-production}
+    NETRA_RELEASE_ID: ${NETRA_RELEASE_ID:?NETRA_RELEASE_ID is required}
     NETRA_RUNTIME_ROLE: api
 
 services:
   frontend:
-    image: netra-production-frontend:latest
+    image: netra-production-frontend:${NETRA_RELEASE_ID:?NETRA_RELEASE_ID is required}
     build:
       context: ../../frontend
       dockerfile: Dockerfile
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?VITE_SUPABASE_ANON_KEY is required}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?VITE_SUPABASE_PUBLISHABLE_KEY is required}
     ports:
-      - "${NETRA_HTTP_BIND:-0.0.0.0}:8080:80"
+      - "${NETRA_HTTP_BIND:-0.0.0.0}:8080:8080"
     depends_on:
       - backend
     restart: unless-stopped
 
   backend:
-    image: netra-production-backend:latest
+    image: netra-production-backend:${NETRA_RELEASE_ID:?NETRA_RELEASE_ID is required}
     build:
       context: ../..
       dockerfile: backend/Dockerfile
@@ -76,7 +76,7 @@ services:
     restart: unless-stopped
 
   analysis-worker:
-    image: netra-production-worker:phase5
+    image: netra-production-worker:${NETRA_RELEASE_ID:?NETRA_RELEASE_ID is required}
     build:
       context: ../..
       dockerfile: backend/Dockerfile.worker
