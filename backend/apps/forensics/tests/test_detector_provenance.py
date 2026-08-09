@@ -9,7 +9,10 @@ from common.tenancy import NETRA_ORGANIZATION_ID
 
 class DetectorProvenanceTests(TestCase):
     def test_new_anomaly_uses_truthful_deterministic_detector_label(self):
-        organization = Organization.objects.get(pk=NETRA_ORGANIZATION_ID)
+        organization, _ = Organization.objects.get_or_create(
+            pk=NETRA_ORGANIZATION_ID,
+            defaults={"name": "Netra", "slug": "netra", "max_queued_analyses": 5},
+        )
         case = Case.objects.create(
             id="CYB-GJ-DETECTOR-DEFAULT",
             display_reference="CYB-GJ-DETECTOR-DEFAULT",
@@ -42,7 +45,10 @@ class DetectorProvenanceMigrationTests(MigrationHarnessMixin, TransactionTestCas
         Organization = old_apps.get_model("forensics", "Organization")
         Case = old_apps.get_model("forensics", "Case")
         AnomalyRecord = old_apps.get_model("forensics", "AnomalyRecord")
-        organization = Organization.objects.get(pk=NETRA_ORGANIZATION_ID)
+        organization, _ = Organization.objects.get_or_create(
+            pk=NETRA_ORGANIZATION_ID,
+            defaults={"name": "Netra", "slug": "netra", "max_queued_analyses": 5},
+        )
         case = Case.objects.create(
             id="CYB-GJ-DETECTOR-MIGRATION",
             display_reference="CYB-GJ-DETECTOR-MIGRATION",
