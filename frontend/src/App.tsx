@@ -33,6 +33,8 @@ import {
 } from "recharts";
 import { toast, Toaster } from "sonner";
 import { apiErrorMessage, findingStatusPath } from "./lib/analysisApi";
+import { capabilityAvailable, type CapabilityMap } from "./lib/capabilities";
+import { runBoundedEventStream } from "./lib/eventStream";
 import {
   Alert,
   Badge,
@@ -90,7 +92,7 @@ import type {
   SensorGroupRecord,
   ZeekEvidence,
 } from "./lib/types";
-import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED, SUPABASE_REALTIME_ENABLED } from "./lib/supabase";
+import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED } from "./lib/supabase";
 import { beginResumableUpload, type DirectUploadSession, type ResumableUploadHandle } from "./lib/resumableUpload";
 import { cn, formatBytes, formatNumber } from "./lib/utils";
 import {
@@ -891,6 +893,7 @@ type DeploymentAccess = {
   hostCaptureEnabled: boolean;
   replayEnabled: boolean;
   sensorCaptureEnabled: boolean;
+  capabilities: CapabilityMap;
   modules: Record<DeploymentModuleKey, DeploymentModuleAccess>;
 };
 
@@ -903,6 +906,7 @@ const DEFAULT_DEPLOYMENT_ACCESS: DeploymentAccess = {
   hostCaptureEnabled: false,
   replayEnabled: false,
   sensorCaptureEnabled: false,
+  capabilities: {},
   modules: {
     lab: { enabled: false, visible: false, reason: "Lab access has not been verified." },
     sensors: { enabled: false, visible: false, reason: "Sensor access has not been verified." },
@@ -1279,6 +1283,9 @@ function NetraProvider({ children }: { children: ReactNode }) {
   const [activeCaseId, setActiveCaseIdState] = useState<string | null>(() => window.localStorage.getItem("netra-active-case"));
   const [activeUpload, setActiveUpload] = useState<ActiveUploadWorkflow | null>(null);
   const [deploymentAccess, setDeploymentAccess] = useState<DeploymentAccess>(DEFAULT_DEPLOYMENT_ACCESS);
+  const [eventStreamAvailable, setEventStreamAvailable] = useState(
+    () => document.visibilityState === "visible" && window.navigator.onLine,
+  );
   const refreshTimerRef = useRef<number | null>(null);
   const [language, setLanguage] = useState<Language>(() => {
     const stored = window.localStorage.getItem("netra-language");
@@ -1289,11 +1296,24 @@ function NetraProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem("netra-language", language);
   }, [language]);
 
+  useEffect(() => {
+    const updateAvailability = () => setEventStreamAvailable(document.visibilityState === "visible" && window.navigator.onLine);
+    document.addEventListener("visibilitychange", updateAvailability);
+    window.addEventListener("online", updateAvailability);
+    window.addEventListener("offline", updateAvailability);
+    return () => {
+      document.removeEventListener("visibilitychange", updateAvailability);
+      window.removeEventListener("online", updateAvailability);
+      window.removeEventListener("offline", updateAvailability);
+    };
+  }, []);
+
   const refreshDeploymentAccess = useCallback(async () => {
     const payload = await apiGet<{
       user: string;
       department: string;
       role: string;
+      capabilities: CapabilityMap;
       deployment: { profile: string; hostCaptureEnabled: boolean; replayEnabled: boolean; sensorCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
     }>("/auth/me");
     setDeploymentAccess({
@@ -1305,6 +1325,7 @@ function NetraProvider({ children }: { children: ReactNode }) {
       hostCaptureEnabled: payload.deployment.hostCaptureEnabled,
       replayEnabled: payload.deployment.replayEnabled,
       sensorCaptureEnabled: payload.deployment.sensorCaptureEnabled,
+      capabilities: payload.capabilities ?? {},
       modules: payload.deployment.modules,
     });
   }, []);
@@ -1346,6 +1367,10 @@ function NetraProvider({ children }: { children: ReactNode }) {
       reloadAnalysis().catch(() => undefined);
     }, 1500);
   }, [reloadAnalysis]);
+  const activeCaseRouteRef = useMemo(
+    () => caseRecords.find((record) => record.id === activeCaseId)?.routeRef ?? "",
+    [activeCaseId, caseRecords],
+  );
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
@@ -1370,28 +1395,41 @@ function NetraProvider({ children }: { children: ReactNode }) {
         setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
       }
     });
-    if (!SUPABASE_REALTIME_ENABLED) {
-      const pollTimer = window.setInterval(() => {
-        const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-        if (document.visibilityState === "visible" && isProtectedAppRoute && getCurrentAccessToken()) scheduleRefresh();
-      }, BACKGROUND_ANALYSIS_REFRESH_MS);
-      return () => {
-        window.clearInterval(pollTimer);
-        subscription.unsubscribe();
-      };
-    }
-    const channel = client
-      .channel("netra-operational-refresh")
-      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_operationalevent" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_processingjob" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_alert" }, scheduleRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "forensics_capturejob" }, scheduleRefresh)
-      .subscribe();
+    const pollTimer = window.setInterval(() => {
+      const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
+      if (document.visibilityState === "visible" && isProtectedAppRoute && getCurrentAccessToken()) scheduleRefresh();
+    }, BACKGROUND_ANALYSIS_REFRESH_MS);
     return () => {
+      window.clearInterval(pollTimer);
       subscription.unsubscribe();
-      client.removeChannel(channel);
     };
   }, [refreshDeploymentAccess, reloadAnalysis, scheduleRefresh]);
+
+  useEffect(() => {
+    const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
+    if (
+      !activeCaseRouteRef
+      || !deploymentAccess.verified
+      || !capabilityAvailable(deploymentAccess.capabilities, "sse")
+      || !isProtectedAppRoute
+      || !eventStreamAvailable
+      || !getCurrentAccessToken()
+    ) return undefined;
+    const controller = new AbortController();
+    void runBoundedEventStream({
+      url: `${API_BASE}/events/stream?caseRef=${encodeURIComponent(activeCaseRouteRef)}`,
+      getAccessToken: getCurrentAccessToken,
+      signal: controller.signal,
+      onInvalidate: scheduleRefresh,
+      onUnauthorized: () => {
+        setCurrentAccessToken();
+        setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
+      },
+    });
+    return () => {
+      controller.abort();
+    };
+  }, [activeCaseRouteRef, deploymentAccess.capabilities, deploymentAccess.verified, eventStreamAvailable, scheduleRefresh]);
 
   const addCaseNote = useCallback(
     (caseId: string, note: string) => {

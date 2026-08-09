@@ -3,11 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
 export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 export const SUPABASE_AUTH_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-// Fail closed on the free plan. Realtime requires both an explicit request and
-// an explicit opt-out from the egress guard, so a stale Vercel variable cannot
-// silently reconnect database channels.
-export const SUPABASE_REALTIME_ENABLED =
-  import.meta.env.VITE_NETRA_FREE_PLAN_GUARD === "0" && import.meta.env.VITE_SUPABASE_REALTIME_ENABLED === "1";
 
 type SessionStorageReader = Pick<Storage, "getItem">;
 
