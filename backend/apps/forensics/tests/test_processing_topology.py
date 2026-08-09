@@ -19,6 +19,22 @@ from common.worker_capacity import CAPACITY_CACHE_KEY, compatible_analysis_worke
     NETRA_DEV_ROLE_HEADERS=True,
 )
 class ProcessingTopologyTests(TestCase):
+    @staticmethod
+    def _details():
+        return {
+            "runtimeRole": "worker",
+            "releaseId": "local-dev",
+            "processingMode": "postgres-worker",
+            "queueProvider": "postgres-row-lock",
+            "capabilities": {
+                "pcap": True,
+                "pcapng": True,
+                "structuredEvidence": True,
+                "tshark": {"available": True, "version": "4.6.7"},
+                "zeek": {"available": True, "version": "8.2.1"},
+            },
+        }
+
     def _upload(self):
         return self.client.post(
             "/api/evidence/upload",
@@ -44,7 +60,7 @@ class ProcessingTopologyTests(TestCase):
             instance_id="stale",
             status="healthy",
             last_seen_at=timezone.now() - timedelta(minutes=10),
-            details_json={"runtimeRole": "worker", "processingMode": "postgres-worker", "queueProvider": "postgres-row-lock"},
+            details_json=self._details(),
         )
         self.assertFalse(compatible_analysis_worker_available())
         WorkerHeartbeat.objects.create(
@@ -52,7 +68,7 @@ class ProcessingTopologyTests(TestCase):
             instance_id="ready",
             status="healthy",
             last_seen_at=timezone.now(),
-            details_json={"runtimeRole": "worker", "processingMode": "postgres-worker", "queueProvider": "postgres-row-lock"},
+            details_json=self._details(),
         )
         self.assertTrue(compatible_analysis_worker_available())
 

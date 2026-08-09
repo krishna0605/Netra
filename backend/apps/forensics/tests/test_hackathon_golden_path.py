@@ -57,7 +57,19 @@ class HackathonGoldenPathTests(TestCase):
             instance_id="golden-worker",
             status="healthy",
             last_seen_at=timezone.now(),
-            details_json={"runtimeRole": "worker", "processingMode": "postgres-worker", "queueProvider": "postgres-row-lock"},
+            details_json={
+                "runtimeRole": "worker",
+                "releaseId": "local-dev",
+                "processingMode": "postgres-worker",
+                "queueProvider": "postgres-row-lock",
+                "capabilities": {
+                    "pcap": True,
+                    "pcapng": True,
+                    "structuredEvidence": True,
+                    "tshark": {"available": True, "version": "4.6.7"},
+                    "zeek": {"available": True, "version": "8.2.1"},
+                },
+            },
         )
 
     @staticmethod

@@ -55,7 +55,7 @@ from common.tenancy import netra_organization
 from common.upload_sessions import UploadSessionProblem, create_upload_session, finalize_upload_session, get_upload_session, upload_session_payload
 from common.vault import fernet, read_encrypted_or_plain, temporary_decrypted_copy
 from common.vault_v2 import verify_evidence_v2
-from common.worker_capacity import analysis_admission_available
+from common.worker_capacity import analysis_admission_available, compatible_analysis_worker_available
 
 
 logger = logging.getLogger(__name__)
@@ -2320,8 +2320,14 @@ def _probe_evidence_normalization() -> dict:
 
 
 def _probe_packet_tools() -> dict:
-    tools = available_packet_tools()
-    return {"status": "ok" if tools.get("tshark") and tools.get("zeek") else "degraded", **tools}
+    available = compatible_analysis_worker_available()
+    return {
+        "status": "ok" if available else "degraded",
+        "runtimeRole": settings.NETRA_RUNTIME_ROLE,
+        "mode": settings.NETRA_PROCESSING_MODE,
+        "synchronousFallback": settings.NETRA_SYNC_FALLBACK_ENABLED,
+        "compatibleWorkerAvailable": available,
+    }
 
 
 def _probe_workers() -> dict:

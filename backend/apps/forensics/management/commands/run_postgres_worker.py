@@ -17,6 +17,7 @@ from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import claim_next_job, mark_job_failure, renew_job_lease
 from common.quarantine_cleanup import cleanup_worker_artifacts
 from common.worker_capacity import invalidate_worker_capacity_cache
+from common.tool_capabilities import require_worker_capabilities
 
 
 class Command(BaseCommand):
@@ -31,6 +32,7 @@ class Command(BaseCommand):
             raise RuntimeError("run_postgres_worker requires NETRA_RUNTIME_ROLE=worker")
         if settings.NETRA_PROCESSING_MODE != "postgres-worker" or settings.NETRA_QUEUE_PROVIDER != "postgres-row-lock":
             raise RuntimeError("The production worker requires postgres-worker and postgres-row-lock")
+        self.capabilities = require_worker_capabilities()
         worker_id = options["worker_id"] or os.getenv("RAILWAY_REPLICA_ID") or f"{socket.gethostname()}-{uuid4().hex[:8]}"
         self._start_health_server()
         cleanup_worker_artifacts()
@@ -68,8 +70,7 @@ class Command(BaseCommand):
             if options["once"]:
                 return
 
-    @staticmethod
-    def _heartbeat(worker_id: str, current_job_id: str) -> None:
+    def _heartbeat(self, worker_id: str, current_job_id: str) -> None:
         WorkerHeartbeat.objects.update_or_create(
             worker_name="postgres-analysis",
             instance_id=worker_id,
@@ -79,21 +80,22 @@ class Command(BaseCommand):
                 "current_job_id": current_job_id,
                 "details_json": {
                     "runtimeRole": "worker",
+                    "releaseId": settings.NETRA_RELEASE_ID,
                     "queueProvider": "postgres-row-lock",
                     "processingMode": "postgres-worker",
+                    "capabilities": self.capabilities,
                 },
             },
         )
         invalidate_worker_capacity_cache()
 
-    @classmethod
-    def _job_heartbeat_loop(cls, stop: threading.Event, worker_id: str, job_id: str) -> None:
+    def _job_heartbeat_loop(self, stop: threading.Event, worker_id: str, job_id: str) -> None:
         while not stop.wait(settings.NETRA_JOB_HEARTBEAT_SECONDS):
             close_old_connections()
             try:
                 if not renew_job_lease(job_id, worker_id):
                     return
-                cls._heartbeat(worker_id, job_id)
+                self._heartbeat(worker_id, job_id)
             except Exception:
                 # A transient database error is retried on the next bounded
                 # heartbeat interval; the main worker still owns the job lease.

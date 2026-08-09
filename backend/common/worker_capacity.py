@@ -32,6 +32,16 @@ def compatible_analysis_worker_available() -> bool:
         and details.get("runtimeRole", "worker") == "worker"
         and details.get("processingMode") == "postgres-worker"
         and details.get("queueProvider") == "postgres-row-lock"
+        and (not settings.NETRA_REQUIRE_WORKER_RELEASE_MATCH or details.get("releaseId") == settings.NETRA_RELEASE_ID)
+        and isinstance(details.get("capabilities"), dict)
+        and details["capabilities"].get("pcap") is True
+        and details["capabilities"].get("pcapng") is True
+        and isinstance(details["capabilities"].get("tshark"), dict)
+        and details["capabilities"]["tshark"].get("available") is True
+        and details["capabilities"]["tshark"].get("version") == settings.NETRA_REQUIRED_TSHARK_VERSION
+        and isinstance(details["capabilities"].get("zeek"), dict)
+        and details["capabilities"]["zeek"].get("available") is True
+        and details["capabilities"]["zeek"].get("version") == settings.NETRA_REQUIRED_ZEEK_VERSION
         for details in candidates
     )
     cache.set(CAPACITY_CACHE_KEY, available, settings.NETRA_WORKER_CAPACITY_CACHE_SECONDS)

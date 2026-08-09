@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from hashlib import sha256
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
 from common.analysis import MAX_PACKETS, analyze_pcap
+from common.hashing import sha256_file
+from common.tool_capabilities import worker_capabilities
 
 
 class Command(BaseCommand):
@@ -29,6 +30,7 @@ class Command(BaseCommand):
             "checkedAt": datetime.now(timezone.utc).isoformat(),
             "mode": options["mode"],
             "packetMetadataLimit": MAX_PACKETS,
+            "workerCapabilities": worker_capabilities(),
             "dpi": None,
             "largePcap": None,
             "passed": True,
@@ -122,8 +124,7 @@ class Command(BaseCommand):
         }
 
     def _saved(self, path: Path) -> dict:
-        data = path.read_bytes()
-        digest = sha256(data).hexdigest()
+        digest = sha256_file(path)
         return {
             "filename": path.name,
             "size_bytes": path.stat().st_size,

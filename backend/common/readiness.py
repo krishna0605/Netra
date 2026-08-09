@@ -248,11 +248,13 @@ def deployment_readiness_payload() -> dict[str, Any]:
         _deployment_check("webhook-secret-set", bool(getattr(settings, "NETRA_WEBHOOK_SIGNING_SECRET", "")), "Webhook signing secret is configured.", "Set NETRA_WEBHOOK_SIGNING_SECRET for SIEM delivery signing.", required=False),
         _deployment_check(
             "queue-provider",
-            getattr(settings, "NETRA_QUEUE_PROVIDER", "") in {"supabase-pgmq", "postgres-row-lock"},
-            "A reviewed durable queue provider is active.",
-            "Set NETRA_QUEUE_PROVIDER to supabase-pgmq or postgres-row-lock and deploy the matching workers.",
+            getattr(settings, "NETRA_QUEUE_PROVIDER", "") == "postgres-row-lock",
+            "PostgreSQL row-lock job acquisition is active.",
+            "Set NETRA_QUEUE_PROVIDER=postgres-row-lock and deploy the dedicated worker.",
             required=True,
         ),
+        _deployment_check("runtime-role", getattr(settings, "NETRA_RUNTIME_ROLE", "") in {"api", "worker"}, "Runtime role is explicit.", "Set NETRA_RUNTIME_ROLE to api or worker.", required=True),
+        _deployment_check("worker-only-processing", getattr(settings, "NETRA_PROCESSING_MODE", "") == "postgres-worker" and not getattr(settings, "NETRA_SYNC_FALLBACK_ENABLED", True), "Packet analysis is worker-only.", "Set NETRA_PROCESSING_MODE=postgres-worker and NETRA_SYNC_FALLBACK_ENABLED=0.", required=True),
         _deployment_check("search-provider", getattr(settings, "NETRA_SEARCH_PROVIDER", "") == "postgres", "Postgres search is active.", "Set NETRA_SEARCH_PROVIDER=postgres for Supabase mode.", required=False),
         _deployment_check(
             "https-plan",
