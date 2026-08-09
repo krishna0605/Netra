@@ -9,7 +9,7 @@
 </p>
 
 > [!IMPORTANT]
-> Netra is a controlled demonstration and active security-remediation project. Use it only on networks and packet captures you are authorized to investigate. Automated detections support investigator review; they are not certified legal conclusions. The current remediation branch is not yet approved for production deployment.
+> Netra is a controlled demonstration and active security-remediation project. Use it only on networks and packet captures you are authorized to investigate. Automated detections support investigator review; they are not certified legal conclusions. Production writes remain closed until the platform activation gates pass.
 
 ![Netra controlled-demo landing page using synthetic content](docs/assets/readme/netra-controlled-demo.webp)
 

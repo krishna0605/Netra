@@ -79,11 +79,11 @@ Apply the Supabase infrastructure migrations only after all 53 public tables
 exist. Inspect the current CLI flags before use:
 
 ```powershell
-npx --yes supabase@latest db push --help
-npx --yes supabase@latest login
-npx --yes supabase@latest link --workdir infra --project-ref $env:TARGET_PROJECT_REF
-npx --yes supabase@latest db push --workdir infra --linked --dry-run
-npx --yes supabase@latest db push --workdir infra --linked
+npx --yes supabase@2.113.0 db push --help
+npx --yes supabase@2.113.0 login
+npx --yes supabase@2.113.0 link --workdir infra --project-ref $env:TARGET_PROJECT_REF
+npx --yes supabase@2.113.0 db push --workdir infra --linked --dry-run
+npx --yes supabase@2.113.0 db push --workdir infra --linked
 ```
 
 Load the target Supabase URL and service-role key into the backend environment,

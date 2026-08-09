@@ -5,35 +5,43 @@ This is an owner-executed runbook. Repository preparation does not authorize a p
 ```mermaid
 flowchart LR
     LOCAL["Offline repository gates"]
-    ISOLATE["Confirm branch deployment isolation"]
-    PUSH["Push remediation branch only"]
+    FREEZE["Freeze production writes"]
     CI["Three policy gates"]
     BACKUP["Encrypted logical backup"]
     SCHEMA["Migrations 0014-0017"]
     HARDEN["53-table RLS and grants"]
+    PUSH["Fast-forward push main"]
+    DEPLOY["Automatic production deployments"]
     PLATFORM["Bounded Railway, Auth, and Vercel drills"]
-    DRAFT["Draft PR remains unmerged"]
+    PROTECT["Protect main after evidence push"]
 
-    LOCAL --> ISOLATE --> PUSH --> CI --> BACKUP --> SCHEMA --> HARDEN --> PLATFORM --> DRAFT
+    LOCAL --> FREEZE --> BACKUP --> SCHEMA --> HARDEN --> PUSH
+    PUSH --> CI
+    PUSH --> DEPLOY --> PLATFORM --> PROTECT
+    CI --> PLATFORM
 ```
 
 ## Pre-push stop gate
 
-1. Confirm Railway production tracks only `main` and a remediation-branch push cannot replace it.
-2. Configure branch-specific Vercel Preview variables before pushing. Preview receives only `VITE_API_BASE_URL`, `VITE_DEPLOYMENT_PROFILE`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_DIRECT_UPLOAD_ENABLED=0`, and `VITE_MAX_UPLOAD_MB=25`.
-3. Enable Vercel Authentication for preview deployments where available on Hobby.
-4. Confirm no backend/database/evidence/custody secret exists in Vercel or GitHub workflow variables.
-5. Record organization-wide Supabase usage and initialize the local byte ledger.
-6. Publish only the reviewed, consolidated release after explicit approval. Never force-push protected `main`.
+1. Confirm local and remote repositories contain only `main`, and the update is a normal fast-forward.
+2. Confirm Railway API and Vercel Production are linked to `main`; their automatic deployments remain enabled for the controlled activation.
+3. Stop the old Railway API and every worker/producer before hosted schema work. The write freeze stays active until CI, deployment, and read-only smoke tests pass.
+4. Configure Vercel Production with only `VITE_API_BASE_URL`, `VITE_DEPLOYMENT_PROFILE`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_DIRECT_UPLOAD_ENABLED=0`, and `VITE_MAX_UPLOAD_MB=25`.
+5. Confirm no backend/database/evidence/custody/SMTP secret exists in Vercel or GitHub workflow variables.
+6. Record organization-wide Supabase usage and initialize the local byte ledger.
+7. Harden and verify the empty target before pushing because the `main` push immediately deploys Railway and Vercel production.
+8. Never force-push `main`.
 
 ## GitHub activation
 
+- Push the verified release directly to `main` only after the hosted pre-push gates pass.
 - Require `ci-policy-gate`, `security-policy-gate`, and `container-policy-gate`.
-- Fix remote-only failures in new commits; never amend prior remediation history.
-- Apply `infra/github/main-ruleset.json` only after all contexts have reported.
+- Keep production writes frozen while GitHub Actions and automatic platform deployments run in parallel.
+- Fix remote-only failures in new commits on local `main`; never amend or force-push prior history.
+- Push the sanitized platform-evidence commit to `main`, then apply `infra/github/main-ruleset.json` only after all contexts have reported.
 - Enable CodeQL, Dependabot alerts/security updates, secret scanning, and push protection.
 - Verify protection with `infra/github/verify-repository-protection.ps1`.
-- Open a draft PR and keep it unmerged through migration and rollout verification.
+- Once protection is active, future repository changes require a reviewed short-lived branch; Phase 8B itself creates none.
 
 ## Hosted maintenance and backup gate
 
@@ -48,9 +56,9 @@ flowchart LR
 The CLI syntax below was verified against Supabase CLI 2.113.0. Re-run each `--help` command at activation time because flags can change.
 
 ```text
-npx supabase@latest migration list --help
-npx supabase@latest db push --help
-npx supabase@latest db lint --help
+npx --yes supabase@2.113.0 migration list --help
+npx --yes supabase@2.113.0 db push --help
+npx --yes supabase@2.113.0 db lint --help
 ```
 
 1. Rehearse Django `0014`–`0017` on disposable PostgreSQL 17.
