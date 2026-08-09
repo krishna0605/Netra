@@ -92,10 +92,13 @@ import type {
   SensorGroupRecord,
   ZeekEvidence,
 } from "../../lib/types";
-import { ensureCurrentAccessToken, getCurrentAccessToken, refreshStoredSupabaseSession, setCurrentAccessToken, supabase, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
+import { ensureCurrentAccessToken, getCurrentAccessToken, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { beginResumableUpload, type DirectUploadSession, type ResumableUploadHandle } from "../../lib/resumableUpload";
 import { cn, formatBytes, formatNumber } from "../../lib/utils";
 import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "../auth/AuthPages";
+import { AuthProvider } from "../auth/AuthProvider";
+import { useAuth } from "../auth/AuthContext";
+import { MfaPage } from "../auth/MfaPage";
 import {
   PublicAboutPage,
   PublicContactPage,
@@ -1253,6 +1256,7 @@ function useNetra() {
 }
 
 function NetraProvider({ children }: { children: ReactNode }) {
+  const { session, signOut: authSignOut } = useAuth();
   const [alertRecords, setAlertRecords] = useState<AlertRecord[]>([]);
   const [anomaliesState, setAnomaliesState] = useState<AnomalyRecord[]>([]);
   const [caseRecords, setCaseRecords] = useState<CaseRecord[]>([]);
@@ -1375,36 +1379,21 @@ function NetraProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !getCurrentAccessToken())) return;
+    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !session?.access_token)) return;
     refreshDeploymentAccess().catch(() => setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS));
     reloadAnalysis().catch(() => undefined);
-  }, [refreshDeploymentAccess, reloadAnalysis]);
+  }, [refreshDeploymentAccess, reloadAnalysis, session?.access_token]);
 
   useEffect(() => {
-    if (!SUPABASE_AUTH_ENABLED || !supabase) return undefined;
-    const client = supabase;
-    refreshStoredSupabaseSession().catch(() => undefined);
-    const {
-      data: { subscription },
-    } = client.auth.onAuthStateChange((_event, session) => {
-      if (session?.access_token) {
-        setCurrentAccessToken(session.access_token);
-        refreshDeploymentAccess().catch(() => setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS));
-        reloadAnalysis().catch(() => undefined);
-      } else {
-        setCurrentAccessToken();
-        setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
-      }
-    });
+    if (!session?.access_token) return undefined;
     const pollTimer = window.setInterval(() => {
       const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-      if (document.visibilityState === "visible" && isProtectedAppRoute && getCurrentAccessToken()) scheduleRefresh();
+      if (document.visibilityState === "visible" && isProtectedAppRoute) scheduleRefresh();
     }, BACKGROUND_ANALYSIS_REFRESH_MS);
     return () => {
       window.clearInterval(pollTimer);
-      subscription.unsubscribe();
     };
-  }, [refreshDeploymentAccess, reloadAnalysis, scheduleRefresh]);
+  }, [scheduleRefresh, session?.access_token]);
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
@@ -1414,23 +1403,23 @@ function NetraProvider({ children }: { children: ReactNode }) {
       || !capabilityAvailable(deploymentAccess.capabilities, "sse")
       || !isProtectedAppRoute
       || !eventStreamAvailable
-      || !getCurrentAccessToken()
+      || !session?.access_token
     ) return undefined;
     const controller = new AbortController();
     void runBoundedEventStream({
       url: `${API_BASE}/events/stream?caseRef=${encodeURIComponent(activeCaseRouteRef)}`,
-      getAccessToken: getCurrentAccessToken,
+      getAccessToken: () => session?.access_token ?? "",
       signal: controller.signal,
       onInvalidate: scheduleRefresh,
       onUnauthorized: () => {
-        setCurrentAccessToken();
         setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
+        void authSignOut();
       },
     });
     return () => {
       controller.abort();
     };
-  }, [activeCaseRouteRef, deploymentAccess.capabilities, deploymentAccess.verified, eventStreamAvailable, scheduleRefresh]);
+  }, [activeCaseRouteRef, authSignOut, deploymentAccess.capabilities, deploymentAccess.verified, eventStreamAvailable, scheduleRefresh, session?.access_token]);
 
   const addCaseNote = useCallback(
     (caseId: string, note: string) => {
@@ -1507,10 +1496,11 @@ function NetraProvider({ children }: { children: ReactNode }) {
 
 function App() {
   return (
-    <TooltipProvider>
-      <NetraProvider>
-        <div className="app-theme">
-          <Router>
+    <AuthProvider>
+      <TooltipProvider>
+        <NetraProvider>
+          <div className="app-theme">
+            <Router>
             <Toaster position="top-right" />
             <Routes>
               <Route path="/" element={<PublicHomePage languageControl={<LanguageControl />} />} />
@@ -1525,53 +1515,24 @@ function App() {
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/auth/recovery" element={<RecoveryPage />} />
               <Route path="/auth/invite" element={<InvitationPage />} />
+              <Route path="/auth/mfa" element={<MfaPage />} />
               <Route path="/app/login" element={<Navigate to="/login" replace />} />
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
               <Route path="*" element={<PublicNotFoundPage languageControl={<LanguageControl />} />} />
             </Routes>
-          </Router>
-        </div>
-      </NetraProvider>
-    </TooltipProvider>
+            </Router>
+          </div>
+        </NetraProvider>
+      </TooltipProvider>
+    </AuthProvider>
   );
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const [status, setStatus] = useState<"checking" | "signed-in" | "signed-out">("checking");
+  const { state } = useAuth();
 
-  useEffect(() => {
-    if (!SUPABASE_AUTH_ENABLED || !supabase) {
-      setStatus("signed-out");
-      return undefined;
-    }
-    let mounted = true;
-    refreshStoredSupabaseSession()
-      .then((session) => {
-        if (!mounted) return;
-        setStatus(session?.access_token ? "signed-in" : "signed-out");
-      })
-      .catch(() => {
-        if (mounted) setStatus("signed-out");
-      });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.access_token) {
-        setCurrentAccessToken(session.access_token);
-        setStatus("signed-in");
-      } else {
-        setCurrentAccessToken();
-        setStatus("signed-out");
-      }
-    });
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  if (status === "checking") {
+  if (state.status === "initializing" || state.status === "resolving_profile") {
     return (
       <main className="auth-shell flex min-h-screen items-center justify-center px-4">
         <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
@@ -1583,9 +1544,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
-  if (status === "signed-out") {
+  if (state.status === "signed_out" || state.status === "profile_denied") {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
+  if (state.status === "mfa_enrollment_required" || state.status === "mfa_challenge_required") {
+    return <Navigate to="/auth/mfa" replace state={{ from: location.pathname }} />;
+  }
+  if (state.status === "recovery") return <Navigate to="/auth/recovery" replace />;
 
   return <>{children}</>;
 }
@@ -1593,55 +1558,29 @@ function RequireAuth({ children }: { children: ReactNode }) {
 function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { state, session, signIn: authenticateSession, signOut: endSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [hasSession, setHasSession] = useState(false);
   const from = typeof location.state === "object" && location.state && "from" in location.state ? String(location.state.from) : appViewRoute("upload");
-
-  useEffect(() => {
-    if (!SUPABASE_AUTH_ENABLED || !supabase) {
-      setCheckingSession(false);
-      return undefined;
-    }
-    let mounted = true;
-    refreshStoredSupabaseSession().then((session) => {
-      if (!mounted) return;
-      setHasSession(Boolean(session?.access_token));
-      setCheckingSession(false);
-    }).catch(() => {
-      if (!mounted) return;
-      setHasSession(false);
-      setCheckingSession(false);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const checkingSession = state.status === "initializing" || state.status === "resolving_profile";
+  const hasSession = Boolean(session);
 
   async function signIn(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (!supabase) {
-      toast.error("Supabase Auth is not configured for this build.");
-      return;
-    }
     setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const result = await authenticateSession(email, password);
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
+    if (!result.ok) {
+      toast.error(result.message ?? "Invalid login credentials.");
       return;
     }
-    setCurrentAccessToken(data.session?.access_token);
     toast.success("Secure session verified");
     navigate(from, { replace: true });
   }
 
   async function signOut() {
-    if (supabase) await supabase.auth.signOut();
-    setCurrentAccessToken();
-    setHasSession(false);
+    await endSession();
     toast.success("Signed out");
   }
 
@@ -1796,6 +1735,7 @@ function AppShell() {
               <Route path="compliance" element={<Navigate to={appViewRoute("compliance")} replace />} />
               <Route path="settings" element={<Navigate to={appViewRoute("settings")} replace />} />
               <Route path="settings/technical-status" element={<Navigate to={appViewRoute("technicalStatus")} replace />} />
+              <Route path="settings/security" element={<MfaPage allowAdditional />} />
               <Route path="settings/sensors" element={<Navigate to={appViewRoute("sensors")} replace />} />
               <Route path="settings/schedules" element={<Navigate to={appViewRoute("schedules")} replace />} />
               <Route path="settings/integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />

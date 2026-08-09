@@ -26,7 +26,6 @@ export function readStoredAccessToken(
   }
 }
 
-let currentAccessToken = typeof window === "undefined" ? "" : readStoredAccessToken(window.sessionStorage);
 let sessionRefreshPromise: ReturnType<typeof refreshStoredSupabaseSession> | null = null;
 
 export const supabase = SUPABASE_AUTH_ENABLED
@@ -41,15 +40,10 @@ export const supabase = SUPABASE_AUTH_ENABLED
   : null;
 
 export function getCurrentAccessToken() {
-  return currentAccessToken;
-}
-
-export function setCurrentAccessToken(token?: string | null) {
-  currentAccessToken = token ?? "";
+  return typeof window === "undefined" ? "" : readStoredAccessToken(window.sessionStorage);
 }
 
 export function clearNetraSessionState() {
-  setCurrentAccessToken();
   if (typeof window === "undefined") return;
   window.localStorage.removeItem("netra-active-case");
   window.sessionStorage.removeItem("netra-last-event-id");
@@ -69,7 +63,6 @@ export async function refreshStoredSupabaseSession() {
   const { data } = await withAuthTimeout(supabase.auth.getSession(), { data: { session: null }, error: null });
   const session = data.session;
   if (!session?.access_token) {
-    setCurrentAccessToken();
     return null;
   }
 
@@ -78,16 +71,14 @@ export async function refreshStoredSupabaseSession() {
     { data: { user: null }, error: null } as unknown as Awaited<ReturnType<typeof supabase.auth.getUser>>,
   );
   if (error || !userData.user) {
-    setCurrentAccessToken();
     return null;
   }
-
-  setCurrentAccessToken(session.access_token);
   return session;
 }
 
 export async function ensureCurrentAccessToken() {
-  if (currentAccessToken) return currentAccessToken;
+  const stored = getCurrentAccessToken();
+  if (stored) return stored;
   if (!supabase) return "";
   if (!sessionRefreshPromise) {
     sessionRefreshPromise = refreshStoredSupabaseSession().finally(() => {
