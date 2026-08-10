@@ -1,4 +1,4 @@
-FROM zeek/zeek@sha256:6ce464c9cc63185ac0ef40b86f1150842350895496520d7e6522c1756d07c755 AS wireshark-builder
+FROM zeek/zeek@sha256:eca2b3915d3e067cbb4a904f23f4c4f461ea2b60613ab30f7ee77bbc707c87c7 AS wireshark-builder
 
 ARG WIRESHARK_VERSION=4.6.7
 ARG WIRESHARK_SHA256=242929b8c10ba89a8d3bcad7ff2eba8effb648d30f48e270d2e5e6ff94d88613
@@ -23,7 +23,7 @@ RUN apt-get update \
     && cmake --install /tmp/wireshark-build \
     && /opt/wireshark/bin/tshark --version | grep -F "4.6.7"
 
-FROM zeek/zeek@sha256:6ce464c9cc63185ac0ef40b86f1150842350895496520d7e6522c1756d07c755
+FROM zeek/zeek@sha256:eca2b3915d3e067cbb4a904f23f4c4f461ea2b60613ab30f7ee77bbc707c87c7
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
