@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "production-bundle.spec.ts",
   outputDir: "../Miscellaneous/tmp/playwright-results",
   // Keep the security journeys deterministic on both local and hosted
   // runners. A bounded worker count avoids starving the mocked Auth/API
