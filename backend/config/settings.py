@@ -350,6 +350,24 @@ REST_FRAMEWORK = {
     )
 }
 
+# Django's default configuration only reaches the console while DEBUG is on, so
+# a hosted deployment returns 500 with no trace of why. Unhandled request
+# exceptions and deliberate service warnings go to stderr, where the platform
+# log collector already reads them. Request payloads are never logged.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"netra": {"format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s"}},
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "stream": sys.stderr, "formatter": "netra"},
+    },
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        "common": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "apps.forensics": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}
+
 if not DEBUG:
     if SECRET_KEY == "netra-development-only-secret":
         raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=0")
