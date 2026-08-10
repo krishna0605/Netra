@@ -92,7 +92,9 @@ try {
             New-EncryptedBundle
             $tag = "release-candidate-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))-$($sha.Substring(0, 8))"
             Invoke-Git tag -s $tag $sha -m "Netra verified release candidate $sha" | Out-Null
-            Invoke-Git push origin "refs/tags/$tag:refs/tags/$tag" | Out-Null
+            # Braces are required before the colon; otherwise PowerShell parses
+            # `$tag:refs` as a scoped variable and corrupts the refspec.
+            Invoke-Git push origin "refs/tags/${tag}:refs/tags/${tag}" | Out-Null
             Write-Host "Candidate tag: $tag"
             Write-Host "Candidate SHA: $sha"
             Write-Host "Recorded origin/main SHA: $remoteSha"
@@ -119,7 +121,7 @@ try {
         }
         "DeleteCandidate" {
             if (-not $CandidateTag) { throw "-CandidateTag is required." }
-            Invoke-Git push origin ":refs/tags/$CandidateTag" | Out-Null
+            Invoke-Git push origin ":refs/tags/${CandidateTag}" | Out-Null
             Invoke-Git tag -d $CandidateTag | Out-Null
             Write-Host "Deleted temporary candidate tag $CandidateTag."
         }
