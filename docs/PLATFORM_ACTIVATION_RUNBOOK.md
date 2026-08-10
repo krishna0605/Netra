@@ -35,6 +35,7 @@ flowchart LR
 ## GitHub activation
 
 - Run `scripts/release-main.ps1 -Action PrepareCandidate` and verify the candidate before changing `main`.
+- For the first cleaned-history publication only, GitHub may report zero workflows because the old default branch does not contain them. Keep Railway and Vercel frozen, then use the explicit `BootstrapMain -BootstrapFirstPublication` action. It refuses to run if GitHub already has any registered workflow, if the signed tag does not identify `HEAD`, or if the recorded remote-main SHA changed. Treat `main` as unpublished until all three policy gates complete successfully, then activate protection.
 - Require `ci-policy-gate`, `security-policy-gate`, and `container-policy-gate`.
 - Keep automatic platform deployments frozen until `origin/main` equals the verified candidate SHA and protection is active.
 - Fix remote-only failures in new commits on local `main`; never amend or force-push prior history.

@@ -1,10 +1,11 @@
 param(
-    [ValidateSet("PrepareCandidate", "VerifyCandidate", "PublishMain", "DeleteCandidate")]
+    [ValidateSet("PrepareCandidate", "VerifyCandidate", "BootstrapMain", "PublishMain", "DeleteCandidate")]
     [string]$Action = "PrepareCandidate",
     [string]$CandidateTag = "",
     [string]$ExpectedRemoteMainSha = "",
     [string]$BackupDirectory = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Netra-Release-Backups"),
-    [switch]$SkipLocalGate
+    [switch]$SkipLocalGate,
+    [switch]$BootstrapFirstPublication
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +80,16 @@ function Assert-CandidateChecks {
     Write-Host "All required GitHub policy gates passed for $Sha."
 }
 
+function Assert-RemoteHasNoWorkflows {
+    $json = gh api -H "Accept: application/vnd.github+json" "/repos/krishna0605/Netra/actions/workflows"
+    if ($LASTEXITCODE -ne 0) { throw "GitHub workflow inventory lookup failed." }
+    $inventory = ConvertFrom-Json $json
+    if ([int]$inventory.total_count -ne 0) {
+        throw "Bootstrap publication is prohibited because GitHub already has registered workflows."
+    }
+    Write-Host "Confirmed that the existing remote main has zero registered workflows."
+}
+
 Push-Location $RepositoryRoot
 try {
     Assert-ReleaseWorkspace
@@ -105,6 +116,22 @@ try {
             if ($tagSha -ne $sha) { throw "The candidate tag does not identify HEAD." }
             Invoke-Git verify-tag $CandidateTag | Out-Null
             Assert-CandidateChecks -Sha $sha
+        }
+        "BootstrapMain" {
+            if (-not $BootstrapFirstPublication) {
+                throw "BootstrapMain requires the explicit -BootstrapFirstPublication switch."
+            }
+            if (-not $CandidateTag -or -not $ExpectedRemoteMainSha) {
+                throw "-CandidateTag and -ExpectedRemoteMainSha are required."
+            }
+            $tagSha = (Invoke-Git rev-list -n 1 $CandidateTag).Trim()
+            if ($tagSha -ne $sha) { throw "The candidate tag does not identify HEAD." }
+            Invoke-Git verify-tag $CandidateTag | Out-Null
+            Assert-RemoteHasNoWorkflows
+            if ((Get-RemoteMainSha) -ne $ExpectedRemoteMainSha) { throw "origin/main changed after candidate preparation." }
+            Invoke-Git push "--force-with-lease=refs/heads/main:$ExpectedRemoteMainSha" origin "main:main" | Out-Null
+            if ((Get-RemoteMainSha) -ne $sha) { throw "Bootstrapped origin/main does not match the signed candidate." }
+            Write-Host "Bootstrapped main at $sha. Keep deployments frozen until all policy gates pass."
         }
         "PublishMain" {
             if (-not $CandidateTag -or -not $ExpectedRemoteMainSha) {
