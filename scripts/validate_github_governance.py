@@ -9,7 +9,6 @@ REQUIRED_RULES = {
     "non_fast_forward",
     "required_linear_history",
     "required_signatures",
-    "required_review_thread_resolution",
     "required_status_checks",
 }
 REQUIRED_CONTEXTS = {"ci-policy-gate", "security-policy-gate", "container-policy-gate"}

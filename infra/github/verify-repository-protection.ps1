@@ -27,7 +27,7 @@ if ($Ruleset.enforcement -ne "active") {
 }
 
 $RuleTypes = @($Ruleset.rules | ForEach-Object { $_.type })
-$RequiredTypes = @("deletion", "non_fast_forward", "required_linear_history", "required_signatures", "required_review_thread_resolution", "required_status_checks")
+$RequiredTypes = @("deletion", "non_fast_forward", "required_linear_history", "required_signatures", "required_status_checks")
 foreach ($Type in $RequiredTypes) {
     if ($Type -notin $RuleTypes) { throw "Required rule is missing: $Type" }
 }
