@@ -28,7 +28,16 @@ def main() -> int:
         raise ValueError("Railway API pre-deploy must run check --deploy before migrate in one command")
     if worker["build"].get("dockerfilePath") != "backend/Dockerfile.worker":
         raise ValueError("Railway worker must use the isolated worker image")
-    if worker["deploy"].get("startCommand") != "python manage.py run_postgres_worker":
+    # A startCommand overrides the image CMD and silently skips the fail-fast
+    # cache preflight, so the worker must inherit the reviewed image contract.
+    if "startCommand" in worker["deploy"]:
+        raise ValueError("Railway worker must inherit the worker image entrypoint and command")
+    worker_image = Path("backend/Dockerfile.worker").read_text(encoding="utf-8")
+    if 'ENTRYPOINT ["netra-entrypoint"]' not in worker_image:
+        raise ValueError("Railway worker must correct persistent volume ownership through the reviewed entrypoint")
+    if "maintain_storage_cache --startup &&" not in worker_image:
+        raise ValueError("Railway worker must fail closed when the encrypted Storage cache is unusable")
+    if "run_postgres_worker" not in worker_image:
         raise ValueError("Railway worker must use the PostgreSQL row-lock consumer")
 
     if vercel.get("ignoreCommand") != "node scripts/vercel-ignore-build.mjs":

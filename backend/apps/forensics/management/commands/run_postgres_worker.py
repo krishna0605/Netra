@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import threading
@@ -17,12 +18,14 @@ from apps.forensics.services.webhook_delivery import claim_next_delivery, proces
 from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import claim_next_job, mark_job_failure, renew_job_lease
 from common.quarantine_cleanup import cleanup_worker_artifacts
+from common.storage_cache import StorageCacheUnavailable, storage_cache
 from common.worker_capacity import invalidate_worker_capacity_cache
 from common.tool_capabilities import require_worker_capabilities
 
 
 class Command(BaseCommand):
     help = "Run the durable PostgreSQL-backed evidence analysis worker."
+    cache_state: dict = {}
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Claim at most one job and exit.")
@@ -35,13 +38,17 @@ class Command(BaseCommand):
             raise RuntimeError("The production worker requires postgres-worker and postgres-row-lock")
         self.capabilities = require_worker_capabilities()
         worker_id = options["worker_id"] or os.getenv("RAILWAY_REPLICA_ID") or f"{socket.gethostname()}-{uuid4().hex[:8]}"
+        self.cache_state = storage_cache.preflight()
         self._start_health_server()
         cleanup_worker_artifacts()
         last_cleanup = time.monotonic()
         self.stdout.write(f"Starting durable NETRA worker {worker_id}")
+        if not self.cache_state.get("ok"):
+            self.stderr.write(f"Encrypted Storage cache is not usable [{self.cache_state.get('code')}]")
         while True:
             if time.monotonic() - last_cleanup >= settings.NETRA_CLEANUP_INTERVAL_SECONDS:
                 cleanup_worker_artifacts()
+                self.cache_state = storage_cache.preflight()
                 last_cleanup = time.monotonic()
             job = claim_next_job(worker_id)
             self._heartbeat(worker_id, job.id if job else "")
@@ -71,6 +78,11 @@ class Command(BaseCommand):
             except Exception as exc:
                 failed = mark_job_failure(job.id, worker_id, exc)
                 self.stderr.write(f"Job {job.id} ended as {failed.status}: {failed.error_code}")
+                if isinstance(exc, StorageCacheUnavailable):
+                    # Re-probe immediately so the heartbeat and health endpoint
+                    # name the cache fault instead of reporting a healthy worker.
+                    self.cache_state = storage_cache.preflight()
+                    self.stderr.write(f"Encrypted Storage cache fault [{exc.code}]")
             finally:
                 heartbeat_stop.set()
                 heartbeat_thread.join(timeout=settings.NETRA_JOB_HEARTBEAT_SECONDS + 1)
@@ -92,6 +104,8 @@ class Command(BaseCommand):
                     "queueProvider": "postgres-row-lock",
                     "processingMode": "postgres-worker",
                     "capabilities": self.capabilities,
+                    "storageCacheOk": bool(self.cache_state.get("ok")),
+                    "storageCacheCode": self.cache_state.get("code", ""),
                 },
             },
         )
@@ -111,11 +125,11 @@ class Command(BaseCommand):
             finally:
                 close_old_connections()
 
-    @staticmethod
-    def _start_health_server() -> None:
+    def _start_health_server(self) -> None:
         port = int(os.getenv("PORT", "0"))
         if not port:
             return
+        command = self
 
         class HealthHandler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -123,7 +137,16 @@ class Command(BaseCommand):
                     self.send_response(404)
                     self.end_headers()
                     return
-                payload = b'{"status":"ok","service":"netra-worker"}'
+                state = command.cache_state or {}
+                document = {
+                    "status": "ok" if state.get("ok") else "degraded",
+                    "service": "netra-worker",
+                    "storageCache": state.get("code", ""),
+                }
+                payload = json.dumps(document, sort_keys=True).encode("utf-8")
+                # Deliberately still 200 when degraded: a failing health check
+                # makes Railway restart the worker in a loop, which destroys the
+                # log line naming the cache fault.
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))

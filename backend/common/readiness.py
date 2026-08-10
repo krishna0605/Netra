@@ -27,17 +27,20 @@ from apps.forensics.models import (
     UserProfile,
 )
 from common.custody import custody_event_dict, verify_case_ledger
-from common.storage_cache import storage_cache
+from common.storage_cache import classify_cache_failure, storage_cache
 
 
 def storage_cache_status_payload() -> dict[str, Any]:
     try:
         return {**storage_cache.status().as_dict(), "available": True}
-    except Exception:
+    except Exception as exc:
         return {
             "available": False,
             "enabled": bool(getattr(settings, "NETRA_STORAGE_CACHE_ENABLED", False)),
             "root": str(getattr(storage_cache, "root", "")),
+            # A fixed enum, never the exception text, so the cause is named
+            # without exposing filesystem detail to an API caller.
+            "code": classify_cache_failure(exc),
             "detail": "Encrypted cache metadata is temporarily unavailable.",
             "deepStorageCheckEnabled": False,
         }
