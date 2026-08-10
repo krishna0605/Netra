@@ -6,12 +6,28 @@ import { requiredMfaStep } from "./authPolicy";
 
 const profile = (role: string): NetraProfile => ({
   user: "officer@netra.test",
+  department: "Netra Test Organization",
   role,
   aal: "aal1",
   mfaPolicy: "admin_required",
   mfaEnrollmentRequired: role === "Admin",
   privilegedAdminReady: false,
   organization: { id: "org", name: "Netra", slug: "netra" },
+  capabilities: {},
+  deployment: {
+    profile: "test",
+    hostCaptureEnabled: false,
+    replayEnabled: false,
+    sensorCaptureEnabled: false,
+    modules: {
+      lab: { enabled: false, visible: false, reason: "Not used by this policy test." },
+      sensors: { enabled: false, visible: false, reason: "Not used by this policy test." },
+      schedules: { enabled: false, visible: false, reason: "Not used by this policy test." },
+      integrations: { enabled: false, visible: false, reason: "Not used by this policy test." },
+      retention: { enabled: false, visible: false, reason: "Not used by this policy test." },
+      system: { enabled: false, visible: false, reason: "Not used by this policy test." },
+    },
+  },
 });
 
 const factor: TotpFactor = {

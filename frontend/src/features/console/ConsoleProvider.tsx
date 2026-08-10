@@ -1,7 +1,6 @@
 import { API_BASE } from "./ConsoleCore";
-import { apiGet } from "./ConsoleCore";
 import { BACKGROUND_ANALYSIS_REFRESH_MS } from "./ConsoleCore";
-import { capabilityAvailable, type CapabilityMap } from "../../lib/capabilities";
+import { capabilityAvailable } from "../../lib/capabilities";
 import { createDefaultIntakeForm } from "./ConsoleCore";
 import { DEFAULT_DEPLOYMENT_ACCESS } from "./ConsoleCore";
 import { loadAnalysisData } from "./ConsoleCore";
@@ -15,13 +14,11 @@ import { type AccessLogRecord, type AlertRecord, type AnomalyRecord, type CaseRe
 import { type ActiveUploadWorkflow } from "./ConsoleCore";
 import { type ComplianceRecord } from "./ConsoleCore";
 import { type DeploymentAccess } from "./ConsoleCore";
-import { type DeploymentModuleAccess } from "./ConsoleCore";
-import { type DeploymentModuleKey } from "./ConsoleCore";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 
 export function NetraProvider({ children }: { children: ReactNode }) {
-  const { session, signOut: authSignOut } = useAuth();
+  const { state: authState, session, signOut: authSignOut } = useAuth();
   const [alertRecords, setAlertRecords] = useState<AlertRecord[]>([]);
   const [anomaliesState, setAnomaliesState] = useState<AnomalyRecord[]>([]);
   const [caseRecords, setCaseRecords] = useState<CaseRecord[]>([]);
@@ -52,7 +49,6 @@ export function NetraProvider({ children }: { children: ReactNode }) {
   const [zeekState, setZeekState] = useState<ZeekEvidence | null>(null);
   const [activeCaseId, setActiveCaseIdState] = useState<string | null>(() => window.localStorage.getItem("netra-active-case"));
   const [activeUpload, setActiveUpload] = useState<ActiveUploadWorkflow | null>(null);
-  const [deploymentAccess, setDeploymentAccess] = useState<DeploymentAccess>(DEFAULT_DEPLOYMENT_ACCESS);
   const [eventStreamAvailable, setEventStreamAvailable] = useState(
     () => document.visibilityState === "visible" && window.navigator.onLine,
   );
@@ -78,15 +74,10 @@ export function NetraProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const refreshDeploymentAccess = useCallback(async () => {
-    const payload = await apiGet<{
-      user: string;
-      department: string;
-      role: string;
-      capabilities: CapabilityMap;
-      deployment: { profile: string; hostCaptureEnabled: boolean; replayEnabled: boolean; sensorCaptureEnabled: boolean; modules: Record<DeploymentModuleKey, DeploymentModuleAccess> };
-    }>("/auth/me");
-    setDeploymentAccess({
+  const deploymentAccess = useMemo<DeploymentAccess>(() => {
+    if (!("profile" in authState)) return DEFAULT_DEPLOYMENT_ACCESS;
+    const payload = authState.profile;
+    return {
       verified: true,
       user: payload.user,
       department: payload.department,
@@ -97,8 +88,8 @@ export function NetraProvider({ children }: { children: ReactNode }) {
       sensorCaptureEnabled: payload.deployment.sensorCaptureEnabled,
       capabilities: payload.capabilities ?? {},
       modules: payload.deployment.modules,
-    });
-  }, []);
+    };
+  }, [authState]);
 
   const setActiveCaseId = useCallback((caseId: string | null) => {
     setActiveCaseIdState(caseId);
@@ -130,6 +121,11 @@ export function NetraProvider({ children }: { children: ReactNode }) {
       setActiveCaseId(data.selectedCaseId);
     }
   }, [activeCaseId, setActiveCaseId]);
+  const reloadAnalysisRef = useRef(reloadAnalysis);
+
+  useEffect(() => {
+    reloadAnalysisRef.current = reloadAnalysis;
+  }, [reloadAnalysis]);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
@@ -141,13 +137,13 @@ export function NetraProvider({ children }: { children: ReactNode }) {
     () => caseRecords.find((record) => record.id === activeCaseId)?.routeRef ?? "",
     [activeCaseId, caseRecords],
   );
+  const signedInUserId = session?.access_token ? session.user.id : "";
 
   useEffect(() => {
     const isProtectedAppRoute = window.location.pathname.startsWith("/app/") && window.location.pathname !== "/app/login";
-    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !session?.access_token)) return;
-    refreshDeploymentAccess().catch(() => setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS));
-    reloadAnalysis().catch(() => undefined);
-  }, [refreshDeploymentAccess, reloadAnalysis, session?.access_token]);
+    if (SUPABASE_AUTH_ENABLED && (!isProtectedAppRoute || !signedInUserId)) return;
+    reloadAnalysisRef.current().catch(() => undefined);
+  }, [signedInUserId]);
 
   useEffect(() => {
     if (!session?.access_token) return undefined;
@@ -177,7 +173,6 @@ export function NetraProvider({ children }: { children: ReactNode }) {
       signal: controller.signal,
       onInvalidate: scheduleRefresh,
       onUnauthorized: () => {
-        setDeploymentAccess(DEFAULT_DEPLOYMENT_ACCESS);
         void authSignOut();
       },
     });

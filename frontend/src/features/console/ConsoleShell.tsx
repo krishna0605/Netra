@@ -13,6 +13,7 @@ import { motion, MotionConfig } from "framer-motion";
 import { NetraProvider } from "./ConsoleProvider";
 import { PageFrame } from "./reports/ReportPages";
 import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicNotFoundPage, PublicPrivacyPage, PublicTermsPage, PublicUpdatesPage } from "../../public/PublicSite";
+import { RouteErrorBoundary } from "../../components/RouteErrorBoundary";
 import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { toast, Toaster } from "sonner";
 import { type DeploymentModuleKey } from "./ConsoleCore";
@@ -59,7 +60,7 @@ export function App() {
             <div className="app-theme">
               <Router>
             <Toaster position="top-right" />
-            <Suspense fallback={<main id="main-content" aria-busy="true" aria-label="Loading Netra route" />}>
+            <Suspense fallback={<RouteLoadingScreen />}>
             <Routes>
               <Route path="/" element={<PublicHomePage languageControl={<LanguageControl />} />} />
               <Route path="/about" element={<PublicAboutPage languageControl={<LanguageControl />} />} />
@@ -97,8 +98,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       <main className="auth-shell flex min-h-screen items-center justify-center px-4">
         <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
           <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
-          <h1 className="mt-2 text-2xl font-bold text-strong">Checking session</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">Verifying your secure session before opening the investigation console.</p>
+          <h1 className="mt-2 text-2xl font-bold text-strong">Checking authentication</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">Verifying your identity and assigned Netra access before opening the investigation console.</p>
         </section>
       </main>
     );
@@ -113,6 +114,27 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (state.status === "recovery") return <Navigate to="/auth/recovery" replace />;
 
   return <>{children}</>;
+}
+
+function RouteLoadingScreen() {
+  return (
+    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content" aria-busy="true">
+      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm" role="status">
+        <p className="text-sm font-semibold text-accent">Netra Secure Console</p>
+        <h1 className="mt-2 text-2xl font-bold text-strong">Opening workspace</h1>
+        <p className="mt-2 text-sm leading-6 text-muted">Loading the selected investigation view.</p>
+      </section>
+    </main>
+  );
+}
+
+function RouteLoadingPanel() {
+  return (
+    <main id="main-content" className="surface rounded-[1.5rem] p-6" aria-busy="true" role="status">
+      <h1 className="text-2xl font-normal text-strong">Opening workspace</h1>
+      <p className="mt-2 text-sm text-muted">Loading the selected investigation view.</p>
+    </main>
+  );
 }
 
 export function LoginPage() {
@@ -154,7 +176,7 @@ export function LoginPage() {
           <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
         </div>
         {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the frontend.</Alert>}
-        {checkingSession && <Alert>Checking whether this browser already has an active Netra session.</Alert>}
+        {checkingSession && <Alert>Checking authentication for this browser session.</Alert>}
         {hasSession && (
           <div className="mt-4 grid gap-3">
             <Alert>You are already signed in on this browser. Continue to the investigation console or sign out to use another officer account.</Alert>
@@ -202,7 +224,7 @@ export function ModuleRoute({ module, children }: { module: DeploymentModuleKey;
   const { deploymentAccess } = useNetra();
   const access = deploymentAccess.modules[module];
   if (!deploymentAccess.verified) {
-    return <PageFrame title="Checking access" description="Verifying your role and the active deployment profile."><div /></PageFrame>;
+    return <Navigate to={appViewRoute("upload")} replace />;
   }
   if (!access.visible) return <Navigate to={appViewRoute("upload")} replace />;
   if (!access.enabled) {
@@ -257,6 +279,7 @@ export function LegacyCaseRedirect() {
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const location = useLocation();
   return (
     <div className="min-h-screen bg-[var(--charcoal-deep)]">
       <div className="flex">
@@ -269,6 +292,8 @@ export function AppShell() {
         <div className={cn("min-w-0 flex-1 transition-[padding] duration-300", sidebarCollapsed ? "lg:pl-20" : "lg:pl-72")}>
           <TopBar />
           <div className="app-main-canvas p-4 sm:p-6">
+            <RouteErrorBoundary resetKey={location.pathname}>
+            <Suspense fallback={<RouteLoadingPanel />}>
             <Routes>
               <Route index element={<Navigate to={appViewRoute("upload")} replace />} />
               <Route path="v/:viewRef" element={<OpaqueViewRoute />} />
@@ -308,6 +333,8 @@ export function AppShell() {
               <Route path="integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />
               <Route path="retention" element={<Navigate to={appViewRoute("retention")} replace />} />
             </Routes>
+            </Suspense>
+            </RouteErrorBoundary>
           </div>
         </div>
       </div>

@@ -1,15 +1,26 @@
 import { createContext, useContext } from "react";
 import type { Session } from "@supabase/supabase-js";
+import type { CapabilityMap } from "../../lib/capabilities";
 
+type DeploymentModuleAccess = { enabled: boolean; visible: boolean; reason: string };
 
 export type NetraProfile = {
   user: string;
+  department: string;
   role: string;
   aal: "aal1" | "aal2";
   mfaPolicy: "admin_required" | "optional";
   mfaEnrollmentRequired: boolean;
   privilegedAdminReady: boolean;
   organization: { id: string; name: string; slug: string };
+  capabilities: CapabilityMap;
+  deployment: {
+    profile: string;
+    hostCaptureEnabled: boolean;
+    replayEnabled: boolean;
+    sensorCaptureEnabled: boolean;
+    modules: Record<"lab" | "sensors" | "schedules" | "integrations" | "retention" | "system", DeploymentModuleAccess>;
+  };
 };
 
 export type TotpFactor = {

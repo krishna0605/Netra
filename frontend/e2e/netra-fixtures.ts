@@ -60,6 +60,7 @@ function profile(role: Role, aal: Aal, enrollmentRequired: boolean) {
   const moduleAccess = { enabled: true, visible: true, reason: "Available in the browser fixture." };
   return {
     user: "Synthetic Officer",
+    department: "Netra Test Organization",
     role,
     aal,
     mfaPolicy: "admin_required",
@@ -113,6 +114,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 export async function installNetraFixture(page: Page, options: { role: Role; aal: Aal; verifiedFactor: boolean; enrollmentRequired?: boolean }) {
   const storedSession = session(options.aal, options.verifiedFactor);
+  let authMeRequests = 0;
   await page.addInitScript((value) => {
     window.sessionStorage.setItem("sb-netra-auth-auth-token", JSON.stringify(value));
   }, storedSession);
@@ -146,6 +148,7 @@ export async function installNetraFixture(page: Page, options: { role: Role; aal
     const url = new URL(route.request().url());
     const path = url.pathname.replace(/^\/api/, "");
     if (path === "/auth/me") {
+      authMeRequests += 1;
       await fulfillJson(route, profile(options.role, options.aal, options.enrollmentRequired ?? false));
       return;
     }
@@ -167,10 +170,15 @@ export async function installNetraFixture(page: Page, options: { role: Role; aal
     }
     await fulfillJson(route, { results: [] });
   });
+  return { authMeRequests: () => authMeRequests };
 }
 
 export const fixtureRoutes = {
   cases: "/app/v/14e61a2b-40b2-4c73-bd5c-d75b832322ad",
   analysis: "/app/v/7cab94c3-622f-46b0-b3e4-7e8ea6df0831",
+  activity: "/app/v/1310f49a-114e-4c91-ae05-587c23f65dc9",
+  evidence: "/app/v/1b438ac1-72e9-4413-a28d-cc87ea35ab54",
+  reports: "/app/v/dca32a39-8348-4f14-b62a-fdba9987e234",
+  settings: "/app/v/4c1bed57-4a3b-4c98-a7ee-778b5500eb91",
   admin: "/app/admin/users",
 };
