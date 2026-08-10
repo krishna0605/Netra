@@ -149,7 +149,9 @@ try {
         "DeleteCandidate" {
             if (-not $CandidateTag) { throw "-CandidateTag is required." }
             Invoke-Git push origin ":refs/tags/${CandidateTag}" | Out-Null
-            Invoke-Git tag -d $CandidateTag | Out-Null
+            # Use the long option because PowerShell can consume `-d` as the
+            # function's common `-Debug` parameter before Git receives it.
+            Invoke-Git tag --delete $CandidateTag | Out-Null
             Write-Host "Deleted temporary candidate tag $CandidateTag."
         }
     }
