@@ -4,12 +4,24 @@
 # unprivileged cannot repair that mount, and every cache write then fails with
 # PermissionError. So the container starts as root, corrects the mount, and drops
 # to the unprivileged runtime user before any application code runs.
+#
+# This entrypoint belongs only on the worker image, which is the service that
+# mounts the volume. It must reproduce the environment a `USER 10001:10001`
+# directive would have produced -- same uid, same gid, same supplementary
+# groups, and the same HOME. Dropping privileges without restoring HOME leaves
+# it pointing at root's home, which the runtime user cannot even read.
 set -eu
 
 NETRA_UID=10001
 NETRA_GID=10001
 STORAGE_ROOT="${NETRA_STORAGE_ROOT:-/app/storage}"
 TEMP_ROOT="${NETRA_TEMP_ROOT:-/app/.netra-tmp}"
+
+# Resolve HOME from the passwd database rather than assuming a path, so this
+# keeps matching the image if the account is ever moved.
+NETRA_HOME="$(getent passwd "$NETRA_UID" | cut -d: -f6)"
+[ -n "$NETRA_HOME" ] || NETRA_HOME=/home/netra
+export HOME="$NETRA_HOME"
 
 if [ "$(id -u)" = "0" ]; then
     for directory in "$STORAGE_ROOT" "$TEMP_ROOT"; do
@@ -20,7 +32,9 @@ if [ "$(id -u)" = "0" ]; then
             chown -R "${NETRA_UID}:${NETRA_GID}" "$directory"
         fi
     done
-    exec setpriv --reuid="$NETRA_UID" --regid="$NETRA_GID" --clear-groups "$@"
+    # --init-groups mirrors the supplementary groups a USER directive grants.
+    # --clear-groups would drop them and is not equivalent.
+    exec setpriv --reuid="$NETRA_UID" --regid="$NETRA_GID" --init-groups "$@"
 fi
 
 # Already unprivileged, for example because RAILWAY_RUN_UID pinned the user.
