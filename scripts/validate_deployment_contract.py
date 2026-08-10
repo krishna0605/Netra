@@ -23,10 +23,9 @@ def main() -> int:
     }:
         raise ValueError("Railway API must build only from the reviewed API Docker contract")
     if api["deploy"].get("preDeployCommand") != [
-        "python manage.py check --deploy",
-        "python manage.py migrate --noinput",
+        "python manage.py check --deploy && python manage.py migrate --noinput",
     ]:
-        raise ValueError("Railway API pre-deploy must contain only check --deploy and migrate")
+        raise ValueError("Railway API pre-deploy must run check --deploy before migrate in one command")
     if worker["build"].get("dockerfilePath") != "backend/Dockerfile.worker":
         raise ValueError("Railway worker must use the isolated worker image")
     if worker["deploy"].get("startCommand") != "python manage.py run_postgres_worker":
