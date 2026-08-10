@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 460 260" width="460" height="260" role="img" aria-label="Netra lockup: the Netra mark draws itself beside the NETRA wordmark and the line network evidence, total response, assured, above three capability rows for seal, decode and report.">
+  <title>Netra — network evidence. total response. assured.</title>
+  <desc>The Netra wordmark lockup. Vector artwork is taken verbatim from frontend/public/brand/netra-wordmark-full.svg; only the strapline is re-typeset because the original uses a font that is unavailable to remote renderers.</desc>
+
+  <defs>
+    <!-- highlight that sweeps the wordmark; coordinates are in the brand artboard space -->
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="-520" y1="0" x2="-220" y2="0">
+      <stop offset="0" stop-color="#fa6c34" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#fa6c34" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fa6c34" stop-opacity="0"/>
+      <animate attributeName="x1" values="-520;-520;2420;2420" keyTimes="0;0.30;0.64;1" dur="7s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values="-220;-220;2720;2720" keyTimes="0;0.30;0.64;1" dur="7s" repeatCount="indefinite"/>
+    </linearGradient>
+
+    <radialGradient id="markHalo" gradientUnits="userSpaceOnUse" cx="60" cy="58" r="78">
+      <stop offset="0" stop-color="#fa6c34" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#fa6c34" stop-opacity="0"/>
+    </radialGradient>
+
+    <style>
+      .mono {
+        font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+      }
+      .strap  { fill: #10110F; font-size: 10.5px; letter-spacing: 3.22px; }
+      .rowKey { fill: #10110F; font-size: 11.5px; letter-spacing: 2.2px; }
+      .rowVal { fill: #10110F; fill-opacity: 0.6; font-size: 9.5px; letter-spacing: 0.9px; }
+      .foot   { fill: #10110F; fill-opacity: 0.48; font-size: 9px; letter-spacing: 1.6px; }
+      .rule   { stroke: #10110F; stroke-opacity: 0.14; }
+
+      .markStroke {
+        fill: none;
+        stroke: #fa6c34;
+        stroke-width: 1.8;
+        vector-effect: non-scaling-stroke;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+        stroke-dasharray: 100;
+        stroke-dashoffset: 100;
+        animation: markTrace 7s ease-in-out infinite;
+      }
+      /* the mark itself never disappears; the orange stroke only traces over it */
+      @keyframes markTrace {
+        0%   { stroke-dashoffset: 100; opacity: 1; }
+        26%  { stroke-dashoffset: 0;   opacity: 1; }
+        48%  { stroke-dashoffset: 0;   opacity: 0; }
+        100% { stroke-dashoffset: 0;   opacity: 0; }
+      }
+
+      .markFill { fill: #10110F; }
+
+      .pip { fill: #fa6c34; animation: pipPulse 2.4s ease-in-out infinite; }
+      @keyframes pipPulse {
+        0%, 100% { opacity: 0.22; }
+        16%      { opacity: 1; }
+        46%      { opacity: 0.3; }
+      }
+      .pip2 { animation-delay: -0.8s; }
+      .pip3 { animation-delay: -1.6s; }
+    </style>
+
+    <!-- E T R A letterforms, verbatim from netra-wordmark-full.svg (fill applied by each <use>) -->
+    <g id="letters">
+      <rect x="542.13" y="103.24" width="329.56" height="57.62"/>
+      <rect x="542.13" y="335.5" width="329.56" height="57.62"/>
+      <rect x="542.13" y="220.59" width="307.55" height="54.93"/>
+      <polygon points="1028.88,103.57 1028.88,160.94 1167.59,160.94 1167.59,391.24 1226.59,391.24 1226.59,160.61 1365.45,160.61 1365.45,103.57"/>
+      <path d="M1519.31,104.07v56.6h238.37c18.29,3.75,33.13,10.49,33.68,36.98c-1.12,28.44-14.74,30.95-33.07,34.72h-238.98v159.89h61.61V291.89h147.42l66.38,102.31h72.24l-72.49-109.28c35.1-19.21,59.33-45.51,58.55-88.13c-1.2-44.94-25.22-88.95-84.59-92.72L1519.31,104.07z"/>
+      <polygon points="1966.17,394.2 2044.08,394.2 2179.52,210.52 2318.06,394.2 2391.73,394.2 2180.58,103.11"/>
+      <path d="M2180.17,311.73l-60.79,82.47h118.65C2238.03,394.2,2179.84,311.73,2180.17,311.73z"/>
+    </g>
+  </defs>
+
+  <!-- card -->
+  <rect x="0.75" y="0.75" width="458.5" height="258.5" rx="20" fill="#f0e8da" stroke="#10110F" stroke-opacity="0.16"/>
+  <circle cx="60" cy="58" r="78" fill="url(#markHalo)"/>
+
+  <!-- Netra wordmark: vector artwork verbatim from netra-wordmark-full.svg -->
+  <g transform="translate(27.469 16.646) scale(0.168302)">
+    <!-- the N mark traces itself, then settles into the brand fill -->
+    <polygon class="markFill" points="74.36,391.73 15.04,391.73 15.04,103.24 306.78,283.67 306.78,104.22 366.11,104.22 366.11,392.54 74.68,211.78"/>
+    <polygon class="markStroke" pathLength="100" points="74.36,391.73 15.04,391.73 15.04,103.24 306.78,283.67 306.78,104.22 366.11,104.22 366.11,392.54 74.68,211.78"/>
+
+    <!-- E T R A in the brand fill, then the same letterforms tinted by the travelling highlight -->
+    <use href="#letters" xlink:href="#letters" fill="#10110F"/>
+    <use href="#letters" xlink:href="#letters" fill="url(#sweep)"/>
+  </g>
+
+  <!-- strapline -->
+  <text class="mono strap" x="30" y="101">NETWORK EVIDENCE<tspan fill="#fa6c34">.</tspan> TOTAL RESPONSE<tspan fill="#fa6c34">.</tspan> ASSURED<tspan fill="#fa6c34">.</tspan></text>
+
+  <line class="rule" x1="30" y1="118" x2="430" y2="118"/>
+
+  <!-- capability rows -->
+  <g>
+    <rect class="pip" x="30" y="133" width="9" height="9" rx="2.5"/>
+    <text class="mono rowKey" x="48" y="142">SEAL</text>
+    <text class="mono rowVal" x="120" y="142">hash · encrypt · custody</text>
+    <rect x="352" y="136.5" width="78" height="3" rx="1.5" fill="#10110F" fill-opacity="0.12"/>
+    <rect y="136.5" width="22" height="3" rx="1.5" fill="#fa6c34">
+      <animate attributeName="x" values="352;408;352" dur="3.2s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <g>
+    <rect class="pip pip2" x="30" y="165" width="9" height="9" rx="2.5"/>
+    <text class="mono rowKey" x="48" y="174">DECODE</text>
+    <text class="mono rowVal" x="120" y="174">TShark · Zeek · sandboxed</text>
+    <rect x="352" y="168.5" width="78" height="3" rx="1.5" fill="#10110F" fill-opacity="0.12"/>
+    <rect y="168.5" width="22" height="3" rx="1.5" fill="#fa6c34">
+      <animate attributeName="x" values="352;408;352" dur="3.2s" begin="-1.05s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <g>
+    <rect class="pip pip3" x="30" y="197" width="9" height="9" rx="2.5"/>
+    <text class="mono rowKey" x="48" y="206">REPORT</text>
+    <text class="mono rowVal" x="120" y="206">reviewed findings · exports</text>
+    <rect x="352" y="200.5" width="78" height="3" rx="1.5" fill="#10110F" fill-opacity="0.12"/>
+    <rect y="200.5" width="22" height="3" rx="1.5" fill="#fa6c34">
+      <animate attributeName="x" values="352;408;352" dur="3.2s" begin="-2.1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- footer -->
+  <line class="rule" x1="30" y1="222" x2="430" y2="222"/>
+  <text class="mono foot" x="30" y="241">CONTROLLED DEMONSTRATION · SYNTHETIC DATA</text>
+  <text class="mono foot" x="430" y="241" text-anchor="end">DEFENSIVE USE</text>
+</svg>
