@@ -3,7 +3,38 @@
   "@id": "https://github.com/krishna0605/Netra/security/vex/phase7",
   "author": "Netra security maintainers",
   "role": "Document Creator",
-  "timestamp": "2026-08-09T00:00:00Z",
-  "version": 1,
-  "statements": []
+  "timestamp": "2026-08-10T06:20:00Z",
+  "version": 2,
+  "statements": [
+    {
+      "vulnerability": { "name": "GHSA-vj7q-gjh5-988w" },
+      "products": [{ "@id": "pkg:pypi/mcp@1.23.3" }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "MCP is present only as a transitive dependency of the Semgrep development scanner. Netra does not import or expose the deprecated MCP WebSocket server transport.",
+      "action_statement": "Upgrade Semgrep and MCP when Semgrep permits MCP 1.28.1 or newer; owner: Netra security maintainers.",
+      "timestamp": "2026-08-10T06:20:00Z",
+      "expires": "2026-09-09T06:20:00Z"
+    },
+    {
+      "vulnerability": { "name": "GHSA-jpw9-pfvf-9f58" },
+      "products": [{ "@id": "pkg:pypi/mcp@1.23.3" }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "MCP is present only as a transitive dependency of the Semgrep development scanner. Netra does not run an MCP HTTP or SSE server and does not use MCP session authentication.",
+      "action_statement": "Upgrade Semgrep and MCP when Semgrep permits MCP 1.27.2 or newer; owner: Netra security maintainers.",
+      "timestamp": "2026-08-10T06:20:00Z",
+      "expires": "2026-09-09T06:20:00Z"
+    },
+    {
+      "vulnerability": { "name": "GHSA-hvrp-rf83-w775" },
+      "products": [{ "@id": "pkg:pypi/mcp@1.23.3" }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "MCP is present only as a transitive dependency of the Semgrep development scanner. Netra never enables or executes MCP experimental task support.",
+      "action_statement": "Upgrade Semgrep and MCP when Semgrep permits MCP 1.27.2 or newer; owner: Netra security maintainers.",
+      "timestamp": "2026-08-10T06:20:00Z",
+      "expires": "2026-09-09T06:20:00Z"
+    }
+  ]
 }
