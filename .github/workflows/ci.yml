@@ -36,6 +36,10 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/ml-services/anomaly-engine
           NETRA_TEST_SQLITE: "1"
+          # RLIMIT_NPROC counts every process owned by the shared hosted-runner
+          # user, not only Netra's parser child. Keep this CI-only ceiling
+          # finite while the dedicated production worker retains its limit of 16.
+          NETRA_PARSER_MAX_PROCESSES: "256"
         run: |
           python manage.py test apps.forensics.tests
           python manage.py makemigrations --check --dry-run
