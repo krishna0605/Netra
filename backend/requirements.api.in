@@ -3,7 +3,7 @@ djangorestframework==3.15.2
 djangorestframework-simplejwt==5.5.1
 psycopg[binary]==3.2.12
 dj-database-url==2.3.0
-elasticsearch==8.17.1
+elasticsearch==9.5.0
 kafka-python==2.3.2
 gunicorn==23.0.0
 cryptography==50.0.0
