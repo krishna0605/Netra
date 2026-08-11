@@ -3,10 +3,10 @@ import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { Badge, Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Td, Th } from "../components/ui/primitives";
+import { Avatar, Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { MfaBadge, PageBody, PageHeader, RoleBadge, UserStatusBadge } from "../components/common";
 import { ROLE_BY_SLUG, USERS } from "../data/mock";
-import { relativeLabel } from "../lib/utils";
+import { initials, relativeLabel } from "../lib/utils";
 
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
 
@@ -27,16 +27,15 @@ export function UsersPage() {
     });
   }, [query, role, status, mfaGapOnly]);
 
-  const ownerCount = USERS.filter((user) => user.isOwner).length;
   const pending = USERS.filter((user) => user.status === "invited").length;
 
   return (
     <>
       <PageHeader
         title="Users"
-        summary={`${USERS.length} accounts · ${ownerCount} owner · ${pending} pending invites`}
+        summary={`${USERS.length} accounts · ${pending} awaiting acceptance`}
         action={
-          <Button variant="primary" size="sm" onClick={() => toast("Invite user", { description: "Provisioning is phase 2 — this preview has no backend attached." })}>
+          <Button variant="primary" size="sm" onClick={() => toast("Invitation panel", { description: "Choose a role and send an invitation." })}>
             <UserPlus className="size-3.5" strokeWidth={2} aria-hidden="true" />
             Invite user
           </Button>
@@ -44,20 +43,20 @@ export function UsersPage() {
       />
 
       <PageBody>
-        <Panel className="flex flex-wrap items-center gap-2 px-3 py-2.5">
-          <div className="relative min-w-[13rem] flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-sand-muted/60" strokeWidth={1.75} aria-hidden="true" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[15rem] flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/50" strokeWidth={1.75} aria-hidden="true" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search name or email"
-              className="pl-8"
+              className="pl-9"
               aria-label="Search users"
             />
           </div>
 
           <NativeSelect value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by role">
-            <option value="all">Role: all</option>
+            <option value="all">All roles</option>
             {[...ROLE_BY_SLUG.values()].map((entry) => (
               <option key={entry.slug} value={entry.slug}>
                 {entry.name}
@@ -66,22 +65,17 @@ export function UsersPage() {
           </NativeSelect>
 
           <NativeSelect value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="Filter by status">
-            <option value="all">Status: all</option>
+            <option value="all">All statuses</option>
             <option value="active">Active</option>
             <option value="invited">Invited</option>
             <option value="locked_out">Locked out</option>
             <option value="deactivated">Deactivated</option>
           </NativeSelect>
 
-          <Button
-            variant={mfaGapOnly ? "primary" : "outline"}
-            size="md"
-            onClick={() => setMfaGapOnly((value) => !value)}
-            aria-pressed={mfaGapOnly}
-          >
-            MFA gaps only
+          <Button variant={mfaGapOnly ? "primary" : "outline"} onClick={() => setMfaGapOnly((value) => !value)} aria-pressed={mfaGapOnly}>
+            Missing authenticator
           </Button>
-        </Panel>
+        </div>
 
         <Panel>
           {rows.length === 0 ? (
@@ -94,19 +88,22 @@ export function UsersPage() {
                     <Th>User</Th>
                     <Th>Role</Th>
                     <Th>Status</Th>
-                    <Th>MFA</Th>
+                    <Th>Authenticator</Th>
                     <Th>Denied 24h</Th>
                     <Th>Last activity</Th>
-                    <Th className="w-10" />
+                    <Th className="w-12" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((user) => (
-                    <tr key={user.id} className="transition-colors hover:bg-cream-primary/4">
+                    <tr key={user.id} className="group transition-colors hover:bg-cream-primary/4">
                       <Td>
-                        <Link to={`/users/${user.id}`} className="group block min-w-0">
-                          <span className="block text-sm font-medium text-cream-bright group-hover:text-signal">{user.name}</span>
-                          <span className="block font-mono text-[11px] text-sand-muted/70">{user.email}</span>
+                        <Link to={`/users/${user.id}`} className="flex min-w-0 items-center gap-3">
+                          <Avatar initials={initials(user.name)} tone={user.isOwner ? "accent" : "neutral"} />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-cream-bright group-hover:text-signal">{user.name}</span>
+                            <span className="block truncate font-mono text-xs text-sand-muted/70">{user.email}</span>
+                          </span>
                         </Link>
                       </Td>
                       <Td>
@@ -115,9 +112,9 @@ export function UsersPage() {
                           {user.permissions
                             .filter((permission) => permission.source === "granted")
                             .map((permission) => (
-                              <Badge key={permission.key} tone="accent">
+                              <Tag key={permission.key} tone="accent" mono>
                                 +{permission.key}
-                              </Badge>
+                              </Tag>
                             ))}
                         </div>
                       </Td>
@@ -129,18 +126,18 @@ export function UsersPage() {
                       </Td>
                       <Td>
                         {user.deniedLast24h > 0 ? (
-                          <span className="font-mono text-xs text-state-crit">{user.deniedLast24h}</span>
+                          <span className="font-mono text-[13px] text-state-crit">{user.deniedLast24h}</span>
                         ) : (
-                          <span className="font-mono text-xs text-sand-muted/50">—</span>
+                          <span className="font-mono text-[13px] text-sand-muted/40">0</span>
                         )}
                       </Td>
-                      <Td className="font-mono text-xs whitespace-nowrap text-sand-muted">
-                        {user.lastActivityAt ? relativeLabel(user.lastActivityAt) : "Not yet"}
+                      <Td className="text-[13px] whitespace-nowrap text-sand-muted">
+                        {user.lastActivityAt ? relativeLabel(user.lastActivityAt) : "—"}
                       </Td>
                       <Td>
                         <Link
                           to={`/users/${user.id}`}
-                          className="grid size-7 place-items-center text-sand-muted/60 hover:text-signal"
+                          className="grid size-7 place-items-center rounded-control text-sand-muted/50 transition-colors hover:text-signal"
                           aria-label={`Open ${user.name}`}
                         >
                           <ChevronRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
@@ -153,10 +150,6 @@ export function UsersPage() {
             </TableWrap>
           )}
         </Panel>
-
-        <p className="font-mono text-[11px] text-sand-muted/60">
-          Showing {rows.length} of {USERS.length}. Department and contact details live on the detail page — this view stays scannable.
-        </p>
       </PageBody>
     </>
   );

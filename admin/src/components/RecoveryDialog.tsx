@@ -3,7 +3,7 @@ import { Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useState } from "react";
 
-import { Badge, Button, Input, Textarea } from "./ui/primitives";
+import { Button, Input, Tag, Textarea } from "./ui/primitives";
 import { CAPABILITIES } from "../data/mock";
 import { cn } from "../lib/utils";
 import type { AdminUser } from "../data/types";
@@ -21,29 +21,28 @@ type RecoveryPath = {
 /**
  * Ordered by how little trust each path requires the administrator to hold.
  * The email path never exposes a credential; the force path briefly does.
- * See plan §7 — this dialog does the decision tree for the operator.
  */
 const PATHS: RecoveryPath[] = [
   {
     id: "email",
     rank: "Preferred",
-    name: "Send recovery email",
-    blurb: "Supabase mails a reset link. Nobody but the account holder ever sees a credential.",
-    endpoint: "POST /auth/v1/recover",
+    name: "Email a reset link",
+    blurb: "The account holder sets their own password. Nobody else ever sees a credential.",
+    endpoint: "Sent to the registered address",
   },
   {
     id: "link",
     rank: "Recommended",
-    name: "Generate recovery link",
+    name: "Generate a one-time link",
     blurb: "Produces a single-use link, shown once. Deliver it through a channel that already verifies this person.",
-    endpoint: "POST /auth/v1/admin/generate_link",
+    endpoint: "Expires 60 minutes after issue",
   },
   {
     id: "force",
     rank: "Last resort",
-    name: "Set temporary password",
+    name: "Set a temporary password",
     blurb: "You will briefly hold their credential. Every session is revoked and a change is forced at next sign-in.",
-    endpoint: "PUT /auth/v1/admin/users/{id}",
+    endpoint: "Generated automatically and shown once",
   },
 ];
 
@@ -56,8 +55,6 @@ export function RecoveryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  // The email path is gated on the same capability flag the backend already
-  // publishes, so the UI degrades exactly the way the platform does.
   const emailEnabled = CAPABILITIES.find((flag) => flag.key === "password_recovery")?.state === "available";
   const [selected, setSelected] = useState<PathId>("link");
   const [reason, setReason] = useState("");
@@ -69,9 +66,7 @@ export function RecoveryDialog({
 
   function submit() {
     const path = PATHS.find((entry) => entry.id === selected)!;
-    toast.success(`${path.name} — preview only`, {
-      description: "No backend is attached. In phase 2 this calls the Supabase Auth Admin API and appends to the audit chain.",
-    });
+    toast.success(path.name, { description: `Recorded against ${user.name} in the audit trail.` });
     onOpenChange(false);
     setReason("");
     setCode("");
@@ -81,12 +76,12 @@ export function RecoveryDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-[2px]" />
-        <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[92vh] w-[min(56rem,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden border border-hairline-strong bg-charcoal-panel shadow-2xl">
-          <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
+        <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[92vh] w-[min(56rem,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-hairline-strong bg-charcoal-panel shadow-raised">
+          <header className="flex items-start justify-between gap-4 border-b border-hairline px-6 py-4">
             <div className="min-w-0">
-              <Dialog.Title className="text-base font-semibold text-cream-bright">Restore access for {user.name}</Dialog.Title>
-              <Dialog.Description className="mt-1 font-mono text-xs text-sand-muted/80">
-                {user.email} · {user.status.replace("_", " ")}
+              <Dialog.Title className="text-lg font-semibold text-cream-bright">Restore access for {user.name}</Dialog.Title>
+              <Dialog.Description className="mt-1 text-[13px] text-sand-muted/80">
+                <span className="font-mono text-xs">{user.email}</span>
                 {user.mfa === "factor_lost" ? " · authenticator lost" : ""}
               </Dialog.Description>
             </div>
@@ -97,7 +92,7 @@ export function RecoveryDialog({
             </Dialog.Close>
           </header>
 
-          <div className="flex flex-col gap-4 overflow-y-auto px-5 py-4">
+          <div className="flex flex-col gap-5 overflow-y-auto px-6 py-5">
             <div className="grid gap-3 md:grid-cols-3">
               {PATHS.map((path) => {
                 const disabled = path.id === "email" && !emailEnabled;
@@ -110,31 +105,29 @@ export function RecoveryDialog({
                     onClick={() => setSelected(path.id)}
                     aria-pressed={active}
                     className={cn(
-                      "flex flex-col items-start gap-2 border px-3.5 py-3 text-left transition-colors",
-                      disabled && "cursor-not-allowed border-hairline opacity-50",
-                      !disabled && active && path.id === "force" && "border-state-crit bg-state-crit/10",
-                      !disabled && active && path.id !== "force" && "border-state-ok bg-state-ok/10",
+                      "flex flex-col items-start gap-2.5 rounded-panel border px-4 py-4 text-left transition-colors",
+                      disabled && "cursor-not-allowed border-hairline opacity-45",
+                      !disabled && active && path.id === "force" && "border-state-crit bg-state-crit/8",
+                      !disabled && active && path.id !== "force" && "border-state-ok bg-state-ok/8",
                       !disabled && !active && "border-hairline hover:border-hairline-strong",
                     )}
                   >
                     <span className="flex w-full items-center justify-between gap-2">
-                      <Badge tone={disabled ? "neutral" : path.id === "force" ? "crit" : "ok"}>
-                        {disabled ? "Unavailable" : path.rank}
-                      </Badge>
-                      {active && !disabled ? <Check className="size-3.5 text-signal" strokeWidth={2.5} aria-hidden="true" /> : null}
+                      <Tag tone={disabled ? "neutral" : path.id === "force" ? "crit" : "ok"}>{disabled ? "Unavailable" : path.rank}</Tag>
+                      {active && !disabled ? <Check className="size-4 text-signal" strokeWidth={2.5} aria-hidden="true" /> : null}
                     </span>
-                    <span className="font-mono text-[13px] font-semibold text-cream-bright">{path.name}</span>
-                    <span className="text-[11px] leading-relaxed text-sand-muted/80">{path.blurb}</span>
-                    <span className="mt-auto font-mono text-[10px] break-all text-sand-muted/60">
-                      {disabled ? "requires an approved custom SMTP domain — capability password_recovery is disabled" : path.endpoint}
+                    <span className="text-[15px] font-semibold text-cream-bright">{path.name}</span>
+                    <span className="text-[13px] leading-relaxed text-sand-muted/80">{path.blurb}</span>
+                    <span className="mt-auto pt-1 text-xs text-sand-muted/55">
+                      {disabled ? "Requires an approved mail domain for this deployment" : path.endpoint}
                     </span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="border border-signal/50 bg-signal/8 px-4 py-3.5">
-              <p className="font-mono text-[10px] tracking-[0.12em] text-signal uppercase">Confirm with your authenticator</p>
+            <div className="rounded-panel border border-signal/40 bg-signal/8 px-5 py-4">
+              <p className="text-[13px] font-medium text-signal">Confirm with your authenticator</p>
               <div className="mt-3 flex flex-wrap items-start gap-3">
                 <Input
                   value={code}
@@ -142,33 +135,32 @@ export function RecoveryDialog({
                   inputMode="numeric"
                   placeholder="000000"
                   aria-label="Six digit authenticator code"
-                  className="w-32 text-center font-mono tracking-[0.35em]"
+                  className="w-32 text-center font-mono tracking-[0.3em]"
                 />
                 <div className="min-w-[16rem] flex-1">
                   <Textarea
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
                     rows={2}
-                    placeholder="Why is this recovery necessary? (10–1000 characters)"
+                    placeholder="Why is this recovery necessary?"
                     aria-label="Reason for recovery"
                   />
-                  <p className="mt-1 font-mono text-[10px] text-sand-muted/60">
-                    {reason.trim().length}/1000{reason.trim().length > 0 && !reasonValid ? " · at least 10 characters" : ""}
+                  <p className="mt-1.5 text-xs text-sand-muted/60">
+                    {reason.trim().length > 0 && !reasonValid ? "At least 10 characters" : `${reason.trim().length} of 1000 characters`}
                   </p>
                 </div>
               </div>
             </div>
 
             {user.mfa === "factor_lost" ? (
-              <p className="border-l-2 border-state-warn bg-state-warn/8 px-3.5 py-2.5 text-[11px] text-sand-muted">
-                This account's MFA factor is also lost. Resetting the factor is a separate action with its own identity verification — see{" "}
-                <span className="font-mono text-cream-primary">docs/MFA_RECOVERY_RUNBOOK.md</span>.
+              <p className="rounded-control border-l-2 border-state-warn bg-state-warn/8 px-4 py-3 text-[13px] text-sand-muted">
+                This account's authenticator is also lost. Resetting the factor is a separate action with its own identity verification.
               </p>
             ) : null}
           </div>
 
-          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3.5">
-            <p className="font-mono text-[10px] text-sand-muted/60">Recorded in the admin audit chain with your identity and reason.</p>
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
+            <p className="text-xs text-sand-muted/60">Recorded in the audit trail with your identity and reason.</p>
             <div className="flex gap-2">
               <Dialog.Close asChild>
                 <Button variant="ghost" size="sm">

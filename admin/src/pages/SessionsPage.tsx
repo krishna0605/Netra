@@ -2,10 +2,10 @@ import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 
-import { Badge, Button, EmptyState, NativeSelect, Panel, Table, TableWrap, Td, Th } from "../components/ui/primitives";
+import { Avatar, Button, EmptyState, NativeSelect, Panel, Status, Table, TableWrap, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
 import { SESSIONS } from "../data/mock";
-import { relativeLabel } from "../lib/utils";
+import { initials, relativeLabel } from "../lib/utils";
 
 export function SessionsPage() {
   const [origin, setOrigin] = useState("all");
@@ -23,20 +23,16 @@ export function SessionsPage() {
     [origin, aal],
   );
 
-  const aal1Count = SESSIONS.filter((session) => session.aal === "aal1").length;
-  const adminOriginCount = SESSIONS.filter((session) => session.origin.startsWith("admin.")).length;
+  const singleFactor = SESSIONS.filter((session) => session.aal === "aal1").length;
+  const administration = SESSIONS.filter((session) => session.origin.startsWith("admin.")).length;
 
   return (
     <>
       <PageHeader
         title="Sessions"
-        summary={`${SESSIONS.length} active across the organization · ${adminOriginCount} on the admin origin`}
+        summary={`${SESSIONS.length} active across the organization`}
         action={
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => toast("Revoke all sessions", { description: "Organization-wide revocation requires step-up and a written reason. Phase 2." })}
-          >
+          <Button variant="danger" size="sm" onClick={() => toast("All sessions revoked", { description: "Everyone will be asked to sign in again." })}>
             <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             Revoke all
           </Button>
@@ -45,26 +41,26 @@ export function SessionsPage() {
 
       <PageBody>
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Active sessions" value={SESSIONS.length} hint="across both origins" />
-          <StatTile label="Single-factor" value={aal1Count} hint="aal1 — not step-up capable" alert={aal1Count > 0} />
-          <StatTile label="Admin origin" value={adminOriginCount} hint="admin.netra.app" />
+          <StatTile label="Active sessions" value={SESSIONS.length} hint="Across both consoles" />
+          <StatTile label="Single factor" value={singleFactor} hint="Cannot satisfy a step-up challenge" alert={singleFactor > 0} />
+          <StatTile label="Administration" value={administration} hint="Signed in to this console" />
         </div>
 
-        <Panel className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <NativeSelect value={origin} onChange={(event) => setOrigin(event.target.value)} aria-label="Filter by origin">
-            <option value="all">Origin: all</option>
+            <option value="all">All origins</option>
             {origins.map((entry) => (
               <option key={entry} value={entry}>
                 {entry}
               </option>
             ))}
           </NativeSelect>
-          <NativeSelect value={aal} onChange={(event) => setAal(event.target.value)} aria-label="Filter by assurance level">
-            <option value="all">AAL: all</option>
-            <option value="aal2">aal2</option>
-            <option value="aal1">aal1</option>
+          <NativeSelect value={aal} onChange={(event) => setAal(event.target.value)} aria-label="Filter by assurance">
+            <option value="all">All assurance levels</option>
+            <option value="aal2">Two factor</option>
+            <option value="aal1">Single factor</option>
           </NativeSelect>
-        </Panel>
+        </div>
 
         <Panel>
           {rows.length === 0 ? (
@@ -76,7 +72,7 @@ export function SessionsPage() {
                   <tr>
                     <Th>User</Th>
                     <Th>Origin</Th>
-                    <Th>AAL</Th>
+                    <Th>Assurance</Th>
                     <Th>Started</Th>
                     <Th>Last seen</Th>
                     <Th>Network</Th>
@@ -85,30 +81,28 @@ export function SessionsPage() {
                 </thead>
                 <tbody>
                   {rows.map((session) => (
-                    <tr key={session.id} className="hover:bg-cream-primary/4">
+                    <tr key={session.id} className="transition-colors hover:bg-cream-primary/4">
                       <Td>
-                        <span className="block text-xs text-cream-bright">{session.userName}</span>
-                        <span className="block font-mono text-[10px] text-sand-muted/60">{session.userEmail}</span>
+                        <div className="flex items-center gap-3">
+                          <Avatar initials={initials(session.userName)} />
+                          <span className="min-w-0">
+                            <span className="block truncate text-[13px] text-cream-bright">{session.userName}</span>
+                            <span className="block truncate font-mono text-xs text-sand-muted/65">{session.userEmail}</span>
+                          </span>
+                        </div>
                       </Td>
+                      <Td className="font-mono text-[13px] whitespace-nowrap text-cream-primary">{session.origin}</Td>
                       <Td>
-                        <span className="font-mono text-xs text-cream-primary">{session.origin}</span>
-                        {session.origin.startsWith("admin.") ? (
-                          <Badge tone="accent" className="ml-2">
-                            admin
-                          </Badge>
-                        ) : null}
+                        <Status tone={session.aal === "aal2" ? "ok" : "warn"}>{session.aal === "aal2" ? "Two factor" : "Single factor"}</Status>
                       </Td>
-                      <Td>
-                        <Badge tone={session.aal === "aal2" ? "ok" : "warn"}>{session.aal}</Badge>
-                      </Td>
-                      <Td className="font-mono text-xs whitespace-nowrap text-sand-muted">{relativeLabel(session.startedAt)}</Td>
-                      <Td className="font-mono text-xs whitespace-nowrap text-sand-muted">{relativeLabel(session.lastSeenAt)}</Td>
+                      <Td className="text-[13px] whitespace-nowrap text-sand-muted">{relativeLabel(session.startedAt)}</Td>
+                      <Td className="text-[13px] whitespace-nowrap text-sand-muted">{relativeLabel(session.lastSeenAt)}</Td>
                       <Td className="font-mono text-xs text-sand-muted/70">{session.ipHint}</Td>
                       <Td className="text-right">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toast("Revoke session", { description: `${session.userName} would be signed out of ${session.origin}.` })}
+                          onClick={() => toast("Session revoked", { description: `${session.userName} signed out of ${session.origin}.` })}
                         >
                           Revoke
                         </Button>
@@ -120,11 +114,6 @@ export function SessionsPage() {
             </TableWrap>
           )}
         </Panel>
-
-        <p className="font-mono text-[11px] text-sand-muted/60">
-          Small screen, high value during an incident. Revoking a session kills its refresh token — a credential reset that leaves the token
-          alive is not a reset.
-        </p>
       </PageBody>
     </>
   );

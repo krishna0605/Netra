@@ -8,18 +8,18 @@ import { cn } from "../../lib/utils";
    Button
    --------------------------------------------------------------------------- */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-45",
+  "inline-flex items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-40",
   {
     variants: {
       variant: {
         primary: "bg-signal text-charcoal-deep hover:bg-signal-dark",
-        outline: "border border-hairline-strong text-cream-primary hover:border-signal hover:text-signal",
+        outline: "border border-hairline-strong text-cream-primary hover:border-signal/70 hover:text-signal",
         ghost: "text-sand-muted hover:bg-cream-primary/6 hover:text-cream-bright",
-        danger: "border border-state-crit text-state-crit hover:bg-state-crit hover:text-charcoal-deep",
+        danger: "border border-state-crit/70 text-state-crit hover:bg-state-crit hover:text-charcoal-deep",
       },
       size: {
-        sm: "h-7 px-2.5 text-xs",
-        md: "h-9 px-3.5 text-sm",
+        sm: "h-8 px-3 text-[13px]",
+        md: "h-9 px-4 text-sm",
       },
     },
     defaultVariants: { variant: "outline", size: "md" },
@@ -38,35 +38,81 @@ export function Button({
 }
 
 /* ---------------------------------------------------------------------------
-   Badge — the single most-used element in this console. State is encoded in
-   colour *and* in the word, never colour alone.
+   Tag — bordered pill. Reserved for *categorical* things: roles, permission
+   keys, capability states. State (active, denied, MFA) uses <Status/> below,
+   because five bordered pills in one table row is noise.
    --------------------------------------------------------------------------- */
-const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded-xs border px-1.5 py-0.5 font-mono text-[10px] leading-4 tracking-[0.06em] uppercase whitespace-nowrap",
+const tagVariants = cva(
+  "inline-flex items-center gap-1 rounded-chip border px-1.5 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap",
   {
     variants: {
       tone: {
         neutral: "border-hairline-strong text-sand-muted",
-        accent: "border-signal/60 bg-signal/12 text-signal",
-        ok: "border-state-ok/60 bg-state-ok/12 text-state-ok",
-        warn: "border-state-warn/60 bg-state-warn/12 text-state-warn",
-        crit: "border-state-crit/60 bg-state-crit/12 text-state-crit",
-        info: "border-state-info/60 bg-state-info/12 text-state-info",
+        accent: "border-signal/50 bg-signal/10 text-signal",
+        ok: "border-state-ok/50 bg-state-ok/10 text-state-ok",
+        warn: "border-state-warn/50 bg-state-warn/10 text-state-warn",
+        crit: "border-state-crit/50 bg-state-crit/10 text-state-crit",
+        info: "border-state-info/50 bg-state-info/10 text-state-info",
       },
+      mono: { true: "font-mono text-[10.5px] tracking-[0.02em]", false: "" },
     },
-    defaultVariants: { tone: "neutral" },
+    defaultVariants: { tone: "neutral", mono: false },
   },
 );
 
-export function Badge({ className, tone, ...props }: ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
-  return <span className={cn(badgeVariants({ tone }), className)} {...props} />;
+export function Tag({ className, tone, mono, ...props }: ComponentProps<"span"> & VariantProps<typeof tagVariants>) {
+  return <span className={cn(tagVariants({ tone, mono }), className)} {...props} />;
 }
 
 /* ---------------------------------------------------------------------------
-   Panel — the standard content container
+   Status — dot plus word. Quieter than a pill and still readable without
+   colour, because the word carries the meaning on its own.
+   --------------------------------------------------------------------------- */
+const DOT: Record<string, string> = {
+  ok: "bg-state-ok",
+  warn: "bg-state-warn",
+  crit: "bg-state-crit",
+  info: "bg-state-info",
+  accent: "bg-signal",
+  neutral: "bg-sand-muted/50",
+};
+
+const DOT_TEXT: Record<string, string> = {
+  ok: "text-state-ok",
+  warn: "text-state-warn",
+  crit: "text-state-crit",
+  info: "text-state-info",
+  accent: "text-signal",
+  neutral: "text-sand-muted",
+};
+
+export function Status({
+  tone = "neutral",
+  children,
+  className,
+}: {
+  tone?: "ok" | "warn" | "crit" | "info" | "accent" | "neutral";
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 text-[13px] whitespace-nowrap", DOT_TEXT[tone], className)}>
+      <span className={cn("size-1.5 shrink-0 rounded-full", DOT[tone])} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Panel
    --------------------------------------------------------------------------- */
 export function Panel({ className, ...props }: ComponentProps<"section">) {
-  return <section className={cn("border border-hairline bg-charcoal-panel/94", className)} {...props} />;
+  return (
+    <section
+      className={cn("rounded-panel border border-hairline bg-charcoal-panel shadow-panel", className)}
+      {...props}
+    />
+  );
 }
 
 export function PanelHeader({
@@ -81,10 +127,10 @@ export function PanelHeader({
   className?: string;
 }) {
   return (
-    <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-4 py-2.5", className)}>
+    <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-3.5", className)}>
       <div className="min-w-0">
-        <h3 className="font-mono text-[11px] tracking-[0.13em] text-sand-muted uppercase">{title}</h3>
-        {hint ? <p className="mt-0.5 text-xs text-sand-muted/70">{hint}</p> : null}
+        <h3 className="text-[15px] font-semibold text-cream-bright">{title}</h3>
+        {hint ? <p className="mt-0.5 text-[13px] text-sand-muted/75">{hint}</p> : null}
       </div>
       {action}
     </header>
@@ -92,20 +138,20 @@ export function PanelHeader({
 }
 
 /* ---------------------------------------------------------------------------
-   Field — read-only labelled value, used across detail views
+   Field — labelled value. Label in Geist, value in mono only when it is data
+   you would cite: an id, an address, a hash, a timestamp.
    --------------------------------------------------------------------------- */
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children, mono = true }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
-    <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] items-baseline gap-3 py-1.5">
-      <dt className="font-mono text-[10px] tracking-[0.1em] text-sand-muted/70 uppercase">{label}</dt>
-      <dd className="min-w-0 font-mono text-xs break-words text-cream-primary">{children}</dd>
+    <div className="grid grid-cols-[9rem_minmax(0,1fr)] items-baseline gap-3 py-2">
+      <dt className="text-[13px] text-sand-muted/70">{label}</dt>
+      <dd className={cn("min-w-0 text-[13px] break-words text-cream-primary", mono && "font-mono text-xs")}>{children}</dd>
     </div>
   );
 }
 
 /* ---------------------------------------------------------------------------
-   Table shell — every list in this console shares these rules so a row means
-   the same thing everywhere.
+   Table
    --------------------------------------------------------------------------- */
 export function TableWrap({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("w-full overflow-x-auto", className)} {...props} />;
@@ -119,7 +165,7 @@ export function Th({ className, ...props }: ComponentProps<"th">) {
   return (
     <th
       className={cn(
-        "border-b border-hairline-strong bg-charcoal-deep/60 px-4 py-2 text-left font-mono text-[10px] tracking-[0.1em] whitespace-nowrap text-sand-muted/80 uppercase",
+        "border-b border-hairline px-5 py-2.5 text-left text-[12px] font-medium whitespace-nowrap text-sand-muted/70",
         className,
       )}
       {...props}
@@ -128,7 +174,7 @@ export function Th({ className, ...props }: ComponentProps<"th">) {
 }
 
 export function Td({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("border-b border-hairline px-4 py-2.5 align-middle", className)} {...props} />;
+  return <td className={cn("border-b border-hairline px-5 py-3 align-middle", className)} {...props} />;
 }
 
 /* ---------------------------------------------------------------------------
@@ -138,8 +184,8 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
   return (
     <input
       className={cn(
-        "h-9 w-full rounded-sm border border-hairline bg-charcoal-deep px-3 text-sm text-cream-primary",
-        "placeholder:text-sand-muted/50 focus:border-signal focus:outline-none",
+        "h-9 w-full rounded-control border border-hairline-strong bg-charcoal-deep px-3 text-sm text-cream-primary",
+        "placeholder:text-sand-muted/45 focus:border-signal focus:outline-none",
         className,
       )}
       {...props}
@@ -151,8 +197,8 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "w-full rounded-sm border border-hairline bg-charcoal-deep px-3 py-2 text-sm text-cream-primary",
-        "placeholder:text-sand-muted/50 focus:border-signal focus:outline-none",
+        "w-full rounded-control border border-hairline-strong bg-charcoal-deep px-3 py-2 text-sm text-cream-primary",
+        "placeholder:text-sand-muted/45 focus:border-signal focus:outline-none",
         className,
       )}
       {...props}
@@ -164,7 +210,7 @@ export function NativeSelect({ className, ...props }: ComponentProps<"select">) 
   return (
     <select
       className={cn(
-        "h-9 rounded-sm border border-hairline bg-charcoal-deep px-2.5 text-sm text-cream-primary",
+        "h-9 rounded-control border border-hairline-strong bg-charcoal-deep px-2.5 text-[13px] text-cream-primary",
         "focus:border-signal focus:outline-none",
         className,
       )}
@@ -174,13 +220,32 @@ export function NativeSelect({ className, ...props }: ComponentProps<"select">) 
 }
 
 /* ---------------------------------------------------------------------------
+   Avatar — initials block. Anchors a name visually down a long list.
+   --------------------------------------------------------------------------- */
+export function Avatar({ initials, tone = "neutral", className }: { initials: string; tone?: "neutral" | "accent"; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid size-8 shrink-0 place-items-center rounded-control border font-mono text-[11px] font-semibold",
+        tone === "accent" ? "border-signal/45 bg-signal/10 text-signal" : "border-hairline-strong bg-cream-primary/5 text-sand-muted",
+        className,
+      )}
+    >
+      {initials}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------------------
    Empty state
    --------------------------------------------------------------------------- */
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-14 text-center">
-      <p className="font-mono text-sm text-cream-primary">{title}</p>
-      {hint ? <p className="max-w-md text-xs text-sand-muted/70">{hint}</p> : null}
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+      <img src="/brand/netra-logo-mark.svg" alt="" className="size-8 opacity-15" aria-hidden="true" />
+      <p className="mt-1 text-sm text-cream-primary">{title}</p>
+      {hint ? <p className="max-w-md text-[13px] text-sand-muted/70">{hint}</p> : null}
     </div>
   );
 }

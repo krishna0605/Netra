@@ -2,96 +2,92 @@ import { ArrowLeftRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
-import { Badge, Button, Field, Input, Panel, PanelHeader } from "../components/ui/primitives";
+import { Avatar, Button, Field, Input, Panel, PanelHeader, Status, Tag } from "../components/ui/primitives";
 import { ORGANIZATION, ROLES, USERS } from "../data/mock";
 import { PageBody, PageHeader } from "../components/common";
-import { dateTimeLabel } from "../lib/utils";
+import { dateTimeLabel, initials } from "../lib/utils";
 
 export function OrganizationPage() {
   const owner = USERS.find((user) => user.id === ORGANIZATION.ownerUserId);
 
   return (
     <>
-      <PageHeader title="Organization" summary={`${ORGANIZATION.name} · ${ORGANIZATION.slug} · created ${dateTimeLabel(ORGANIZATION.createdAt)}`} />
+      <PageHeader title="Organization" summary={`${ORGANIZATION.name} · established ${dateTimeLabel(ORGANIZATION.createdAt)}`} />
 
-      <PageBody className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-5">
-        <div className="flex flex-col gap-5">
+      <PageBody className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+        <div className="flex flex-col gap-6">
           <Panel>
-            <PanelHeader title="Identity" />
-            <dl className="px-4 py-2">
-              <Field label="Name">{ORGANIZATION.name}</Field>
-              <Field label="Slug">{ORGANIZATION.slug}</Field>
-              <Field label="Organization id">{ORGANIZATION.id}</Field>
-              <Field label="Created">{dateTimeLabel(ORGANIZATION.createdAt)}</Field>
-              <Field label="Members">{USERS.length}</Field>
-              <Field label="Roles">
-                {ROLES.length} ({ROLES.filter((role) => role.isSystem).length} system)
+            <PanelHeader title="Details" />
+            <dl className="px-5 py-3">
+              <Field label="Name" mono={false}>
+                {ORGANIZATION.name}
+              </Field>
+              <Field label="Short name">{ORGANIZATION.slug}</Field>
+              <Field label="Identifier">{ORGANIZATION.id}</Field>
+              <Field label="Established">{dateTimeLabel(ORGANIZATION.createdAt)}</Field>
+              <Field label="Members" mono={false}>
+                {USERS.length} accounts across {ROLES.length} roles
               </Field>
             </dl>
           </Panel>
 
           <Panel>
-            <PanelHeader title="Limits & policy" hint="max_queued_analyses already exists on the Organization model with no UI anywhere" />
-            <div className="flex flex-col gap-4 px-4 py-4">
-              <label className="flex flex-wrap items-center gap-3">
-                <span className="min-w-[11rem] font-mono text-[10px] tracking-[0.1em] text-sand-muted/70 uppercase">Max queued analyses</span>
+            <PanelHeader title="Limits & policy" />
+            <div className="flex flex-col gap-5 px-5 py-5">
+              <label className="flex flex-wrap items-center gap-4">
+                <span className="min-w-[12rem] text-[13px] text-sand-muted/80">Concurrent analyses</span>
                 <Input defaultValue={ORGANIZATION.maxQueuedAnalyses} className="w-24" type="number" min={1} />
               </label>
-              <label className="flex flex-wrap items-center gap-3">
-                <span className="min-w-[11rem] font-mono text-[10px] tracking-[0.1em] text-sand-muted/70 uppercase">Access log retention</span>
+              <label className="flex flex-wrap items-center gap-4">
+                <span className="min-w-[12rem] text-[13px] text-sand-muted/80">Access record retention</span>
                 <Input defaultValue={ORGANIZATION.accessLogRetentionDays} className="w-24" type="number" min={30} />
-                <span className="font-mono text-[11px] text-sand-muted/60">days, then archived</span>
+                <span className="text-[13px] text-sand-muted/60">days, then archived</span>
               </label>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="min-w-[11rem] font-mono text-[10px] tracking-[0.1em] text-sand-muted/70 uppercase">MFA policy</span>
-                <Badge tone="ok">{ORGANIZATION.mfaPolicy.replace("_", " ")}</Badge>
-                <span className="font-mono text-[11px] text-sand-muted/60">set by NETRA_MFA_POLICY</span>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="min-w-[12rem] text-[13px] text-sand-muted/80">Authenticator policy</span>
+                <Status tone="ok">Required for administrators</Status>
               </div>
-              <Button
-                variant="primary"
-                size="sm"
-                className="self-start"
-                onClick={() => toast("Save settings", { description: "Writes require step-up. Phase 2." })}
-              >
+              <Button variant="primary" size="sm" className="self-start" onClick={() => toast("Settings saved")}>
                 Save changes
               </Button>
             </div>
           </Panel>
         </div>
 
-        <div className="mt-5 flex flex-col gap-5 lg:mt-0">
+        <div className="mt-6 flex flex-col gap-6 lg:mt-0">
           <Panel>
             <PanelHeader title="Owner" hint="Exactly one, transferred rather than granted" />
             {owner ? (
-              <div className="flex flex-wrap items-center gap-3 px-4 py-4">
+              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <Avatar initials={initials(owner.name)} tone="accent" />
                 <div className="min-w-0 flex-1">
-                  <Link to={`/users/${owner.id}`} className="text-sm text-cream-bright hover:text-signal">
+                  <Link to={`/users/${owner.id}`} className="text-[15px] text-cream-bright hover:text-signal">
                     {owner.name}
                   </Link>
-                  <p className="mt-0.5 font-mono text-[11px] text-sand-muted/70">{owner.email}</p>
+                  <p className="mt-0.5 font-mono text-xs text-sand-muted/70">{owner.email}</p>
                 </div>
-                <Badge tone="accent">Owner</Badge>
+                <Tag tone="accent">Owner</Tag>
               </div>
             ) : null}
-            <p className="border-t border-hairline px-4 py-2.5 text-[11px] text-sand-muted/75">
-              Ownership is separate from the Admin role. Admins administer; the owner is the single accountable identity for the
-              organization, and there is always exactly one.
+            <p className="border-t border-hairline px-5 py-3.5 text-[13px] text-sand-muted/75">
+              Ownership is separate from the administrator role. Administrators administer; the owner is the single accountable identity for
+              this organization.
             </p>
           </Panel>
 
-          <Panel className="border-state-crit/70">
-            <PanelHeader title="Transfer ownership" className="border-state-crit/40" hint="Irreversible without the new owner's cooperation" />
-            <div className="flex flex-col gap-3 px-4 py-4">
-              <p className="text-xs text-sand-muted">
-                Transferring ownership demotes the current owner to Admin and promotes the target in a single transaction. It requires a
-                fresh TOTP challenge, a written reason of 10–1000 characters, and the organization name typed exactly.
+          <Panel className="border-state-crit/45">
+            <PanelHeader title="Transfer ownership" className="border-state-crit/25" />
+            <div className="flex flex-col gap-4 px-5 py-5">
+              <p className="text-[13px] leading-relaxed text-sand-muted">
+                Transferring ownership demotes the current owner to administrator and promotes the person you choose, in a single step. It
+                requires a fresh authenticator code, a written reason, and the organization name typed exactly.
               </p>
               <Input placeholder={`Type "${ORGANIZATION.name}" to confirm`} aria-label="Confirm organization name" />
               <Button
                 variant="danger"
                 size="sm"
                 className="self-start"
-                onClick={() => toast("Transfer ownership", { description: "Runs through transfer_administrator. Phase 3." })}
+                onClick={() => toast("Confirmation required", { description: "Type the organization name exactly to continue." })}
               >
                 <ArrowLeftRight className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Transfer ownership

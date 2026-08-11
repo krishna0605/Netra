@@ -155,8 +155,10 @@ export type OrganizationSettings = {
 
 export type OverviewSummary = {
   activeUsers: number;
+  activeUsersTrend: number[];
   newUsersThisWeek: number;
   deniedLast24h: number;
+  deniedTrend: number[];
   deniedTopActor: string;
   mfaEnrolled: number;
   mfaTotal: number;

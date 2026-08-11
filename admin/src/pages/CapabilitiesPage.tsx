@@ -1,15 +1,15 @@
 import { useMemo, useState } from "react";
 
-import { Badge, EmptyState, NativeSelect, Panel, Table, TableWrap, Td, Th } from "../components/ui/primitives";
+import { EmptyState, NativeSelect, Panel, Status, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { CAPABILITIES } from "../data/mock";
 import { PageBody, PageHeader, StatTile } from "../components/common";
 import type { CapabilityState } from "../data/types";
 
-const STATE_TONE: Record<CapabilityState, "ok" | "warn" | "neutral" | "crit"> = {
-  available: "ok",
-  disabled: "warn",
-  not_implemented: "neutral",
-  degraded: "crit",
+const STATE: Record<CapabilityState, { label: string; tone: "ok" | "warn" | "neutral" | "crit" }> = {
+  available: { label: "Available", tone: "ok" },
+  disabled: { label: "Disabled", tone: "warn" },
+  not_implemented: { label: "Not installed", tone: "neutral" },
+  degraded: { label: "Degraded", tone: "crit" },
 };
 
 export function CapabilitiesPage() {
@@ -18,71 +18,60 @@ export function CapabilitiesPage() {
   const rows = useMemo(() => CAPABILITIES.filter((flag) => state === "all" || flag.state === state), [state]);
   const available = CAPABILITIES.filter((flag) => flag.state === "available").length;
   const disabled = CAPABILITIES.filter((flag) => flag.state === "disabled").length;
+  const notInstalled = CAPABILITIES.filter((flag) => flag.state === "not_implemented").length;
 
   return (
     <>
-      <PageHeader
-        title="Capabilities"
-        summary={`${CAPABILITIES.length} flags · ${available} available · ${disabled} disabled for this deployment profile`}
-      />
+      <PageHeader title="Capabilities" summary={`${CAPABILITIES.length} features · ${available} available in this deployment`} />
 
       <PageBody>
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Available" value={available} hint="live in this deployment" />
-          <StatTile label="Disabled" value={disabled} hint="gated on configuration" />
-          <StatTile label="Not implemented" value={CAPABILITIES.filter((flag) => flag.state === "not_implemented").length} hint="no reviewed adapter" />
+          <StatTile label="Available" value={available} hint="Live in this deployment" />
+          <StatTile label="Disabled" value={disabled} hint="Awaiting configuration" />
+          <StatTile label="Not installed" value={notInstalled} hint="No reviewed adapter" />
         </div>
 
-        <Panel className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <NativeSelect value={state} onChange={(event) => setState(event.target.value as CapabilityState | "all")} aria-label="Filter by state">
-            <option value="all">State: all</option>
+            <option value="all">All states</option>
             <option value="available">Available</option>
             <option value="disabled">Disabled</option>
-            <option value="not_implemented">Not implemented</option>
+            <option value="not_implemented">Not installed</option>
             <option value="degraded">Degraded</option>
           </NativeSelect>
-        </Panel>
+        </div>
 
         <Panel>
           {rows.length === 0 ? (
-            <EmptyState title="No capabilities in that state" />
+            <EmptyState title="No features in that state" />
           ) : (
             <TableWrap>
               <Table className="min-w-[48rem]">
                 <thead>
                   <tr>
-                    <Th>Capability</Th>
+                    <Th>Feature</Th>
                     <Th>State</Th>
                     <Th>Reason</Th>
-                    <Th>AAL2</Th>
-                    <Th>Durable consumer</Th>
+                    <Th>Two factor</Th>
+                    <Th>Worker</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((flag) => (
-                    <tr key={flag.key} className="hover:bg-cream-primary/4">
-                      <Td className="font-mono text-xs whitespace-nowrap text-cream-bright">{flag.key}</Td>
+                    <tr key={flag.key} className="transition-colors hover:bg-cream-primary/4">
+                      <Td className="font-mono text-[13px] whitespace-nowrap text-cream-bright">{flag.key}</Td>
                       <Td>
-                        <Badge tone={STATE_TONE[flag.state]}>{flag.state.replace("_", " ")}</Badge>
+                        <Status tone={STATE[flag.state].tone}>{STATE[flag.state].label}</Status>
                       </Td>
-                      <Td className="max-w-md text-[11px] leading-snug text-sand-muted">{flag.reason}</Td>
-                      <Td>{flag.requiresAal2 ? <Badge tone="accent">required</Badge> : <span className="font-mono text-xs text-sand-muted/50">—</span>}</Td>
-                      <Td className="font-mono text-[11px] text-sand-muted/70">{flag.durableConsumer ?? "—"}</Td>
+                      <Td className="max-w-md text-[13px] leading-snug text-sand-muted">{flag.reason}</Td>
+                      <Td>{flag.requiresAal2 ? <Tag tone="accent">Required</Tag> : <span className="text-[13px] text-sand-muted/40">—</span>}</Td>
+                      <Td className="font-mono text-xs text-sand-muted/70">{flag.durableConsumer ?? "—"}</Td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
           )}
-        </Panel>
-
-        <Panel className="border-signal/40 bg-signal/6 px-4 py-3">
-          <p className="text-xs text-sand-muted">
-            <span className="font-mono text-signal">Why this screen exists.</span> It is the fastest possible answer to "why is that button
-            greyed out". Every flag already carries its own reason string from{" "}
-            <span className="font-mono text-cream-primary">capability_registry()</span>, so this is a read-only render of state the backend
-            already publishes — no new source of truth.
-          </p>
         </Panel>
       </PageBody>
     </>

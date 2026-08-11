@@ -26,7 +26,7 @@
   --color-charcoal-page: #2e2e2e;
   --color-charcoal-deep: #1d1d1d;
   --color-charcoal-panel: #242424;
-  --color-charcoal-raised: #424242;
+  --color-charcoal-raised: #2b2b2b;
   --color-cream-primary: #e9e0d1;
   --color-cream-bright: #f0e8da;
   --color-sand-muted: #ccbd9f;
@@ -34,13 +34,13 @@
   --color-signal: #fa6c34;
   --color-signal-dark: #de5d35;
 
-  --color-hairline: rgba(233, 224, 209, 0.14);
-  --color-hairline-strong: rgba(233, 224, 209, 0.27);
+  /* Softened from the investigator console's values. Admin screens are dense
+     with tables and panels; at the original weight every edge competed. */
+  --color-hairline: rgba(233, 224, 209, 0.1);
+  --color-hairline-strong: rgba(233, 224, 209, 0.2);
 
-  /* Admin-only additions. The investigator console never has to render
-     "allowed vs denied" or "high-risk permission", so it defines no semantic
-     palette. These are deliberately desaturated so they read as state and
-     never compete with the signal orange, which stays the only accent. */
+  /* Reserved status colours, desaturated so they read as state and never
+     compete with the accent. Always paired with a word, never colour alone. */
   --color-state-ok: #7fb488;
   --color-state-warn: #d9a851;
   --color-state-crit: #e2705f;
@@ -48,6 +48,15 @@
 
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* One radius scale, applied consistently. */
+  --radius-panel: 6px;
+  --radius-control: 4px;
+  --radius-chip: 3px;
+
+  /* Panels lift off the ground rather than being outlined boxes. */
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.16);
+  --shadow-raised: 0 8px 28px rgba(0, 0, 0, 0.44);
 }
 
 :root {
@@ -97,28 +106,27 @@ select {
 :focus-visible {
   outline: 2px solid var(--color-signal);
   outline-offset: 2px;
+  border-radius: 2px;
 }
 
-/* The 64px graph-paper ground is the console's signature. Carried across so
-   the admin surface is recognisably the same product. */
+/* A single soft lift behind the top of the content, instead of a grid. Enough
+   to keep the page from reading as dead flat; not enough to notice. */
 .app-theme {
   min-height: 100vh;
   background:
-    linear-gradient(var(--color-hairline) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-hairline) 1px, transparent 1px),
+    radial-gradient(1100px 380px at 50% -8%, rgba(233, 224, 209, 0.035), transparent 72%),
     var(--color-charcoal-deep);
-  background-size: 64px 64px;
 }
 
 h1,
 h2,
 h3,
 h4 {
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
-/* Numeric columns must line up — every table in this console is scanned, not
-   read, and ragged digits defeat that. */
+/* Numeric columns must line up — every table here is scanned, not read, and
+   ragged digits defeat that. */
 table,
 time,
 code,

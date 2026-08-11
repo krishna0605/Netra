@@ -363,8 +363,10 @@ export const ORGANIZATION: OrganizationSettings = {
 
 export const OVERVIEW: OverviewSummary = {
   activeUsers: USERS.filter((user) => user.status === "active").length,
+  activeUsersTrend: [3, 3, 4, 4, 4, 5, 5],
   newUsersThisWeek: 2,
   deniedLast24h: ACTIVITY.filter((event) => event.result === "denied").length,
+  deniedTrend: [0, 1, 0, 0, 2, 1, 5],
   deniedTopActor: "A. Mehta",
   mfaEnrolled: USERS.filter((user) => user.mfa === "verified").length,
   mfaTotal: USERS.filter((user) => user.status !== "deactivated").length,
