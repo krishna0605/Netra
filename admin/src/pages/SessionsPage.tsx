@@ -4,35 +4,40 @@ import { useMemo, useState } from "react";
 
 import { Avatar, Button, EmptyState, NativeSelect, Panel, Status, Table, TableWrap, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
-import { SESSIONS } from "../data/mock";
+import { useDirectory } from "../data/store";
 import { initials, relativeLabel } from "../lib/utils";
 
 export function SessionsPage() {
+  const { sessions, revokeSession, revokeAllSessions } = useDirectory();
   const [origin, setOrigin] = useState("all");
   const [aal, setAal] = useState("all");
 
-  const origins = useMemo(() => [...new Set(SESSIONS.map((session) => session.origin))], []);
+  const origins = useMemo(() => [...new Set(sessions.map((session) => session.origin))], [sessions]);
 
   const rows = useMemo(
     () =>
-      SESSIONS.filter((session) => {
+      sessions.filter((session) => {
         if (origin !== "all" && session.origin !== origin) return false;
         if (aal !== "all" && session.aal !== aal) return false;
         return true;
       }),
-    [origin, aal],
+    [sessions, origin, aal],
   );
 
-  const singleFactor = SESSIONS.filter((session) => session.aal === "aal1").length;
-  const administration = SESSIONS.filter((session) => session.origin.startsWith("admin.")).length;
+  const singleFactor = sessions.filter((session) => session.aal === "aal1").length;
+  const administration = sessions.filter((session) => session.origin.startsWith("admin.")).length;
 
   return (
     <>
       <PageHeader
         title="Sessions"
-        summary={`${SESSIONS.length} active across the organization`}
+        summary={`${sessions.length} active across the organization`}
         action={
-          <Button variant="danger" size="sm" onClick={() => toast("All sessions revoked", { description: "Everyone will be asked to sign in again." })}>
+          <Button variant="danger" size="sm" disabled={sessions.length === 0}
+            onClick={() => {
+              revokeAllSessions();
+              toast.success("All sessions ended", { description: "Everyone must sign in again." });
+            }}>
             <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             Revoke all
           </Button>
@@ -41,7 +46,7 @@ export function SessionsPage() {
 
       <PageBody>
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Active sessions" value={SESSIONS.length} hint="Across both consoles" />
+          <StatTile label="Active sessions" value={sessions.length} hint="Across both consoles" />
           <StatTile label="Single factor" value={singleFactor} hint="Cannot satisfy a step-up challenge" alert={singleFactor > 0} />
           <StatTile label="Administration" value={administration} hint="Signed in to this console" />
         </div>
@@ -102,7 +107,10 @@ export function SessionsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toast("Session revoked", { description: `${session.userName} signed out of ${session.origin}.` })}
+                          onClick={() => {
+                            revokeSession(session.id);
+                            toast.success("Session ended", { description: `${session.userName} signed out of ${session.origin}.` });
+                          }}
                         >
                           Revoke
                         </Button>

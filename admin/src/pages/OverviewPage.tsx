@@ -1,51 +1,66 @@
 import { ArrowUpRight, Clock, KeyRound, ShieldAlert, UserMinus } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { ACTIVITY, AUDIT, ORGANIZATION, OVERVIEW } from "../data/mock";
+import { ORGANIZATION, OVERVIEW } from "../data/mock";
+import { useDirectory } from "../data/store";
 import { Button, Panel, PanelHeader, Tag } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
 import { relativeLabel, timeLabel } from "../lib/utils";
 
-/** Ranked by how strongly each suggests something is actively wrong, not by
- *  recency. A denial burst outranks a stale account. */
-const ATTENTION = [
-  {
-    icon: ShieldAlert,
-    tone: "crit" as const,
-    lead: `${OVERVIEW.deniedLast24h} denied actions`,
-    detail: `${OVERVIEW.deniedTopActor} accounts for most of them, all against export`,
-    to: "/activity",
-    cta: "Triage",
-  },
-  {
-    icon: KeyRound,
-    tone: "crit" as const,
-    lead: `${OVERVIEW.mfaTotal - OVERVIEW.mfaEnrolled} accounts without an authenticator`,
-    detail: "Policy requires enrolment for administrators only — these sit below that line",
-    to: "/users",
-    cta: "Review",
-  },
-  {
-    icon: Clock,
-    tone: "warn" as const,
-    lead: "1 invitation expiring today",
-    detail: "r.shah@gcc.gov.in has not accepted since it was sent",
-    to: "/users",
-    cta: "Resend",
-  },
-  {
-    icon: UserMinus,
-    tone: "warn" as const,
-    lead: `${OVERVIEW.staleAccounts} accounts inactive over 90 days`,
-    detail: "Candidates for deactivation",
-    to: "/users",
-    cta: "Review",
-  },
-];
-
 export function OverviewPage() {
-  const recentDenials = ACTIVITY.filter((event) => event.result === "denied").slice(0, 5);
-  const recentAdminActions = AUDIT.slice(0, 5);
+  const { users, activity, audit } = useDirectory();
+
+  const recentDenials = activity.filter((event) => event.result === "denied").slice(0, 5);
+  const recentAdminActions = audit.slice(0, 5);
+
+  const live = {
+    activeUsers: users.filter((user) => user.status === "active").length,
+    denied: activity.filter((event) => event.result === "denied").length,
+    mfaEnrolled: users.filter((user) => user.mfa === "verified").length,
+    mfaTotal: users.filter((user) => user.status !== "deactivated").length,
+    invites: users.filter((user) => user.status === "invited").length,
+    grants: users.flatMap((user) => user.permissions).filter((permission) => permission.expiresAt).length,
+    stale: users.filter(
+      (user) => user.status === "active" && user.lastActivityAt && Date.now() - Date.parse(user.lastActivityAt) > 90 * 864e5,
+    ).length,
+  };
+
+  // Ranked by how strongly each suggests something is actively wrong, not by
+  // recency. A denial burst outranks a dormant account.
+  const attention = [
+    live.denied > 0 && {
+      icon: ShieldAlert,
+      tone: "crit" as const,
+      lead: `${live.denied} denied ${live.denied === 1 ? "action" : "actions"}`,
+      detail: `${OVERVIEW.deniedTopActor} accounts for most of them, all against export`,
+      to: "/activity",
+      cta: "Triage",
+    },
+    live.mfaTotal - live.mfaEnrolled > 0 && {
+      icon: KeyRound,
+      tone: "crit" as const,
+      lead: `${live.mfaTotal - live.mfaEnrolled} accounts without an authenticator`,
+      detail: "Policy requires enrolment for administrators only — these sit below that line",
+      to: "/users",
+      cta: "Review",
+    },
+    live.invites > 0 && {
+      icon: Clock,
+      tone: "warn" as const,
+      lead: `${live.invites} invitation ${live.invites === 1 ? "is" : "are"} unaccepted`,
+      detail: `${OVERVIEW.invitesExpiringToday} expiring today`,
+      to: "/users",
+      cta: "Resend",
+    },
+    live.stale > 0 && {
+      icon: UserMinus,
+      tone: "warn" as const,
+      lead: `${live.stale} accounts inactive over 90 days`,
+      detail: "Candidates for deactivation",
+      to: "/users",
+      cta: "Review",
+    },
+  ].filter((item): item is Exclude<typeof item, false> => item !== false);
 
   return (
     <>
@@ -66,13 +81,13 @@ export function OverviewPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <StatTile
             label="Active users"
-            value={OVERVIEW.activeUsers}
+            value={live.activeUsers}
             trend={OVERVIEW.activeUsersTrend}
             delta={{ direction: "up", text: `${OVERVIEW.newUsersThisWeek} this week` }}
           />
           <StatTile
             label="Denied actions"
-            value={OVERVIEW.deniedLast24h}
+            value={live.denied}
             trend={OVERVIEW.deniedTrend}
             delta={{ direction: "up", text: "sharp rise", good: false }}
             hint={`Most from ${OVERVIEW.deniedTopActor}`}
@@ -80,18 +95,18 @@ export function OverviewPage() {
           />
           <StatTile
             label="Authenticator enrolled"
-            value={OVERVIEW.mfaEnrolled}
-            of={OVERVIEW.mfaTotal}
-            hint={`${OVERVIEW.mfaTotal - OVERVIEW.mfaEnrolled} outstanding`}
+            value={live.mfaEnrolled}
+            of={live.mfaTotal}
+            hint={`${live.mfaTotal - live.mfaEnrolled} outstanding`}
           />
-          <StatTile label="Pending invitations" value={OVERVIEW.pendingInvites} hint={`${OVERVIEW.invitesExpiringToday} expiring today`} />
-          <StatTile label="Temporary grants" value={OVERVIEW.temporaryGrants} hint="Expire 01 September" />
+          <StatTile label="Pending invitations" value={live.invites} hint={`${OVERVIEW.invitesExpiringToday} expiring today`} />
+          <StatTile label="Temporary grants" value={live.grants} hint="Expire 01 September" />
         </div>
 
         <Panel>
           <PanelHeader title="Needs attention" />
           <ul className="divide-y divide-[color:var(--color-hairline)]">
-            {ATTENTION.map((item) => (
+            {attention.map((item) => (
               <li key={item.lead} className="flex flex-wrap items-center gap-4 px-5 py-4 transition-colors hover:bg-cream-primary/3">
                 <span
                   className={

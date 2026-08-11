@@ -2,7 +2,7 @@ import { Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 
-import { ACTIVITY } from "../data/mock";
+import { useDirectory } from "../data/store";
 import { Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, ResultBadge } from "../components/common";
 import { cn, timeLabel } from "../lib/utils";
@@ -19,6 +19,7 @@ const SOURCE_LABEL: Record<ActivitySource, string> = {
 };
 
 export function ActivityPage() {
+  const { activity } = useDirectory();
   // Denied-in-24-hours is the default: it turns a log into a triage queue.
   const [result, setResult] = useState<ActivityResult | "all">("denied");
   const [source, setSource] = useState<ActivitySource | "all">("all");
@@ -26,21 +27,21 @@ export function ActivityPage() {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return ACTIVITY.filter((event) => {
+    return activity.filter((event) => {
       if (result !== "all" && event.result !== result) return false;
       if (source !== "all" && event.source !== source) return false;
       if (!needle) return true;
       return [event.actor, event.action, event.target, event.role].some((value) => value.toLowerCase().includes(needle));
     });
-  }, [result, source, query]);
+  }, [activity, result, source, query]);
 
-  const deniedTotal = ACTIVITY.filter((event) => event.result === "denied").length;
+  const deniedTotal = activity.filter((event) => event.result === "denied").length;
 
   return (
     <>
       <PageHeader
         title="Activity"
-        summary={`${ACTIVITY.length} events in the last 24 hours · ${deniedTotal} denied`}
+        summary={`${activity.length} events in the last 24 hours · ${deniedTotal} denied`}
         action={
           <Button variant="outline" size="sm" onClick={() => toast("Export prepared", { description: "The filtered range has been exported." })}>
             <Download className="size-3.5" strokeWidth={1.75} aria-hidden="true" />

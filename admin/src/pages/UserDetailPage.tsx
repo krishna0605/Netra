@@ -1,12 +1,27 @@
-import { ArrowLeft, KeyRound, LogOut, ShieldOff, UserMinus } from "lucide-react";
+import { ArrowLeft, KeyRound, LogOut, RotateCcw, ShieldOff, UserMinus, X } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useState } from "react";
 
-import { ACTIVITY, PERMISSION_BY_KEY, ROLE_BY_SLUG, SESSIONS, USERS } from "../data/mock";
-import { Avatar, Button, EmptyState, Field, Panel, PanelHeader, Status, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
+import { PERMISSION_BY_KEY, ROLES, ROLE_BY_SLUG } from "../data/mock";
+import { useDirectory } from "../data/store";
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  Field,
+  NativeSelect,
+  Panel,
+  PanelHeader,
+  Status,
+  Table,
+  TableWrap,
+  Tag,
+  Td,
+  Th,
+} from "../components/ui/primitives";
 import { MfaBadge, PageBody, PageHeader, ResultBadge, RoleBadge, UserStatusBadge } from "../components/common";
-import { RecoveryDialog } from "../components/RecoveryDialog";
+import { PasswordDialog } from "../components/PasswordDialog";
 import { dateTimeLabel, initials, relativeLabel, timeLabel } from "../lib/utils";
 import type { PermissionSource } from "../data/types";
 
@@ -18,8 +33,11 @@ const SOURCE: Record<PermissionSource, { label: string; tone: "neutral" | "accen
 
 export function UserDetailPage() {
   const { userId } = useParams();
-  const [recoveryOpen, setRecoveryOpen] = useState(false);
-  const user = USERS.find((entry) => String(entry.id) === userId);
+  const { users, activity, sessions, changeRole, setStatus, resetAuthenticator, revokeSession, revokeUserSessions, removeGrant } =
+    useDirectory();
+  const [passwordOpen, setPasswordOpen] = useState(false);
+
+  const user = users.find((entry) => String(entry.id) === userId);
 
   if (!user) {
     return (
@@ -35,9 +53,16 @@ export function UserDetailPage() {
   }
 
   const role = ROLE_BY_SLUG.get(user.roleSlug);
-  const userActivity = ACTIVITY.filter((event) => event.actorEmail === user.email);
-  const userSessions = SESSIONS.filter((session) => session.userId === user.id);
+  const userActivity = activity.filter((event) => event.actorEmail === user.email);
+  const userSessions = sessions.filter((session) => session.userId === user.id);
   const deniedCount = userActivity.filter((event) => event.result === "denied").length;
+
+  function onRoleChange(nextSlug: string) {
+    if (!user || nextSlug === user.roleSlug) return;
+    const nextName = ROLE_BY_SLUG.get(nextSlug)?.name ?? nextSlug;
+    changeRole(user.id, nextSlug, `Role changed to ${nextName} by an administrator.`);
+    toast.success("Role updated", { description: `${user.name} is now ${nextName}.` });
+  }
 
   return (
     <>
@@ -76,9 +101,6 @@ export function UserDetailPage() {
               <Field label="Directory id">{user.supabaseId || "Not provisioned"}</Field>
               <Field label="Joined">{dateTimeLabel(user.joinedAt)}</Field>
               <Field label="Last sign-in">{user.lastSignInAt ? dateTimeLabel(user.lastSignInAt) : "Never"}</Field>
-              <Field label="Invitation" mono={false}>
-                {user.invitationState === "accepted" ? "Accepted" : user.invitationState}
-              </Field>
             </dl>
           </Panel>
 
@@ -87,9 +109,17 @@ export function UserDetailPage() {
               title="Role & permissions"
               hint={role?.description}
               action={
-                <Button variant="outline" size="sm" onClick={() => toast("Grant a permission", { description: "Choose a permission and an expiry." })}>
-                  Grant
-                </Button>
+                user.isOwner ? (
+                  <Tag tone="accent">Owner — transfer to change</Tag>
+                ) : (
+                  <NativeSelect value={user.roleSlug} onChange={(event) => onRoleChange(event.target.value)} aria-label="Change role">
+                    {ROLES.filter((entry) => entry.slug !== "admin").map((entry) => (
+                      <option key={entry.slug} value={entry.slug}>
+                        {entry.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )
               }
             />
             {user.permissions.length === 0 ? (
@@ -102,6 +132,7 @@ export function UserDetailPage() {
                       <Th>Permission</Th>
                       <Th>Source</Th>
                       <Th>Expires</Th>
+                      <Th className="w-10" />
                     </tr>
                   </thead>
                   <tbody>
@@ -118,6 +149,21 @@ export function UserDetailPage() {
                         </Td>
                         <Td className="text-[13px] whitespace-nowrap text-sand-muted">
                           {permission.expiresAt ? dateTimeLabel(permission.expiresAt) : "—"}
+                        </Td>
+                        <Td>
+                          {permission.source === "granted" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                removeGrant(user.id, permission.key);
+                                toast.success("Grant withdrawn", { description: `${permission.key} removed from ${user.name}.` });
+                              }}
+                              className="grid size-6 place-items-center rounded-control text-sand-muted/50 hover:text-state-crit"
+                              aria-label={`Withdraw ${permission.key}`}
+                            >
+                              <X className="size-3.5" strokeWidth={2} aria-hidden="true" />
+                            </button>
+                          ) : null}
                         </Td>
                       </tr>
                     ))}
@@ -148,10 +194,19 @@ export function UserDetailPage() {
                         <Td className="text-[13px] whitespace-nowrap text-sand-muted">{relativeLabel(session.startedAt)}</Td>
                         <Td className="font-mono text-[13px] text-cream-primary">{session.origin}</Td>
                         <Td>
-                          <Status tone={session.aal === "aal2" ? "ok" : "warn"}>{session.aal === "aal2" ? "Two factor" : "Single factor"}</Status>
+                          <Status tone={session.aal === "aal2" ? "ok" : "warn"}>
+                            {session.aal === "aal2" ? "Two factor" : "Single factor"}
+                          </Status>
                         </Td>
                         <Td className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => toast(`Session revoked`, { description: `${user.name} signed out of ${session.origin}.` })}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              revokeSession(session.id);
+                              toast.success("Session ended", { description: `${user.name} signed out of ${session.origin}.` });
+                            }}
+                          >
                             Revoke
                           </Button>
                         </Td>
@@ -178,7 +233,7 @@ export function UserDetailPage() {
               <EmptyState title="Nothing recorded yet" hint="This account has not signed in." />
             ) : (
               <ul className="divide-y divide-[color:var(--color-hairline)]">
-                {userActivity.map((event) => (
+                {userActivity.slice(0, 12).map((event) => (
                   <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
                     <time className="shrink-0 font-mono text-xs text-sand-muted/60">{timeLabel(event.at)}</time>
                     <div className="min-w-0 flex-1">
@@ -222,28 +277,71 @@ export function UserDetailPage() {
               hint="Each requires a fresh authenticator code and a written reason"
             />
             <div className="flex flex-wrap gap-2 px-5 py-4">
-              <Button variant="outline" size="sm" onClick={() => setRecoveryOpen(true)}>
+              <Button variant="outline" size="sm" onClick={() => setPasswordOpen(true)}>
                 <KeyRound className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
-                Restore access
+                Set password
               </Button>
-              <Button variant="outline" size="sm" onClick={() => toast("Reset authenticator", { description: "Verify identity before removing the enrolled factor." })}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={user.mfa === "unenrolled"}
+                onClick={() => {
+                  resetAuthenticator(user.id, "Enrolled device lost. Identity verified out of band.");
+                  toast.success("Authenticator reset", { description: `${user.name} must enrol again at next sign-in.` });
+                }}
+              >
                 <ShieldOff className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Reset authenticator
               </Button>
-              <Button variant="outline" size="sm" onClick={() => toast("Revoke all sessions", { description: `${user.name} will be signed out everywhere.` })}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={userSessions.length === 0}
+                onClick={() => {
+                  revokeUserSessions(user.id);
+                  toast.success("All sessions ended", { description: `${user.name} was signed out everywhere.` });
+                }}
+              >
                 <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Revoke all sessions
               </Button>
-              <Button variant="danger" size="sm" onClick={() => toast("Deactivate account", { description: "Access is withdrawn immediately and the record is retained." })}>
-                <UserMinus className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
-                Deactivate
-              </Button>
+              {user.status === "deactivated" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStatus(user.id, "active", "Account restored by an administrator.");
+                    toast.success("Account reactivated", { description: `${user.name} can sign in again.` });
+                  }}
+                >
+                  <RotateCcw className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  Reactivate
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={user.isOwner}
+                  onClick={() => {
+                    setStatus(user.id, "deactivated", "Access withdrawn by an administrator.");
+                    toast.success("Account deactivated", { description: `${user.name} can no longer sign in.` });
+                  }}
+                >
+                  <UserMinus className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  Deactivate
+                </Button>
+              )}
             </div>
+            {user.isOwner ? (
+              <p className="border-t border-hairline px-5 py-3 text-xs text-sand-muted/70">
+                The owner cannot be deactivated. Transfer ownership first.
+              </p>
+            ) : null}
           </Panel>
         </div>
       </PageBody>
 
-      <RecoveryDialog user={user} open={recoveryOpen} onOpenChange={setRecoveryOpen} />
+      <PasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />
     </>
   );
 }

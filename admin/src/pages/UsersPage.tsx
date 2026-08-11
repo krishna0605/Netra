@@ -1,16 +1,19 @@
 import { ChevronRight, Search, UserPlus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 
 import { Avatar, Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { MfaBadge, PageBody, PageHeader, RoleBadge, UserStatusBadge } from "../components/common";
-import { ROLE_BY_SLUG, USERS } from "../data/mock";
+import { AddUserDialog } from "../components/AddUserDialog";
+import { ROLE_BY_SLUG } from "../data/mock";
+import { useDirectory } from "../data/store";
 import { initials, relativeLabel } from "../lib/utils";
 
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
 
 export function UsersPage() {
+  const { users } = useDirectory();
+  const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -18,26 +21,26 @@ export function UsersPage() {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return USERS.filter((user) => {
+    return users.filter((user) => {
       if (needle && !user.name.toLowerCase().includes(needle) && !user.email.toLowerCase().includes(needle)) return false;
       if (role !== "all" && user.roleSlug !== role) return false;
       if (status !== "all" && user.status !== status) return false;
       if (mfaGapOnly && user.mfa === "verified") return false;
       return true;
     });
-  }, [query, role, status, mfaGapOnly]);
+  }, [users, query, role, status, mfaGapOnly]);
 
-  const pending = USERS.filter((user) => user.status === "invited").length;
+  const pending = users.filter((user) => user.status === "invited").length;
 
   return (
     <>
       <PageHeader
         title="Users"
-        summary={`${USERS.length} accounts · ${pending} awaiting acceptance`}
+        summary={`${users.length} accounts · ${pending} awaiting acceptance`}
         action={
-          <Button variant="primary" size="sm" onClick={() => toast("Invitation panel", { description: "Choose a role and send an invitation." })}>
+          <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
             <UserPlus className="size-3.5" strokeWidth={2} aria-hidden="true" />
-            Invite user
+            Add user
           </Button>
         }
       />
@@ -151,6 +154,8 @@ export function UsersPage() {
           )}
         </Panel>
       </PageBody>
+
+      <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />
     </>
   );
 }

@@ -1,24 +1,25 @@
 import { CheckCircle2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { AUDIT } from "../data/mock";
+import { useDirectory } from "../data/store";
 import { Button, Panel, PanelHeader, Status, Tag } from "../components/ui/primitives";
 import { PageBody, PageHeader } from "../components/common";
 import { dateTimeLabel } from "../lib/utils";
 
 export function AuditPage() {
-  const head = AUDIT[0];
+  const { audit } = useDirectory();
+  const head = audit[0];
 
   return (
     <>
       <PageHeader
         title="Audit trail"
-        summary={`${AUDIT.length} administrator actions · sequence ${head.chainIndex}`}
+        summary={`${audit.length} administrator actions · sequence ${head.chainIndex}`}
         action={
           <Button
             variant="outline"
             size="sm"
-            onClick={() => toast.success("Trail verified", { description: `${AUDIT.length} entries, no gaps, every link intact.` })}
+            onClick={() => toast.success("Trail verified", { description: `${audit.length} entries, no gaps, every link intact.` })}
           >
             <CheckCircle2 className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             Verify
@@ -41,7 +42,7 @@ export function AuditPage() {
         <Panel>
           <PanelHeader title="Entries" hint="Newest first" />
           <ol className="divide-y divide-[color:var(--color-hairline)]">
-            {AUDIT.map((event) => (
+            {audit.map((event) => (
               <li key={event.id} className="px-5 py-5 transition-colors hover:bg-cream-primary/3">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
                   <Tag tone="accent" mono>
