@@ -254,7 +254,7 @@ export function UserDetailPage() {
               </Button>
             </div>
             <p className="border-t border-hairline px-4 py-2.5 text-[11px] text-sand-muted/70">
-              All five actions append to the tamper-evident admin audit chain. An administrator cannot perform any of them on their own account.
+              Every action here appends to the tamper-evident admin audit chain. An administrator cannot perform any of them on their own account.
             </p>
           </Panel>
         </div>
