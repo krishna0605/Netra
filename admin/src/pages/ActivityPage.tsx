@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useMemo, useState } from "react";
 
 import { ACTIVITY } from "../data/mock";
-import { Badge, Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Td, Th } from "../components/ui/primitives";
+import { Badge, Button, EmptyState, Input, NativeSelect, Panel, PanelHeader, Table, TableWrap, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, ResultBadge } from "../components/common";
 import { cn, timeLabel } from "../lib/utils";
 import type { ActivityResult, ActivitySource } from "../data/types";
