@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { ApiFailure, directoryApi, type CreateUserInput, type DirectorySnapshot, type SetPasswordInput } from "./client";
-import type { AdminUser, PermissionKey, RoleSlug, UserStatus } from "./types";
+import { ORGANIZATION, ROLES } from "./mock";
+import type { AdminUser, OrganizationSettings, PermissionKey, Role, RoleSlug, UserStatus } from "./types";
 
 /**
  * React state over the transport boundary.
@@ -11,7 +12,14 @@ import type { AdminUser, PermissionKey, RoleSlug, UserStatus } from "./types";
  * it is still arriving, and whether it failed.
  */
 
-const EMPTY: DirectorySnapshot = { users: [], sessions: [], activity: [], audit: [] };
+const EMPTY: DirectorySnapshot = {
+  users: [],
+  sessions: [],
+  activity: [],
+  audit: [],
+  roles: ROLES,
+  organization: ORGANIZATION,
+};
 
 type DirectoryValue = DirectorySnapshot & {
   loading: boolean;
@@ -28,6 +36,12 @@ type DirectoryValue = DirectorySnapshot & {
   revokeAllSessions: () => Promise<void>;
   grantPermission: (userId: number, key: PermissionKey, expiresAt: string | null, reason: string) => Promise<void>;
   removeGrant: (userId: number, key: PermissionKey) => Promise<void>;
+  createRole: (input: { name: string; description: string; baseSlug: string }) => Promise<Role>;
+  setRolePermission: (slug: string, key: PermissionKey, held: boolean) => Promise<void>;
+  updateOrganization: (
+    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>,
+  ) => Promise<void>;
+  transferOwnership: (targetUserId: number, reason: string) => Promise<void>;
 };
 
 const DirectoryContext = createContext<DirectoryValue | null>(null);
@@ -144,6 +158,36 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
     [run],
   );
 
+  const createRole = useCallback(
+    async (input: { name: string; description: string; baseSlug: string }) => {
+      const { snapshot: next, created } = await run(() => directoryApi.createRole(input));
+      setSnapshot(next);
+      return created;
+    },
+    [run],
+  );
+
+  const setRolePermission = useCallback(
+    async (slug: string, key: PermissionKey, held: boolean) => {
+      setSnapshot(await run(() => directoryApi.setRolePermission(slug, key, held)));
+    },
+    [run],
+  );
+
+  const updateOrganization = useCallback(
+    async (changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>) => {
+      setSnapshot(await run(() => directoryApi.updateOrganization(changes)));
+    },
+    [run],
+  );
+
+  const transferOwnership = useCallback(
+    async (targetUserId: number, reason: string) => {
+      setSnapshot(await run(() => directoryApi.transferOwnership(targetUserId, reason)));
+    },
+    [run],
+  );
+
   const value = useMemo<DirectoryValue>(
     () => ({
       ...snapshot,
@@ -160,6 +204,10 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       revokeAllSessions,
       grantPermission,
       removeGrant,
+      createRole,
+      setRolePermission,
+      updateOrganization,
+      transferOwnership,
     }),
     [
       snapshot,
@@ -176,6 +224,10 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       revokeAllSessions,
       grantPermission,
       removeGrant,
+      createRole,
+      setRolePermission,
+      updateOrganization,
+      transferOwnership,
     ],
   );
 

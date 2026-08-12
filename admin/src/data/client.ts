@@ -1,10 +1,12 @@
-import { ACTIVITY, AUDIT, CURRENT_OPERATOR, ROLE_BY_SLUG, SESSIONS, USERS } from "./mock";
+import { ACTIVITY, AUDIT, CURRENT_OPERATOR, ORGANIZATION, ROLES, SESSIONS, USERS } from "./mock";
 import type {
   ActivityEvent,
   AdminUser,
   AuditEvent,
   EffectivePermission,
+  OrganizationSettings,
   PermissionKey,
+  Role,
   RoleSlug,
   SessionRow,
   UserStatus,
@@ -30,6 +32,8 @@ export type DirectorySnapshot = {
   sessions: SessionRow[];
   activity: ActivityEvent[];
   audit: AuditEvent[];
+  roles: Role[];
+  organization: OrganizationSettings;
 };
 
 export class ApiFailure extends Error {
@@ -98,7 +102,14 @@ function marker(input: string) {
 }
 
 function seed(): DirectorySnapshot {
-  return { users: USERS, sessions: SESSIONS, activity: ACTIVITY, audit: AUDIT };
+  return {
+    users: USERS,
+    sessions: SESSIONS,
+    activity: ACTIVITY,
+    audit: AUDIT,
+    roles: ROLES,
+    organization: ORGANIZATION,
+  };
 }
 
 function load(): DirectorySnapshot {
@@ -113,6 +124,8 @@ function load(): DirectorySnapshot {
       sessions: parsed.sessions ?? SESSIONS,
       activity: parsed.activity ?? ACTIVITY,
       audit: parsed.audit ?? AUDIT,
+      roles: parsed.roles ?? ROLES,
+      organization: parsed.organization ?? ORGANIZATION,
     };
   } catch {
     return seed();
@@ -206,7 +219,7 @@ export const directoryApi = {
       throw new ApiFailure("email_in_use", "An account with that address already exists.", 409);
     }
 
-    const role = ROLE_BY_SLUG.get(input.roleSlug);
+    const role = state.roles.find((entry) => entry.slug === input.roleSlug);
     const created: AdminUser = {
       id: Math.max(0, ...state.users.map((user) => user.id)) + 1,
       email,
@@ -250,8 +263,8 @@ export const directoryApi = {
     const target = requireUser(state, userId);
     if (target.roleSlug === roleSlug) return settle(state);
 
-    const previousRole = ROLE_BY_SLUG.get(target.roleSlug);
-    const nextRole = ROLE_BY_SLUG.get(roleSlug);
+    const previousRole = state.roles.find((entry) => entry.slug === target.roleSlug);
+    const nextRole = state.roles.find((entry) => entry.slug === roleSlug);
 
     // Explicit grants and revocations survive a role change; only the
     // role-derived set is swapped. A temporary grant silently vanishing on a
@@ -403,9 +416,133 @@ export const directoryApi = {
     return commit(next);
   },
 
+  async createRole(input: { name: string; description: string; baseSlug: string }) {
+    const slug = input.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!slug) throw new ApiFailure("invalid_role_name", "Give the role a name.", 400);
+    if (state.roles.some((role) => role.slug === slug)) {
+      await settle(null);
+      throw new ApiFailure("role_exists", "A role with that name already exists.", 409);
+    }
+
+    const base = state.roles.find((role) => role.slug === input.baseSlug);
+    const created: Role = {
+      slug,
+      name: input.name.trim(),
+      description: input.description.trim() || `Cloned from ${base?.name ?? "an existing role"}.`,
+      isSystem: false,
+      permissions: [...(base?.permissions ?? [])],
+      memberCount: 0,
+    };
+
+    const next = record({ ...state, roles: [...state.roles, created] }, {
+      action: "role.created",
+      targetType: "Role",
+      targetId: slug,
+      reason: `Cloned from ${base?.name ?? "an existing role"}.`,
+      before: "—",
+      after: `${created.permissions.length} permissions`,
+    });
+
+    await settle(null);
+    commit(next);
+    return { snapshot: state, created };
+  },
+
+  async setRolePermission(slug: string, key: PermissionKey, held: boolean) {
+    const role = state.roles.find((entry) => entry.slug === slug);
+    if (!role) throw new ApiFailure("resource_not_found", "That role no longer exists.", 404);
+    if (role.isSystem) {
+      await settle(null);
+      throw new ApiFailure("system_role_locked", "Standard roles cannot be edited. Clone one to customise it.", 409);
+    }
+
+    const permissions = held
+      ? [...new Set([...role.permissions, key])]
+      : role.permissions.filter((entry) => entry !== key);
+    const roles = state.roles.map((entry) => (entry.slug === slug ? { ...entry, permissions } : entry));
+
+    const next = record({ ...state, roles }, {
+      action: held ? "role.permission_added" : "role.permission_removed",
+      targetType: "Role",
+      targetId: slug,
+      reason: `${held ? "Added" : "Removed"} ${key} on ${role.name}.`,
+      before: held ? "—" : key,
+      after: held ? key : "—",
+    });
+
+    await settle(null);
+    return commit(next);
+  },
+
+  async updateOrganization(
+    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>,
+  ) {
+    const before = state.organization;
+    const organization = { ...before, ...changes };
+
+    const described = Object.entries(changes)
+      .filter(([key, value]) => before[key as keyof OrganizationSettings] !== value)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(", ");
+
+    if (!described) return settle(state);
+
+    const next = record({ ...state, organization }, {
+      action: "organization.updated",
+      targetType: "Organization",
+      targetId: before.slug,
+      reason: "Organization settings changed by an administrator.",
+      before: Object.keys(changes)
+        .map((key) => `${key}=${String(before[key as keyof OrganizationSettings])}`)
+        .join(", "),
+      after: described,
+    });
+
+    await settle(null);
+    return commit(next);
+  },
+
+  async transferOwnership(targetUserId: number, reason: string) {
+    const target = requireUser(state, targetUserId);
+    const current = state.users.find((user) => user.isOwner);
+
+    if (target.isOwner) {
+      await settle(null);
+      throw new ApiFailure("already_owner", "That account already owns this organization.", 409);
+    }
+    if (target.status !== "active") {
+      await settle(null);
+      throw new ApiFailure("inactive_target", "Ownership can only pass to an active account.", 409);
+    }
+
+    // Demote and promote together. A moment with no owner, or with two, is a
+    // state nothing downstream should ever have to interpret.
+    const users = state.users.map((user) => ({
+      ...user,
+      isOwner: user.id === targetUserId,
+      roleSlug:
+        user.id === targetUserId ? "admin" : user.id === current?.id ? "investigator" : user.roleSlug,
+    }));
+
+    const next = record(
+      { ...state, users, organization: { ...state.organization, ownerUserId: targetUserId } },
+      {
+        action: "organization.owner_transferred",
+        targetType: "Organization",
+        targetId: state.organization.slug,
+        reason,
+        before: current?.email ?? "—",
+        after: target.email,
+      },
+    );
+
+    await settle(null);
+    return commit(next);
+  },
+
   async removeGrant(userId: number, key: PermissionKey) {
     const target = requireUser(state, userId);
-    const role = ROLE_BY_SLUG.get(target.roleSlug);
+    const role = state.roles.find((entry) => entry.slug === target.roleSlug);
     const permissions = target.permissions.filter((permission) => permission.key !== key);
     if (role?.permissions.includes(key)) {
       permissions.push({ key, source: "role", expiresAt: null, reason: "", grantedBy: "" });
