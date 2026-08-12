@@ -193,7 +193,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     setBusy(true);
     try {
-      await supabase.auth.signOut({ scope: "global" });
+      // Local scope, not global. Both consoles authenticate the same Supabase
+      // user, so a global sign-out would revoke every refresh token that user
+      // holds — ending their investigation session too. Leaving Administration
+      // must not eject someone from work they had open elsewhere.
+      await supabase.auth.signOut({ scope: "local" });
     } catch {
       // Signing out locally must succeed even if the network call does not.
     } finally {
