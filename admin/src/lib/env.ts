@@ -57,3 +57,14 @@ export const SUPABASE_PUBLISHABLE_KEY = read("VITE_SUPABASE_PUBLISHABLE_KEY");
 export const API_BASE_URL = read("VITE_API_BASE_URL") || "/api";
 export const DEPLOYMENT_PROFILE = read("VITE_DEPLOYMENT_PROFILE") || "local";
 export const IS_LOCAL = DEPLOYMENT_PROFILE === "local";
+
+/**
+ * Where the investigator console lives.
+ *
+ * In a deployment both consoles share one origin behind a path rewrite, so "/"
+ * is correct. Locally they are two dev servers on different ports, and "/" is
+ * this app — navigating there reloads the admin console, drops its
+ * memory-only session, and lands the operator back on sign-in looking as
+ * though the button did nothing.
+ */
+export const CONSOLE_URL = read("VITE_CONSOLE_URL") || (IS_LOCAL ? "http://localhost:8080" : "/");

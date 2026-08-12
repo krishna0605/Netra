@@ -3,10 +3,21 @@ import { useState } from "react";
 
 import { AuthLayout } from "./AuthLayout";
 import { Avatar, Tag } from "../../components/ui/primitives";
+import { CONSOLE_URL, IS_LOCAL } from "../../lib/env";
 import { cn, initials } from "../../lib/utils";
 import { useAuth } from "./AuthContext";
 
 const REMEMBER_KEY = "netra.admin.preferInvestigation";
+
+/**
+ * Leaving for the investigator console is a full navigation to a different
+ * origin in local development, and a different path in a deployment. Either
+ * way the administrative session ends here, which is intended — it lives in
+ * memory and should not survive leaving the workspace.
+ */
+function leaveForConsole() {
+  window.location.assign(CONSOLE_URL);
+}
 
 /**
  * Reads as an ordinary workspace picker, not a secret door. If it felt
@@ -47,9 +58,11 @@ export function ChooserPage() {
             name="Investigation Console"
             description="Cases, evidence, analysis and reports. Your day-to-day work."
             action="Open"
-            onSelect={() => {
-              window.location.href = "/";
-            }}
+            // Locally this is a separate dev server. Naming it means a console
+            // that is not running reads as "nothing at that address" rather
+            // than as a broken button.
+            footnote={IS_LOCAL ? CONSOLE_URL.replace(/^https?:\/\//, "") : undefined}
+            onSelect={leaveForConsole}
           />
           <WorkspaceCard
             elevated
@@ -90,6 +103,7 @@ function WorkspaceCard({
   name,
   description,
   note,
+  footnote,
   action,
   elevated = false,
   onSelect,
@@ -98,6 +112,7 @@ function WorkspaceCard({
   name: string;
   description: string;
   note?: string;
+  footnote?: string;
   action: string;
   elevated?: boolean;
   onSelect: () => void;
@@ -125,13 +140,10 @@ function WorkspaceCard({
       <span className="text-[16px] font-semibold text-cream-bright">{name}</span>
       <span className="text-[13px] leading-relaxed text-sand-muted/85">{description}</span>
 
-      {note ? (
-        <span className="mt-auto pt-1">
-          <Tag tone="accent">{note}</Tag>
-        </span>
-      ) : (
-        <span className="mt-auto pt-1" />
-      )}
+      <span className="mt-auto pt-1">
+        {note ? <Tag tone="accent">{note}</Tag> : null}
+        {footnote ? <span className="block font-mono text-[11px] text-sand-muted/60">{footnote}</span> : null}
+      </span>
 
       <span
         className={cn(
