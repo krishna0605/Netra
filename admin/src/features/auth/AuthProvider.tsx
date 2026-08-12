@@ -17,6 +17,31 @@ import { supabase } from "../../lib/supabase";
 /** Never say whether an address exists; a sign-in form is an enumeration oracle otherwise. */
 const GENERIC_REJECTION = "Those credentials were not accepted.";
 
+/**
+ * Anti-enumeration must not swallow infrastructure failures.
+ *
+ * A suspended project, a rate limit and a wrong password all arrive here as
+ * "sign-in failed". Reporting them identically is actively harmful: it sends
+ * someone hunting for a credential problem that does not exist. Only genuine
+ * credential rejections get the generic message; everything else says plainly
+ * that the service, not the password, is the problem — which reveals nothing
+ * about whether any particular account exists.
+ */
+function describeFailure(error: unknown): string {
+  const status = typeof error === "object" && error !== null ? Number((error as { status?: number }).status ?? 0) : 0;
+
+  if (status === 429) {
+    return "Too many attempts. Wait a minute before trying again.";
+  }
+  if (status === 402 || status === 403) {
+    return "Sign-in is unavailable: the authentication service is currently restricted. This is not a problem with your credentials.";
+  }
+  if (status === 0 || status >= 500) {
+    return "Sign-in is unavailable. The authentication service could not be reached.";
+  }
+  return GENERIC_REJECTION;
+}
+
 function profileFor(email: string, userId: string): AdminProfile | null {
   const known = USERS.find((user) => user.email.toLowerCase() === email.toLowerCase());
 
@@ -94,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (signInError || !data.session) {
-          setError(GENERIC_REJECTION);
+          setError(signInError ? describeFailure(signInError) : GENERIC_REJECTION);
           return;
         }
 
@@ -137,7 +162,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (verifyError) {
-          setError("That code was not accepted. Codes expire after 30 seconds.");
+          const status = Number((verifyError as { status?: number }).status ?? 0);
+          setError(
+            status === 0 || status >= 402
+              ? describeFailure(verifyError)
+              : "That code was not accepted. Codes expire after 30 seconds.",
+          );
           return;
         }
 
