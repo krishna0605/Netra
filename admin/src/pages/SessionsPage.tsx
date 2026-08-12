@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 
 import { Avatar, Button, EmptyState, NativeSelect, Panel, Status, Table, TableWrap, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonTable, SkeletonTiles } from "../components/states";
 import { initials, relativeLabel } from "../lib/utils";
 
 export function SessionsPage() {
   const { sessions, revokeSession, revokeAllSessions, loading, error, refetch } = useDirectory();
+  const [revokeAllOpen, setRevokeAllOpen] = useState(false);
   const [origin, setOrigin] = useState("all");
   const [aal, setAal] = useState("all");
 
@@ -35,15 +37,7 @@ export function SessionsPage() {
         summary={`${sessions.length} active across the organization`}
         action={
           <Button variant="danger" size="sm" disabled={sessions.length === 0}
-            onClick={() => {
-              void revokeAllSessions()
-                .then(() => toast.success("All sessions ended", { description: "Everyone must sign in again." }))
-                .catch((cause: unknown) =>
-                  toast.error("Could not complete", {
-                    description: cause instanceof Error ? cause.message : "Try again.",
-                  }),
-                );
-            }}>
+            onClick={() => setRevokeAllOpen(true)}>
             <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             Revoke all
           </Button>
@@ -147,6 +141,20 @@ export function SessionsPage() {
           </DataRegion>
         </Panel>
       </PageBody>
+
+      <ConfirmDialog
+        open={revokeAllOpen}
+        onOpenChange={setRevokeAllOpen}
+        title="End every session"
+        subject={`${sessions.length} people are signed in right now`}
+        consequences={[
+          "Everyone in the organization is signed out immediately, including you.",
+          "Anyone mid-way through a case note or an upload loses that screen.",
+          "Nobody is locked out — each person signs back in with their existing password.",
+        ]}
+        confirmLabel="End all sessions"
+        onConfirm={(reason) => revokeAllSessions().then(() => void reason)}
+      />
     </>
   );
 }

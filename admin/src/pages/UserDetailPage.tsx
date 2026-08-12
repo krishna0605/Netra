@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useState } from "react";
 
-import { PERMISSION_BY_KEY, ROLES, ROLE_BY_SLUG } from "../data/mock";
+import { PERMISSION_BY_KEY } from "../data/mock";
 import { useDirectory } from "../data/store";
 import { ErrorState, SkeletonList } from "../components/states";
 import {
@@ -22,6 +22,8 @@ import {
   Th,
 } from "../components/ui/primitives";
 import { MfaBadge, PageBody, PageHeader, ResultBadge, RoleBadge, UserStatusBadge } from "../components/common";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GrantPermissionDialog } from "../components/GrantPermissionDialog";
 import { PasswordDialog } from "../components/PasswordDialog";
 import { dateTimeLabel, initials, relativeLabel, timeLabel } from "../lib/utils";
 import type { PermissionSource } from "../data/types";
@@ -44,11 +46,14 @@ export function UserDetailPage() {
     revokeSession,
     revokeUserSessions,
     removeGrant,
+    roles,
     loading,
     error,
     refetch,
   } = useDirectory();
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [confirming, setConfirming] = useState<"authenticator" | "deactivate" | null>(null);
 
   const user = users.find((entry) => String(entry.id) === userId);
 
@@ -91,14 +96,14 @@ export function UserDetailPage() {
     );
   }
 
-  const role = ROLE_BY_SLUG.get(user.roleSlug);
+  const role = roles.find((entry) => entry.slug === user.roleSlug);
   const userActivity = activity.filter((event) => event.actorEmail === user.email);
   const userSessions = sessions.filter((session) => session.userId === user.id);
   const deniedCount = userActivity.filter((event) => event.result === "denied").length;
 
   async function onRoleChange(nextSlug: string) {
     if (!user || nextSlug === user.roleSlug) return;
-    const nextName = ROLE_BY_SLUG.get(nextSlug)?.name ?? nextSlug;
+    const nextName = roles.find((entry) => entry.slug === nextSlug)?.name ?? nextSlug;
     try {
       await changeRole(user.id, nextSlug, `Role changed to ${nextName} by an administrator.`);
       toast.success("Role updated", { description: `${user.name} is now ${nextName}.` });
@@ -165,17 +170,28 @@ export function UserDetailPage() {
               title="Role & permissions"
               hint={role?.description}
               action={
-                user.isOwner ? (
-                  <Tag tone="accent">Owner — transfer to change</Tag>
-                ) : (
-                  <NativeSelect value={user.roleSlug} onChange={(event) => void onRoleChange(event.target.value)} aria-label="Change role">
-                    {ROLES.filter((entry) => entry.slug !== "admin").map((entry) => (
-                      <option key={entry.slug} value={entry.slug}>
-                        {entry.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                )
+                <div className="flex items-center gap-2">
+                  {user.isOwner ? (
+                    <Tag tone="accent">Owner — transfer to change</Tag>
+                  ) : (
+                    <NativeSelect
+                      value={user.roleSlug}
+                      onChange={(event) => void onRoleChange(event.target.value)}
+                      aria-label="Change role"
+                    >
+                      {roles
+                        .filter((entry) => entry.slug !== "admin")
+                        .map((entry) => (
+                          <option key={entry.slug} value={entry.slug}>
+                            {entry.name}
+                          </option>
+                        ))}
+                    </NativeSelect>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setGrantOpen(true)}>
+                    Grant
+                  </Button>
+                </div>
               }
             />
             {user.permissions.length === 0 ? (
@@ -347,13 +363,7 @@ export function UserDetailPage() {
                 variant="outline"
                 size="sm"
                 disabled={user.mfa === "unenrolled"}
-                onClick={() =>
-                  apply(
-                    resetAuthenticator(user.id, "Enrolled device lost. Identity verified out of band."),
-                    "Authenticator reset",
-                    `${user.name} must enrol again at next sign-in.`,
-                  )
-                }
+                onClick={() => setConfirming("authenticator")}
               >
                 <ShieldOff className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Reset authenticator
@@ -389,13 +399,7 @@ export function UserDetailPage() {
                   variant="danger"
                   size="sm"
                   disabled={user.isOwner}
-                  onClick={() =>
-                    apply(
-                      setStatus(user.id, "deactivated", "Access withdrawn by an administrator."),
-                      "Account deactivated",
-                      `${user.name} can no longer sign in.`,
-                    )
-                  }
+                  onClick={() => setConfirming("deactivate")}
                 >
                   <UserMinus className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                   Deactivate
@@ -412,6 +416,35 @@ export function UserDetailPage() {
       </PageBody>
 
       <PasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />
+      <GrantPermissionDialog user={user} open={grantOpen} onOpenChange={setGrantOpen} />
+
+      <ConfirmDialog
+        open={confirming === "authenticator"}
+        onOpenChange={(next) => setConfirming(next ? "authenticator" : null)}
+        title="Reset authenticator"
+        subject={`${user.name} · ${user.email}`}
+        consequences={[
+          "Their enrolled authenticator is removed and cannot be restored.",
+          "Until they enrol a new one, their account is protected by password alone.",
+          "Verify their identity through a channel you trust before continuing — this request is a common target for impersonation.",
+        ]}
+        confirmLabel="Reset authenticator"
+        onConfirm={(reason) => resetAuthenticator(user.id, reason)}
+      />
+
+      <ConfirmDialog
+        open={confirming === "deactivate"}
+        onOpenChange={(next) => setConfirming(next ? "deactivate" : null)}
+        title="Deactivate account"
+        subject={`${user.name} · ${user.email}`}
+        consequences={[
+          "They are signed out of every device immediately, mid-task.",
+          "They will not be able to sign in until reactivated.",
+          "Their history, case memberships and audit entries are kept — nothing is deleted.",
+        ]}
+        confirmLabel="Deactivate"
+        onConfirm={(reason) => setStatus(user.id, "deactivated", reason)}
+      />
     </>
   );
 }
