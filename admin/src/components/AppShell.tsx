@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   MonitorSmartphone,
   ScrollText,
-  ShieldCheck,
   ToggleLeft,
   Users,
   type LucideIcon,
@@ -13,9 +12,9 @@ import {
 import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
-import { Avatar } from "./ui/primitives";
-import { CURRENT_OPERATOR, ORGANIZATION } from "../data/mock";
-import { cn, initials, relativeLabel } from "../lib/utils";
+import { UserMenu } from "./UserMenu";
+import { cn } from "../lib/utils";
+import { useAuth } from "../features/auth/AuthContext";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -58,6 +57,8 @@ function NavSection({ items, label }: { items: NavItem[]; label: string }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { profile } = useAuth();
+
   return (
     <div className="app-theme flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-[16rem] shrink-0 flex-col border-r border-hairline bg-charcoal-panel/70 md:flex">
@@ -70,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <p className="mt-3.5 truncate rounded-control border border-hairline bg-cream-primary/4 px-2.5 py-1.5 text-[12px] text-sand-muted">
-            {ORGANIZATION.name}
+            {profile?.organizationName ?? "—"}
           </p>
         </div>
 
@@ -79,18 +80,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NavSection items={SECONDARY_NAV} label="Record" />
         </nav>
 
-        <div className="border-t border-hairline px-4 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <Avatar initials={initials(CURRENT_OPERATOR.name)} tone="accent" />
-            <div className="min-w-0">
-              <p className="truncate text-[13px] text-cream-bright">{CURRENT_OPERATOR.name}</p>
-              <p className="truncate text-[11px] text-sand-muted/70">{CURRENT_OPERATOR.role}</p>
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-1.5 text-[11px] text-sand-muted/60">
-            <ShieldCheck className="size-3.5 shrink-0 text-state-ok" strokeWidth={2} aria-hidden="true" />
-            <span>Verified {relativeLabel(CURRENT_OPERATOR.stepUpVerifiedAt)}</span>
-          </div>
+        <div className="border-t border-hairline px-2.5 py-2.5">
+          <UserMenu />
         </div>
       </aside>
 
