@@ -104,6 +104,7 @@ export function GrantPermissionDialog({
                     type="button"
                     onClick={() => setKey(entry.key)}
                     aria-pressed={key === entry.key}
+                    aria-label={`Grant ${entry.key} — ${entry.risk} risk`}
                     className={cn(
                       "flex items-start gap-3 rounded-control border px-3.5 py-2.5 text-left transition-colors",
                       key === entry.key ? "border-signal bg-signal/8" : "border-hairline hover:border-hairline-strong",

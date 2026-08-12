@@ -129,6 +129,12 @@ jobs:
           cache-dependency-path: admin/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+        env:
+          VITE_SUPABASE_URL: https://ci.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          VITE_DEPLOYMENT_PROFILE: local
       - run: npm run build
         env:
           # The console refuses to start without these, by design. CI only
