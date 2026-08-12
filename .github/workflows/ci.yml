@@ -111,6 +111,64 @@ jobs:
       - run: npm run build
       - run: npm run check:bundle
 
+  admin-quality:
+    name: admin-quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          # The console refuses to start without these, by design. CI only
+          # needs them to be present and correctly named — a build must never
+          # carry real values, and these are not real.
+          VITE_SUPABASE_URL: https://ci.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          VITE_DEPLOYMENT_PROFILE: local
+      - name: No server secret may reach a browser bundle
+        working-directory: .
+        run: |
+          # Anything prefixed VITE_ is compiled into JavaScript every visitor
+          # downloads, so a secret committed here is disclosed the moment it
+          # builds. Match on secrets being *used*, not merely named — source
+          # that names them in order to reject them is exactly what we want.
+          failed=0
+
+          # A service key, hardcoded. Both the modern and legacy shapes.
+          if grep -rnE 'sb_secret_[A-Za-z0-9_-]{8,}|"role"[[:space:]]*:[[:space:]]*"service_role"' \
+               admin/src frontend/src 2>/dev/null; then
+            echo "::error::A Supabase secret key literal appears in browser source."
+            failed=1
+          fi
+
+          # A secret read out of the environment and into the bundle.
+          if grep -rnE 'import\.meta\.env\.[A-Za-z_]*(SECRET|SERVICE_ROLE|PRIVATE_KEY)' \
+               admin/src frontend/src 2>/dev/null; then
+            echo "::error::Browser source reads a server-only environment variable."
+            failed=1
+          fi
+
+          # A committed env file carrying one.
+          for f in $(git ls-files 'admin/.env*' 'frontend/.env*' | grep -v '\.example$'); do
+            echo "::error::$f is tracked; local environment files must stay ignored."
+            failed=1
+          done
+
+          test "$failed" -eq 0 && echo "No server secret reaches browser-bundled source."
+          exit "$failed"
+
   browser-security:
     name: browser-security
     runs-on: ubuntu-24.04
@@ -152,7 +210,7 @@ jobs:
   ci-policy-gate:
     name: ci-policy-gate
     if: always()
-    needs: [backend-unit, backend-postgres, frontend-quality, browser-security, migration-and-supabase-lint]
+    needs: [backend-unit, backend-postgres, frontend-quality, admin-quality, browser-security, migration-and-supabase-lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -161,6 +219,7 @@ jobs:
           BACKEND_UNIT: ${{ needs.backend-unit.result }}
           BACKEND_POSTGRES: ${{ needs.backend-postgres.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
+          ADMIN_QUALITY: ${{ needs.admin-quality.result }}
           BROWSER_SECURITY: ${{ needs.browser-security.result }}
           MIGRATION_LINT: ${{ needs.migration-and-supabase-lint.result }}
-        run: test "$BACKEND_UNIT$BACKEND_POSTGRES$FRONTEND_QUALITY$BROWSER_SECURITY$MIGRATION_LINT" = "successsuccesssuccesssuccesssuccess"
+        run: test "$BACKEND_UNIT$BACKEND_POSTGRES$FRONTEND_QUALITY$ADMIN_QUALITY$BROWSER_SECURITY$MIGRATION_LINT" = "successsuccesssuccesssuccesssuccesssuccess"

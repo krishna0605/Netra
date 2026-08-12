@@ -20,7 +20,14 @@ export function dailyCounts(events: ActivityEvent[], predicate: (event: Activity
 
   const buckets = Array.from({ length: days }, () => 0);
   for (const event of matching) {
-    const age = Math.floor((startOfToday.getTime() - Date.parse(event.at)) / DAY);
+    // Compare midnights, not instants. Subtracting a mid-afternoon timestamp
+    // from this morning's midnight gives a negative span, which floors to -1
+    // and pushes today's events off the end of the array — so the most recent
+    // day, the one that matters most, silently reads as zero.
+    const eventDay = new Date(Date.parse(event.at));
+    eventDay.setHours(0, 0, 0, 0);
+
+    const age = Math.round((startOfToday.getTime() - eventDay.getTime()) / DAY);
     const index = days - 1 - age;
     if (index >= 0 && index < days) buckets[index] += 1;
   }

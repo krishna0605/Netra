@@ -209,6 +209,21 @@ export type SetPasswordInput = {
   revokeSessions: boolean;
 };
 
+/**
+ * Test seam. The module holds one state, as a server would, so tests that
+ * mutate it would otherwise leak into each other and pass or fail by
+ * ordering. Clearing storage alone is not enough — the in-memory copy is
+ * already loaded.
+ */
+export function resetDirectory() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+  state = seed();
+}
+
 export const directoryApi = {
   read: () => settle(state),
 
