@@ -1,0 +1,208 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+import { AuthContext, STEP_UP_WINDOW_MS, type AdminProfile, type AuthStage, type AuthValue } from "./AuthContext";
+import { IS_LOCAL } from "../../lib/env";
+import { ORGANIZATION, USERS } from "../../data/mock";
+import { supabase } from "../../lib/supabase";
+
+/**
+ * Administrative session state.
+ *
+ * The session lives here and nowhere else — the Supabase client is configured
+ * with `persistSession: false`, so closing the tab or reloading ends it. That
+ * is why `stage` starts at "resolving" and settles on "anonymous" rather than
+ * attempting to restore anything.
+ */
+
+/** Never say whether an address exists; a sign-in form is an enumeration oracle otherwise. */
+const GENERIC_REJECTION = "Those credentials were not accepted.";
+
+function profileFor(email: string, userId: string): AdminProfile | null {
+  const known = USERS.find((user) => user.email.toLowerCase() === email.toLowerCase());
+
+  if (known) {
+    const administrative = known.isOwner || known.roleSlug === "admin";
+    return {
+      userId,
+      email: known.email,
+      displayName: known.name,
+      role: known.isOwner ? "Owner" : (known.roleSlug ?? "Viewer"),
+      organizationName: ORGANIZATION.name,
+      isOwner: known.isOwner,
+      isAdministrative: administrative,
+    };
+  }
+
+  // Local development: any account that can authenticate against the project is
+  // treated as an administrator, so the console is usable before the directory
+  // endpoint exists. In every other profile an unknown account is refused —
+  // authenticating is not the same as being authorized.
+  if (!IS_LOCAL) return null;
+
+  return {
+    userId,
+    email,
+    displayName: email.split("@")[0] ?? email,
+    role: "Admin",
+    organizationName: ORGANIZATION.name,
+    isOwner: false,
+    isAdministrative: true,
+  };
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [stage, setStage] = useState<AuthStage>("resolving");
+  const [profile, setProfile] = useState<AdminProfile | null>(null);
+  const [verifiedAt, setVerifiedAt] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const pendingEmail = useRef("");
+
+  // No restoration by design. Any session Supabase may still hold in memory
+  // from a hot reload is discarded so development matches production.
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.signOut({ scope: "local" }).finally(() => {
+      if (!cancelled) setStage("anonymous");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const settleAfterFactor = useCallback(async (email: string, userId: string) => {
+    const resolved = profileFor(email, userId);
+    if (!resolved || !resolved.isAdministrative) {
+      setProfile(null);
+      setStage("not_permitted");
+      return;
+    }
+    setProfile(resolved);
+    setVerifiedAt(new Date().toISOString());
+    setStage("choosing");
+  }, []);
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      setBusy(true);
+      setError("");
+      try {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+
+        if (signInError || !data.session) {
+          setError(GENERIC_REJECTION);
+          return;
+        }
+
+        pendingEmail.current = data.user?.email ?? email.trim().toLowerCase();
+
+        const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+        const needsSecondFactor = assurance?.nextLevel === "aal2" && assurance.currentLevel !== "aal2";
+
+        if (needsSecondFactor) {
+          setStage("challenge");
+          return;
+        }
+
+        await settleAfterFactor(pendingEmail.current, data.user?.id ?? "");
+      } catch {
+        setError("Sign-in is unavailable. Check your connection and try again.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [settleAfterFactor],
+  );
+
+  const verifyCode = useCallback(
+    async (code: string) => {
+      setBusy(true);
+      setError("");
+      try {
+        const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+        const totp = factors?.totp?.find((factor) => factor.status === "verified") ?? factors?.totp?.[0];
+
+        if (listError || !totp) {
+          setError("No authenticator is enrolled on this account.");
+          return;
+        }
+
+        const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({
+          factorId: totp.id,
+          code: code.trim(),
+        });
+
+        if (verifyError) {
+          setError("That code was not accepted. Codes expire after 30 seconds.");
+          return;
+        }
+
+        const { data } = await supabase.auth.getUser();
+        await settleAfterFactor(pendingEmail.current || (data.user?.email ?? ""), data.user?.id ?? "");
+      } catch {
+        setError("Verification is unavailable. Check your connection and try again.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [settleAfterFactor],
+  );
+
+  const chooseAdministration = useCallback(() => {
+    setStage((current) => (current === "choosing" ? "active" : current));
+  }, []);
+
+  const returnToChooser = useCallback(() => {
+    setStage((current) => (current === "active" ? "choosing" : current));
+  }, []);
+
+  const signOut = useCallback(async () => {
+    setBusy(true);
+    try {
+      await supabase.auth.signOut({ scope: "global" });
+    } catch {
+      // Signing out locally must succeed even if the network call does not.
+    } finally {
+      pendingEmail.current = "";
+      setProfile(null);
+      setVerifiedAt(null);
+      setError("");
+      setStage("anonymous");
+      setBusy(false);
+    }
+  }, []);
+
+  const isStepUpFresh = useCallback(
+    (maxAgeMs: number = STEP_UP_WINDOW_MS) => {
+      if (!verifiedAt) return false;
+      return Date.now() - Date.parse(verifiedAt) < maxAgeMs;
+    },
+    [verifiedAt],
+  );
+
+  const clearError = useCallback(() => setError(""), []);
+
+  const value = useMemo<AuthValue>(
+    () => ({
+      stage,
+      profile,
+      verifiedAt,
+      error,
+      busy,
+      signIn,
+      verifyCode,
+      chooseAdministration,
+      returnToChooser,
+      signOut,
+      clearError,
+      isStepUpFresh,
+    }),
+    [stage, profile, verifiedAt, error, busy, signIn, verifyCode, chooseAdministration, returnToChooser, signOut, clearError, isStepUpFresh],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
