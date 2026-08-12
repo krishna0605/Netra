@@ -137,7 +137,7 @@ export function ConfirmDialog({
                   placeholder="Why is this necessary?"
                   autoComplete="off"
                 />
-                <p className="mt-1.5 text-xs text-sand-muted/60">
+                <p className="mt-1.5 text-xs text-sand-muted/70">
                   {reason.trim().length > 0 && !reasonOk ? "At least 10 characters" : "Stored with your name in the audit trail"}
                 </p>
               </div>

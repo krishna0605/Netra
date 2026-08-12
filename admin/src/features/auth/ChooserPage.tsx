@@ -142,7 +142,7 @@ function WorkspaceCard({
 
       <span className="mt-auto pt-1">
         {note ? <Tag tone="accent">{note}</Tag> : null}
-        {footnote ? <span className="block font-mono text-[11px] text-sand-muted/60">{footnote}</span> : null}
+        {footnote ? <span className="block font-mono text-[11px] text-sand-muted/70">{footnote}</span> : null}
       </span>
 
       <span

@@ -151,7 +151,7 @@ export function PasswordDialog({
                     />
                     <span className="text-[13px] text-sand-muted">
                       End every session they have open
-                      <span className="mt-0.5 block text-xs text-sand-muted/60">
+                      <span className="mt-0.5 block text-xs text-sand-muted/70">
                         Leave this on. A password change that leaves an old session signed in has not actually locked anyone out.
                       </span>
                     </span>
@@ -168,7 +168,7 @@ export function PasswordDialog({
                     onChange={(event) => setReason(event.target.value)}
                     placeholder="Why is this necessary?"
                   />
-                  <p className="mt-1.5 text-xs text-sand-muted/60">
+                  <p className="mt-1.5 text-xs text-sand-muted/70">
                     {reason.trim().length > 0 && !reasonValid ? "At least 10 characters" : "Stored with your name in the audit trail"}
                   </p>
                 </div>
@@ -199,7 +199,7 @@ export function PasswordDialog({
               </div>
 
               <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
-                <p className="text-xs text-sand-muted/60">You will see this password once.</p>
+                <p className="text-xs text-sand-muted/70">You will see this password once.</p>
                 <div className="flex gap-2">
                   <Dialog.Close asChild>
                     <Button variant="ghost" size="sm" disabled={busy}>

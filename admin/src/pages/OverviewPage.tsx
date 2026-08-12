@@ -188,7 +188,7 @@ export function OverviewPage() {
               <ul className="divide-y divide-[color:var(--color-hairline)]">
                 {recentDenials.map((event) => (
                   <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
-                    <time className="shrink-0 font-mono text-xs text-sand-muted/60">{timeLabel(event.at)}</time>
+                    <time className="shrink-0 font-mono text-xs text-sand-muted/70">{timeLabel(event.at)}</time>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-[13px] text-state-crit">{event.action}</p>
                       <p className="mt-0.5 truncate text-xs text-sand-muted/70">
@@ -216,7 +216,7 @@ export function OverviewPage() {
               <ul className="divide-y divide-[color:var(--color-hairline)]">
                 {recentAdminActions.map((event) => (
                   <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
-                    <time className="shrink-0 text-xs text-sand-muted/60">{relativeLabel(event.at)}</time>
+                    <time className="shrink-0 text-xs text-sand-muted/70">{relativeLabel(event.at)}</time>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-[13px] text-cream-primary">{event.action}</p>
                       <p className="mt-0.5 truncate text-xs text-sand-muted/70">{event.after}</p>

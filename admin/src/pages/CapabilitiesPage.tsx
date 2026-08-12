@@ -64,7 +64,7 @@ export function CapabilitiesPage() {
                         <Status tone={STATE[flag.state].tone}>{STATE[flag.state].label}</Status>
                       </Td>
                       <Td className="max-w-md text-[13px] leading-snug text-sand-muted">{flag.reason}</Td>
-                      <Td>{flag.requiresAal2 ? <Tag tone="accent">Required</Tag> : <span className="text-[13px] text-sand-muted/40">—</span>}</Td>
+                      <Td>{flag.requiresAal2 ? <Tag tone="accent">Required</Tag> : <span className="text-[13px] text-sand-muted/70">—</span>}</Td>
                       <Td className="font-mono text-xs text-sand-muted/70">{flag.durableConsumer ?? "—"}</Td>
                     </tr>
                   ))}

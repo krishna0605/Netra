@@ -105,7 +105,7 @@ export function CloneRoleDialog({
 
             <div>
               <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="clone-description">
-                Description <span className="text-sand-muted/55">(optional)</span>
+                Description <span className="text-sand-muted/70">(optional)</span>
               </label>
               <Input
                 id="clone-description"

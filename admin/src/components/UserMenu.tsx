@@ -22,7 +22,7 @@ export function UserMenu() {
           <span className="block truncate text-[13px] text-cream-bright">{profile.displayName}</span>
           <span className="block truncate text-[11px] text-sand-muted/70">{profile.role}</span>
         </span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-sand-muted/50" strokeWidth={1.75} aria-hidden="true" />
+        <ChevronsUpDown className="size-3.5 shrink-0 text-sand-muted/70" strokeWidth={1.75} aria-hidden="true" />
       </DropdownMenu.Trigger>
 
       <DropdownMenu.Portal>

@@ -202,7 +202,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   </div>
                 </div>
 
-                <p className="-mt-1 text-xs text-sand-muted/65">
+                <p className="-mt-1 text-xs text-sand-muted/70">
                   {ROLES.find((role) => role.slug === roleSlug)?.description}
                 </p>
 
@@ -217,7 +217,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   />
                   <span className="text-[13px] text-sand-muted">
                     Require a new password at first sign-in
-                    <span className="mt-0.5 block text-xs text-sand-muted/60">
+                    <span className="mt-0.5 block text-xs text-sand-muted/70">
                       Recommended. You will have seen this password, so it should not stay in use.
                     </span>
                   </span>
@@ -249,7 +249,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               </div>
 
               <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
-                <p className="text-xs text-sand-muted/60">Recorded in the audit trail.</p>
+                <p className="text-xs text-sand-muted/70">Recorded in the audit trail.</p>
                 <div className="flex gap-2">
                   <Dialog.Close asChild>
                     <Button variant="ghost" size="sm" disabled={busy}>

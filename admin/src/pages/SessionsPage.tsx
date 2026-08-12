@@ -101,7 +101,7 @@ export function SessionsPage() {
                           <Avatar initials={initials(session.userName)} />
                           <span className="min-w-0">
                             <span className="block truncate text-[13px] text-cream-bright">{session.userName}</span>
-                            <span className="block truncate font-mono text-xs text-sand-muted/65">{session.userEmail}</span>
+                            <span className="block truncate font-mono text-xs text-sand-muted/70">{session.userEmail}</span>
                           </span>
                         </div>
                       </Td>

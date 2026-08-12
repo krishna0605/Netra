@@ -90,7 +90,7 @@ export function StatTile({
       <div className="mt-2.5 flex flex-wrap items-baseline gap-2">
         <p className={cn("font-mono text-[26px] leading-none font-semibold", alert ? "text-state-crit" : "text-cream-bright")}>
           {value}
-          {of ? <span className="text-base text-sand-muted/55">/{of}</span> : null}
+          {of ? <span className="text-base text-sand-muted/70">/{of}</span> : null}
         </p>
         {delta ? (
           <span className={cn("text-xs font-medium", delta.good === false ? "text-state-crit" : "text-state-ok")}>
@@ -98,7 +98,7 @@ export function StatTile({
           </span>
         ) : null}
       </div>
-      {hint ? <p className="mt-2 text-xs text-sand-muted/60">{hint}</p> : null}
+      {hint ? <p className="mt-2 text-xs text-sand-muted/70">{hint}</p> : null}
     </Panel>
   );
 }

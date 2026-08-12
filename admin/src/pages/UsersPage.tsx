@@ -8,7 +8,9 @@ import { AddUserDialog } from "../components/AddUserDialog";
 import { ROLE_BY_SLUG } from "../data/mock";
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonTable } from "../components/states";
+import { LiveRegion, regionStatus } from "../components/a11y";
 import { LoadMore, useIncremental } from "../components/LoadMore";
+import { SortableTh, useSort, useSortState } from "../components/SortableTh";
 import { initials, relativeLabel } from "../lib/utils";
 
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
@@ -20,6 +22,7 @@ export function UsersPage() {
   const [role, setRole] = useState("all");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [mfaGapOnly, setMfaGapOnly] = useState(false);
+  const { sortKey, direction, toggleSort } = useSortState<"name" | "roleSlug" | "lastActivityAt">("name");
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -32,7 +35,8 @@ export function UsersPage() {
     });
   }, [users, query, role, status, mfaGapOnly]);
 
-  const page = useIncremental(rows, 25);
+  const sorted = useSort(rows, sortKey, direction);
+  const page = useIncremental(sorted, 25);
   const pending = users.filter((user) => user.status === "invited").length;
 
   return (
@@ -51,7 +55,7 @@ export function UsersPage() {
       <PageBody>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[15rem] flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/50" strokeWidth={1.75} aria-hidden="true" />
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/70" strokeWidth={1.75} aria-hidden="true" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -96,12 +100,18 @@ export function UsersPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>User</Th>
-                    <Th>Role</Th>
+                    <SortableTh field="name" sortKey={sortKey} direction={direction} onSort={toggleSort}>
+                      User
+                    </SortableTh>
+                    <SortableTh field="roleSlug" sortKey={sortKey} direction={direction} onSort={toggleSort}>
+                      Role
+                    </SortableTh>
                     <Th>Status</Th>
                     <Th>Authenticator</Th>
                     <Th>Denied 24h</Th>
-                    <Th>Last activity</Th>
+                    <SortableTh field="lastActivityAt" sortKey={sortKey} direction={direction} onSort={toggleSort}>
+                      Last activity
+                    </SortableTh>
                     <Th className="w-12" />
                   </tr>
                 </thead>
@@ -139,7 +149,7 @@ export function UsersPage() {
                         {user.deniedLast24h > 0 ? (
                           <span className="font-mono text-[13px] text-state-crit">{user.deniedLast24h}</span>
                         ) : (
-                          <span className="font-mono text-[13px] text-sand-muted/40">0</span>
+                          <span className="font-mono text-[13px] text-sand-muted/70">0</span>
                         )}
                       </Td>
                       <Td className="text-[13px] whitespace-nowrap text-sand-muted">
@@ -148,7 +158,7 @@ export function UsersPage() {
                       <Td>
                         <Link
                           to={`/users/${user.id}`}
-                          className="grid size-7 place-items-center rounded-control text-sand-muted/50 transition-colors hover:text-signal"
+                          className="grid size-7 place-items-center rounded-control text-sand-muted/70 transition-colors hover:text-signal"
                           aria-label={`Open ${user.name}`}
                         >
                           <ChevronRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
@@ -161,9 +171,11 @@ export function UsersPage() {
             </TableWrap>
           </DataRegion>
           {!loading && !error ? (
-            <LoadMore shown={page.shown} total={rows.length} remaining={page.remaining} onMore={page.showMore} noun="accounts" />
+            <LoadMore shown={page.shown} total={sorted.length} remaining={page.remaining} onMore={page.showMore} noun="accounts" />
           ) : null}
         </Panel>
+
+        <LiveRegion message={regionStatus({ loading, error, count: sorted.length, noun: "accounts" })} />
       </PageBody>
 
       <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />

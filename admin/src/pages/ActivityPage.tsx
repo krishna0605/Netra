@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { DataRegion, SkeletonTable } from "../components/states";
+import { LiveRegion, regionStatus } from "../components/a11y";
 import { LoadMore, useIncremental } from "../components/LoadMore";
 import { PageBody, PageHeader, ResultBadge } from "../components/common";
 import { cn, dateTimeLabel, timeLabel } from "../lib/utils";
@@ -93,7 +94,7 @@ export function ActivityPage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[15rem] flex-1">
             <Search
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/50"
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/70"
               strokeWidth={1.75}
               aria-hidden="true"
             />
@@ -175,7 +176,7 @@ export function ActivityPage() {
                       <Td className="font-mono text-xs whitespace-nowrap text-sand-muted">{timeLabel(event.at)}</Td>
                       <Td>
                         <span className="block text-[13px] text-cream-bright">{event.actor}</span>
-                        {event.actorEmail ? <span className="block font-mono text-xs text-sand-muted/60">{event.actorEmail}</span> : null}
+                        {event.actorEmail ? <span className="block font-mono text-xs text-sand-muted/70">{event.actorEmail}</span> : null}
                       </Td>
                       <Td className="text-[13px] whitespace-nowrap text-sand-muted">{event.role}</Td>
                       <Td>
@@ -209,6 +210,8 @@ export function ActivityPage() {
             <LoadMore shown={page.shown} total={rows.length} remaining={page.remaining} onMore={page.showMore} noun="events" />
           ) : null}
         </Panel>
+
+        <LiveRegion message={regionStatus({ loading, error, count: rows.length, noun: "events" })} />
       </PageBody>
     </>
   );

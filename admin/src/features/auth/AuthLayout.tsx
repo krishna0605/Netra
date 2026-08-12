@@ -36,7 +36,7 @@ export function AuthLayout({
 
         <div className="mt-7">{children}</div>
 
-        {footer ? <div className="mt-6 text-center text-[12.5px] text-sand-muted/65">{footer}</div> : null}
+        {footer ? <div className="mt-6 text-center text-[12.5px] text-sand-muted/70">{footer}</div> : null}
       </div>
     </div>
   );

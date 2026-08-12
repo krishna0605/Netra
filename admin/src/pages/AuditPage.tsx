@@ -72,7 +72,7 @@ export function AuditPage() {
 
                 <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
                   <div className="rounded-control border border-hairline bg-charcoal-deep/50 px-4 py-3">
-                    <p className="text-[11px] tracking-[0.08em] text-sand-muted/55 uppercase">Before</p>
+                    <p className="text-[11px] tracking-[0.08em] text-sand-muted/70 uppercase">Before</p>
                     <p className="mt-1 font-mono text-xs break-words text-sand-muted">{event.before}</p>
                   </div>
                   <div className="rounded-control border border-signal/35 bg-signal/6 px-4 py-3">
@@ -81,7 +81,7 @@ export function AuditPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-sand-muted/60">
+                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-sand-muted/70">
                   <span>{event.actor}</span>
                   <span className="flex items-center gap-1.5 font-mono">
                     <Link2 className="size-3" strokeWidth={2} aria-hidden="true" />

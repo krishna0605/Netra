@@ -144,7 +144,7 @@ export function GrantPermissionDialog({
 
             <div>
               <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="grant-reason">
-                Reason {reasonRequired ? "" : <span className="text-sand-muted/55">(optional)</span>}
+                Reason {reasonRequired ? "" : <span className="text-sand-muted/70">(optional)</span>}
               </label>
               <Input
                 id="grant-reason"
@@ -168,7 +168,7 @@ export function GrantPermissionDialog({
           </div>
 
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
-            <p className="text-xs text-sand-muted/60">Recorded in the audit trail.</p>
+            <p className="text-xs text-sand-muted/70">Recorded in the audit trail.</p>
             <div className="flex gap-2">
               <Dialog.Close asChild>
                 <Button variant="ghost" size="sm" disabled={busy}>

@@ -12,6 +12,7 @@ import {
 import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { SkipLink } from "./a11y";
 import { UserMenu } from "./UserMenu";
 import { cn } from "../lib/utils";
 import { useAuth } from "../features/auth/AuthContext";
@@ -35,7 +36,7 @@ const SECONDARY_NAV: NavItem[] = [
 function NavSection({ items, label }: { items: NavItem[]; label: string }) {
   return (
     <div className="flex flex-col gap-0.5 px-2.5">
-      <p className="px-2.5 pt-5 pb-2 text-[11px] font-medium tracking-[0.1em] text-sand-muted/45 uppercase">{label}</p>
+      <p className="px-2.5 pt-5 pb-2 text-[11px] font-medium tracking-[0.1em] text-sand-muted/70 uppercase">{label}</p>
       {items.map((item) => (
         <NavLink
           key={item.to}
@@ -56,11 +57,12 @@ function NavSection({ items, label }: { items: NavItem[]; label: string }) {
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, idleWarning, secondsLeft }: { children: ReactNode; idleWarning?: boolean; secondsLeft?: number }) {
   const { profile } = useAuth();
 
   return (
     <div className="app-theme flex min-h-screen">
+      <SkipLink />
       <aside className="sticky top-0 hidden h-screen w-[16rem] shrink-0 flex-col border-r border-hairline bg-charcoal-panel/70 md:flex">
         <div className="px-4 py-4">
           <div className="flex items-center gap-2.5">
@@ -81,6 +83,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="border-t border-hairline px-2.5 py-2.5">
+          {/* Surfaced in the rail as well as the modal, so the warning is
+              visible from anywhere on the screen rather than only where the
+              dialog happens to sit. */}
+          {idleWarning && secondsLeft !== undefined ? (
+            <p
+              className="mb-2 rounded-control border border-state-warn/50 bg-state-warn/10 px-2.5 py-1.5 text-[11.5px] text-state-warn"
+              role="status"
+            >
+              Session ends in {Math.max(0, Math.ceil(secondsLeft))}s
+            </p>
+          ) : null}
           <UserMenu />
         </div>
       </aside>
@@ -106,7 +119,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         ))}
       </nav>
 
-      <main className="min-w-0 flex-1 pb-20 md:pb-0">{children}</main>
+      <main id="main" tabIndex={-1} className="min-w-0 flex-1 pb-20 md:pb-0">
+        {children}
+      </main>
     </div>
   );
 }

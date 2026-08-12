@@ -39,6 +39,11 @@
   --color-hairline: rgba(233, 224, 209, 0.1);
   --color-hairline-strong: rgba(233, 224, 209, 0.2);
 
+  /* Dividers may be faint; the edge of something you can type into may not.
+     WCAG treats a control boundary as meaningful non-text content at 3:1,
+     and the hairlines above sit at 1.7:1. Measured, not estimated. */
+  --color-control-edge: rgba(233, 224, 209, 0.42);
+
   /* Reserved status colours, desaturated so they read as state and never
      compete with the accent. Always paired with a word, never colour alone. */
   --color-state-ok: #7fb488;

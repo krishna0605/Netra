@@ -87,7 +87,7 @@ export function RolesPage() {
                           {role.isSystem ? <Lock className="size-3 opacity-50" strokeWidth={2.5} aria-hidden="true" /> : null}
                           {role.name}
                         </span>
-                        <span className="mt-1 block text-[11px] font-normal text-sand-muted/55">
+                        <span className="mt-1 block text-[11px] font-normal text-sand-muted/70">
                           {role.memberCount === 1 ? "1 member" : `${role.memberCount} members`}
                         </span>
                       </th>
@@ -109,7 +109,7 @@ export function RolesPage() {
                         >
                           {permission.key}
                         </span>
-                        <span className="mt-0.5 block max-w-[20rem] text-xs leading-snug text-sand-muted/65">
+                        <span className="mt-0.5 block max-w-[20rem] text-xs leading-snug text-sand-muted/70">
                           {permission.description}
                         </span>
                       </th>
@@ -158,7 +158,7 @@ export function RolesPage() {
                                   aria-hidden="true"
                                 />
                               ) : (
-                                <Minus className="size-3.5 text-sand-muted/25" strokeWidth={2} aria-hidden="true" />
+                                <Minus className="size-3.5 text-sand-muted/70" strokeWidth={2} aria-hidden="true" />
                               )}
                             </button>
                           </td>
@@ -181,7 +181,7 @@ export function RolesPage() {
                   <div className="flex flex-wrap items-center gap-2.5">
                     <span className="text-[15px] font-medium text-cream-bright">{role.name}</span>
                     {role.isSystem ? <Tag tone="neutral">Standard</Tag> : <Tag tone="accent">Custom</Tag>}
-                    <span className="ml-auto font-mono text-xs text-sand-muted/65">
+                    <span className="ml-auto font-mono text-xs text-sand-muted/70">
                       {role.permissions.length} of {PERMISSIONS.length}
                     </span>
                   </div>
@@ -197,7 +197,7 @@ export function RolesPage() {
               {PERMISSIONS.map((permission) => (
                 <li key={permission.key} className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-cream-primary/3">
                   <span className="font-mono text-[13px] text-cream-primary">{permission.key}</span>
-                  <span className="text-xs text-sand-muted/60">{permission.category}</span>
+                  <span className="text-xs text-sand-muted/70">{permission.category}</span>
                   <span className="ml-auto">
                     <RiskBadge risk={permission.risk} />
                   </span>

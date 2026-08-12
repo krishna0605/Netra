@@ -233,7 +233,7 @@ export function UserDetailPage() {
                                   `${permission.key} removed from ${user.name}.`,
                                 )
                               }
-                              className="grid size-6 place-items-center rounded-control text-sand-muted/50 hover:text-state-crit"
+                              className="grid size-6 place-items-center rounded-control text-sand-muted/70 hover:text-state-crit"
                               aria-label={`Withdraw ${permission.key}`}
                             >
                               <X className="size-3.5" strokeWidth={2} aria-hidden="true" />
@@ -313,7 +313,7 @@ export function UserDetailPage() {
               <ul className="divide-y divide-[color:var(--color-hairline)]">
                 {userActivity.slice(0, 12).map((event) => (
                   <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
-                    <time className="shrink-0 font-mono text-xs text-sand-muted/60">{timeLabel(event.at)}</time>
+                    <time className="shrink-0 font-mono text-xs text-sand-muted/70">{timeLabel(event.at)}</time>
                     <div className="min-w-0 flex-1">
                       <p className={`truncate font-mono text-[13px] ${event.result === "denied" ? "text-state-crit" : "text-cream-primary"}`}>
                         {event.action}

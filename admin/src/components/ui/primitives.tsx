@@ -13,7 +13,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary: "bg-signal text-charcoal-deep hover:bg-signal-dark",
-        outline: "border border-hairline-strong text-cream-primary hover:border-signal/70 hover:text-signal",
+        outline: "border border-control-edge text-cream-primary hover:border-signal/70 hover:text-signal",
         ghost: "text-sand-muted hover:bg-cream-primary/6 hover:text-cream-bright",
         danger: "border border-state-crit/70 text-state-crit hover:bg-state-crit hover:text-charcoal-deep",
       },
@@ -184,8 +184,8 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
   return (
     <input
       className={cn(
-        "h-9 w-full rounded-control border border-hairline-strong bg-charcoal-deep px-3 text-sm text-cream-primary",
-        "placeholder:text-sand-muted/45 focus:border-signal focus:outline-none",
+        "h-9 w-full rounded-control border border-control-edge bg-charcoal-deep px-3 text-sm text-cream-primary",
+        "placeholder:text-sand-muted/70 focus:border-signal focus:outline-none",
         className,
       )}
       {...props}
@@ -197,8 +197,8 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "w-full rounded-control border border-hairline-strong bg-charcoal-deep px-3 py-2 text-sm text-cream-primary",
-        "placeholder:text-sand-muted/45 focus:border-signal focus:outline-none",
+        "w-full rounded-control border border-control-edge bg-charcoal-deep px-3 py-2 text-sm text-cream-primary",
+        "placeholder:text-sand-muted/70 focus:border-signal focus:outline-none",
         className,
       )}
       {...props}
@@ -210,7 +210,7 @@ export function NativeSelect({ className, ...props }: ComponentProps<"select">) 
   return (
     <select
       className={cn(
-        "h-9 rounded-control border border-hairline-strong bg-charcoal-deep px-2.5 text-[13px] text-cream-primary",
+        "h-9 rounded-control border border-control-edge bg-charcoal-deep px-2.5 text-[13px] text-cream-primary",
         "focus:border-signal focus:outline-none",
         className,
       )}

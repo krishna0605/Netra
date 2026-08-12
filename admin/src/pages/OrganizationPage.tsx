@@ -124,7 +124,7 @@ export function OrganizationPage() {
                   }
                   className="w-24"
                 />
-                <span className="text-[13px] text-sand-muted/60">days, then archived</span>
+                <span className="text-[13px] text-sand-muted/70">days, then archived</span>
               </label>
 
               <div className="flex flex-wrap items-center gap-4">

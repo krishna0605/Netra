@@ -103,7 +103,7 @@ export function OwnerTransferDialog({ open, onOpenChange }: { open: boolean; onO
               <span className="mb-1.5 block text-[13px] text-sand-muted/80">New owner</span>
               <div className="relative mb-2">
                 <Search
-                  className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/50"
+                  className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sand-muted/70"
                   strokeWidth={1.75}
                   aria-hidden="true"
                 />

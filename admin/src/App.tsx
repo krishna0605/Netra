@@ -38,7 +38,7 @@ function Workspace() {
   return (
     <WorkspaceRouter>
       <DirectoryProvider>
-        <AppShell>
+        <AppShell idleWarning={warning} secondsLeft={msRemaining / 1000}>
           <Routes>
             <Route path="/" element={<OverviewPage />} />
             <Route path="/users" element={<UsersPage />} />

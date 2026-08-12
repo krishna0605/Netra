@@ -123,7 +123,7 @@ export function VerifyPage() {
           {busy ? "Verifying…" : "Verify"}
         </Button>
 
-        <p className="text-center text-[12.5px] text-sand-muted/60">
+        <p className="text-center text-[12.5px] text-sand-muted/70">
           Lost your authenticator? Contact your department administrator.
         </p>
       </div>
