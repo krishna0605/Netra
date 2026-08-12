@@ -8,6 +8,7 @@ import { AddUserDialog } from "../components/AddUserDialog";
 import { ROLE_BY_SLUG } from "../data/mock";
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonTable } from "../components/states";
+import { LoadMore, useIncremental } from "../components/LoadMore";
 import { initials, relativeLabel } from "../lib/utils";
 
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
@@ -31,6 +32,7 @@ export function UsersPage() {
     });
   }, [users, query, role, status, mfaGapOnly]);
 
+  const page = useIncremental(rows, 25);
   const pending = users.filter((user) => user.status === "invited").length;
 
   return (
@@ -104,7 +106,7 @@ export function UsersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((user) => (
+                  {page.slice.map((user) => (
                     <tr key={user.id} className="group transition-colors hover:bg-cream-primary/4">
                       <Td>
                         <Link to={`/users/${user.id}`} className="flex min-w-0 items-center gap-3">
@@ -158,6 +160,9 @@ export function UsersPage() {
               </Table>
             </TableWrap>
           </DataRegion>
+          {!loading && !error ? (
+            <LoadMore shown={page.shown} total={rows.length} remaining={page.remaining} onMore={page.showMore} noun="accounts" />
+          ) : null}
         </Panel>
       </PageBody>
 

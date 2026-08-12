@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonList } from "../components/states";
+import { LoadMore, useIncremental } from "../components/LoadMore";
 import { Button, Panel, PanelHeader, Status, Tag } from "../components/ui/primitives";
 import { PageBody, PageHeader } from "../components/common";
 import { dateTimeLabel } from "../lib/utils";
@@ -10,6 +11,7 @@ import { dateTimeLabel } from "../lib/utils";
 export function AuditPage() {
   const { audit, loading, error, refetch } = useDirectory();
   const head = audit[0];
+  const page = useIncremental(audit, 20);
 
   return (
     <>
@@ -51,7 +53,7 @@ export function AuditPage() {
             emptyState={<div className="px-5 py-14 text-center text-[13px] text-sand-muted">No administrator actions recorded yet.</div>}
           >
           <ol className="divide-y divide-[color:var(--color-hairline)]">
-            {audit.map((event) => (
+            {page.slice.map((event) => (
               <li key={event.id} className="px-5 py-5 transition-colors hover:bg-cream-primary/3">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
                   <Tag tone="accent" mono>
@@ -91,6 +93,9 @@ export function AuditPage() {
             ))}
           </ol>
           </DataRegion>
+          {!loading && !error ? (
+            <LoadMore shown={page.shown} total={audit.length} remaining={page.remaining} onMore={page.showMore} noun="entries" />
+          ) : null}
         </Panel>
       </PageBody>
     </>

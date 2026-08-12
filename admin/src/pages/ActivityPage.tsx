@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { DataRegion, SkeletonTable } from "../components/states";
+import { LoadMore, useIncremental } from "../components/LoadMore";
 import { PageBody, PageHeader, ResultBadge } from "../components/common";
 import { cn, dateTimeLabel, timeLabel } from "../lib/utils";
 import { downloadCsv, stampedName, toCsv } from "../lib/csv";
@@ -53,6 +54,7 @@ export function ActivityPage() {
     });
   }, [inWindow, result, source, query]);
 
+  const page = useIncremental(rows, 25);
   const deniedTotal = inWindow.filter((event) => event.result === "denied").length;
   const windowLabel = WINDOWS.find((entry) => entry.hours === hours)?.label ?? "";
 
@@ -165,7 +167,7 @@ export function ActivityPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((event) => (
+                  {page.slice.map((event) => (
                     <tr
                       key={event.id}
                       className={cn("transition-colors hover:bg-cream-primary/4", event.result === "denied" && "bg-state-crit/5")}
@@ -203,6 +205,9 @@ export function ActivityPage() {
               </Table>
             </TableWrap>
           </DataRegion>
+          {!loading && !error ? (
+            <LoadMore shown={page.shown} total={rows.length} remaining={page.remaining} onMore={page.showMore} noun="events" />
+          ) : null}
         </Panel>
       </PageBody>
     </>
