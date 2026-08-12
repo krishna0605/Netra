@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useMemo, useState } from "react";
 
 import { useDirectory } from "../data/store";
+import { DataRegion, SkeletonTable } from "../components/states";
 import { Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, ResultBadge } from "../components/common";
 import { cn, timeLabel } from "../lib/utils";
@@ -19,7 +20,7 @@ const SOURCE_LABEL: Record<ActivitySource, string> = {
 };
 
 export function ActivityPage() {
-  const { activity } = useDirectory();
+  const { activity, loading, error, refetch } = useDirectory();
   // Denied-in-24-hours is the default: it turns a log into a triage queue.
   const [result, setResult] = useState<ActivityResult | "all">("denied");
   const [source, setSource] = useState<ActivitySource | "all">("all");
@@ -81,9 +82,14 @@ export function ActivityPage() {
         </div>
 
         <Panel>
-          {rows.length === 0 ? (
-            <EmptyState title="No events match those filters" hint="Widen the result or source filter." />
-          ) : (
+          <DataRegion
+            loading={loading}
+            error={error}
+            empty={rows.length === 0}
+            onRetry={() => void refetch()}
+            skeleton={<SkeletonTable rows={8} columns={7} />}
+            emptyState={<EmptyState title="No events match those filters" hint="Widen the result or source filter." />}
+          >
             <TableWrap>
               <Table className="min-w-[56rem]">
                 <thead>
@@ -130,7 +136,7 @@ export function ActivityPage() {
                 </tbody>
               </Table>
             </TableWrap>
-          )}
+          </DataRegion>
         </Panel>
       </PageBody>
     </>

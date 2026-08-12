@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AppShell } from "./components/AppShell";
+import { ErrorBoundary } from "./components/states";
 import { AuthProvider } from "./features/auth/AuthProvider";
 import { ChooserPage } from "./features/auth/ChooserPage";
 import { DirectoryProvider } from "./data/store";
@@ -84,20 +85,22 @@ function Gate() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <Gate />
-      <Toaster
-        position="bottom-right"
-        toastOptions={{
-          style: {
-            background: "#242424",
-            border: "1px solid rgba(233, 224, 209, 0.2)",
-            color: "#e9e0d1",
-            borderRadius: "6px",
-            fontFamily: '"Geist", ui-sans-serif, system-ui, sans-serif',
-          },
-        }}
-      />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Gate />
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: "#242424",
+              border: "1px solid rgba(233, 224, 209, 0.2)",
+              color: "#e9e0d1",
+              borderRadius: "6px",
+              fontFamily: '"Geist", ui-sans-serif, system-ui, sans-serif',
+            },
+          }}
+        />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

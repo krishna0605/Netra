@@ -3,12 +3,13 @@ import { Link } from "react-router-dom";
 
 import { ORGANIZATION, OVERVIEW } from "../data/mock";
 import { useDirectory } from "../data/store";
+import { ErrorState, SkeletonList, SkeletonTiles } from "../components/states";
 import { Button, Panel, PanelHeader, Tag } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
 import { relativeLabel, timeLabel } from "../lib/utils";
 
 export function OverviewPage() {
-  const { users, activity, audit } = useDirectory();
+  const { users, activity, audit, loading, error, refetch } = useDirectory();
 
   const recentDenials = activity.filter((event) => event.result === "denied").slice(0, 5);
   const recentAdminActions = audit.slice(0, 5);
@@ -78,6 +79,9 @@ export function OverviewPage() {
       />
 
       <PageBody>
+        {error ? <Panel><ErrorState detail={error} onRetry={() => void refetch()} /></Panel> : null}
+
+        {loading ? <SkeletonTiles count={5} /> : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <StatTile
             label="Active users"
@@ -102,6 +106,7 @@ export function OverviewPage() {
           <StatTile label="Pending invitations" value={live.invites} hint={`${OVERVIEW.invitesExpiringToday} expiring today`} />
           <StatTile label="Temporary grants" value={live.grants} hint="Expire 01 September" />
         </div>
+        )}
 
         <Panel>
           <PanelHeader title="Needs attention" />
@@ -139,6 +144,7 @@ export function OverviewPage() {
                 </Button>
               }
             />
+            {loading ? <SkeletonList rows={5} /> : (
             <ul className="divide-y divide-[color:var(--color-hairline)]">
               {recentDenials.map((event) => (
                 <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
@@ -152,6 +158,7 @@ export function OverviewPage() {
                 </li>
               ))}
             </ul>
+            )}
           </Panel>
 
           <Panel>
@@ -163,6 +170,7 @@ export function OverviewPage() {
                 </Button>
               }
             />
+            {loading ? <SkeletonList rows={5} /> : (
             <ul className="divide-y divide-[color:var(--color-hairline)]">
               {recentAdminActions.map((event) => (
                 <li key={event.id} className="flex items-baseline gap-4 px-5 py-3">
@@ -177,6 +185,7 @@ export function OverviewPage() {
                 </li>
               ))}
             </ul>
+            )}
           </Panel>
         </div>
       </PageBody>

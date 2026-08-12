@@ -25,9 +25,11 @@ export function PasswordDialog({
   const [revokeSessions, setRevokeSessions] = useState(true);
   const [issued, setIssued] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
 
   const reasonValid = reason.trim().length >= 10;
-  const canSubmit = passwordStrength(password).score >= 3 && reasonValid && code.trim().length === 6;
+  const canSubmit = passwordStrength(password).score >= 3 && reasonValid && code.trim().length === 6 && !busy;
 
   function reset() {
     setPasswordValue(generatePassword());
@@ -37,11 +39,20 @@ export function PasswordDialog({
     setRevokeSessions(true);
     setIssued(null);
     setCopied(false);
+    setFailure("");
   }
 
-  function submit() {
-    setPassword({ userId: user.id, reason: reason.trim(), requireChange, revokeSessions });
-    setIssued(password);
+  async function submit() {
+    setBusy(true);
+    setFailure("");
+    try {
+      await setPassword({ userId: user.id, reason: reason.trim(), requireChange, revokeSessions });
+      setIssued(password);
+    } catch (cause) {
+      setFailure(cause instanceof Error ? cause.message : "The password could not be replaced.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function copyDetails() {
@@ -176,18 +187,27 @@ export function PasswordDialog({
                     autoComplete="off"
                   />
                 </div>
+
+                {failure ? (
+                  <p
+                    role="alert"
+                    className="rounded-control border border-state-crit/50 bg-state-crit/10 px-4 py-3 text-[13px] text-state-crit"
+                  >
+                    {failure}
+                  </p>
+                ) : null}
               </div>
 
               <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
                 <p className="text-xs text-sand-muted/60">You will see this password once.</p>
                 <div className="flex gap-2">
                   <Dialog.Close asChild>
-                    <Button variant="ghost" size="sm">
+                    <Button variant="ghost" size="sm" disabled={busy}>
                       Cancel
                     </Button>
                   </Dialog.Close>
-                  <Button variant="primary" size="sm" disabled={!canSubmit} onClick={submit}>
-                    Set password
+                  <Button variant="primary" size="sm" disabled={!canSubmit} onClick={() => void submit()}>
+                    {busy ? "Applying…" : "Set password"}
                   </Button>
                 </div>
               </footer>

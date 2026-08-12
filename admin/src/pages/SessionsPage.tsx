@@ -5,10 +5,11 @@ import { useMemo, useState } from "react";
 import { Avatar, Button, EmptyState, NativeSelect, Panel, Status, Table, TableWrap, Td, Th } from "../components/ui/primitives";
 import { PageBody, PageHeader, StatTile } from "../components/common";
 import { useDirectory } from "../data/store";
+import { DataRegion, SkeletonTable, SkeletonTiles } from "../components/states";
 import { initials, relativeLabel } from "../lib/utils";
 
 export function SessionsPage() {
-  const { sessions, revokeSession, revokeAllSessions } = useDirectory();
+  const { sessions, revokeSession, revokeAllSessions, loading, error, refetch } = useDirectory();
   const [origin, setOrigin] = useState("all");
   const [aal, setAal] = useState("all");
 
@@ -35,8 +36,13 @@ export function SessionsPage() {
         action={
           <Button variant="danger" size="sm" disabled={sessions.length === 0}
             onClick={() => {
-              revokeAllSessions();
-              toast.success("All sessions ended", { description: "Everyone must sign in again." });
+              void revokeAllSessions()
+                .then(() => toast.success("All sessions ended", { description: "Everyone must sign in again." }))
+                .catch((cause: unknown) =>
+                  toast.error("Could not complete", {
+                    description: cause instanceof Error ? cause.message : "Try again.",
+                  }),
+                );
             }}>
             <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             Revoke all
@@ -45,11 +51,15 @@ export function SessionsPage() {
       />
 
       <PageBody>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Active sessions" value={sessions.length} hint="Across both consoles" />
-          <StatTile label="Single factor" value={singleFactor} hint="Cannot satisfy a step-up challenge" alert={singleFactor > 0} />
-          <StatTile label="Administration" value={administration} hint="Signed in to this console" />
-        </div>
+        {loading ? (
+          <SkeletonTiles count={3} />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatTile label="Active sessions" value={sessions.length} hint="Across both consoles" />
+            <StatTile label="Single factor" value={singleFactor} hint="Cannot satisfy a step-up challenge" alert={singleFactor > 0} />
+            <StatTile label="Administration" value={administration} hint="Signed in to this console" />
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect value={origin} onChange={(event) => setOrigin(event.target.value)} aria-label="Filter by origin">
@@ -68,9 +78,14 @@ export function SessionsPage() {
         </div>
 
         <Panel>
-          {rows.length === 0 ? (
-            <EmptyState title="No sessions match those filters" />
-          ) : (
+          <DataRegion
+            loading={loading}
+            error={error}
+            empty={rows.length === 0}
+            onRetry={() => void refetch()}
+            skeleton={<SkeletonTable rows={6} columns={7} />}
+            emptyState={<EmptyState title="No sessions match those filters" />}
+          >
             <TableWrap>
               <Table>
                 <thead>
@@ -108,8 +123,17 @@ export function SessionsPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            revokeSession(session.id);
-                            toast.success("Session ended", { description: `${session.userName} signed out of ${session.origin}.` });
+                            void revokeSession(session.id)
+                              .then(() =>
+                                toast.success("Session ended", {
+                                  description: `${session.userName} signed out of ${session.origin}.`,
+                                }),
+                              )
+                              .catch((cause: unknown) =>
+                                toast.error("Could not complete", {
+                                  description: cause instanceof Error ? cause.message : "Try again.",
+                                }),
+                              );
                           }}
                         >
                           Revoke
@@ -120,7 +144,7 @@ export function SessionsPage() {
                 </tbody>
               </Table>
             </TableWrap>
-          )}
+          </DataRegion>
         </Panel>
       </PageBody>
     </>

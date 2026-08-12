@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { PERMISSION_BY_KEY, ROLES, ROLE_BY_SLUG } from "../data/mock";
 import { useDirectory } from "../data/store";
+import { ErrorState, SkeletonList } from "../components/states";
 import {
   Avatar,
   Button,
@@ -33,11 +34,49 @@ const SOURCE: Record<PermissionSource, { label: string; tone: "neutral" | "accen
 
 export function UserDetailPage() {
   const { userId } = useParams();
-  const { users, activity, sessions, changeRole, setStatus, resetAuthenticator, revokeSession, revokeUserSessions, removeGrant } =
-    useDirectory();
+  const {
+    users,
+    activity,
+    sessions,
+    changeRole,
+    setStatus,
+    resetAuthenticator,
+    revokeSession,
+    revokeUserSessions,
+    removeGrant,
+    loading,
+    error,
+    refetch,
+  } = useDirectory();
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   const user = users.find((entry) => String(entry.id) === userId);
+
+  if (loading) {
+    return (
+      <>
+        <PageHeader title="Loading" summary="Fetching this account." />
+        <PageBody>
+          <Panel>
+            <SkeletonList rows={6} />
+          </Panel>
+        </PageBody>
+      </>
+    );
+  }
+
+  if (error) {
+    return (
+      <>
+        <PageHeader title="Could not load" summary="This account could not be fetched." />
+        <PageBody>
+          <Panel>
+            <ErrorState detail={error} onRetry={() => void refetch()} />
+          </Panel>
+        </PageBody>
+      </>
+    );
+  }
 
   if (!user) {
     return (
@@ -57,11 +96,28 @@ export function UserDetailPage() {
   const userSessions = sessions.filter((session) => session.userId === user.id);
   const deniedCount = userActivity.filter((event) => event.result === "denied").length;
 
-  function onRoleChange(nextSlug: string) {
+  async function onRoleChange(nextSlug: string) {
     if (!user || nextSlug === user.roleSlug) return;
     const nextName = ROLE_BY_SLUG.get(nextSlug)?.name ?? nextSlug;
-    changeRole(user.id, nextSlug, `Role changed to ${nextName} by an administrator.`);
-    toast.success("Role updated", { description: `${user.name} is now ${nextName}.` });
+    try {
+      await changeRole(user.id, nextSlug, `Role changed to ${nextName} by an administrator.`);
+      toast.success("Role updated", { description: `${user.name} is now ${nextName}.` });
+    } catch (cause) {
+      toast.error("Role not changed", {
+        description: cause instanceof Error ? cause.message : "The change was not saved.",
+      });
+    }
+  }
+
+  /** Mutations report their own failure; nothing is assumed to have worked. */
+  function apply(operation: Promise<void>, success: string, detail: string) {
+    void operation
+      .then(() => toast.success(success, { description: detail }))
+      .catch((cause: unknown) =>
+        toast.error("Could not complete", {
+          description: cause instanceof Error ? cause.message : "Try again.",
+        }),
+      );
   }
 
   return (
@@ -112,7 +168,7 @@ export function UserDetailPage() {
                 user.isOwner ? (
                   <Tag tone="accent">Owner — transfer to change</Tag>
                 ) : (
-                  <NativeSelect value={user.roleSlug} onChange={(event) => onRoleChange(event.target.value)} aria-label="Change role">
+                  <NativeSelect value={user.roleSlug} onChange={(event) => void onRoleChange(event.target.value)} aria-label="Change role">
                     {ROLES.filter((entry) => entry.slug !== "admin").map((entry) => (
                       <option key={entry.slug} value={entry.slug}>
                         {entry.name}
@@ -154,10 +210,13 @@ export function UserDetailPage() {
                           {permission.source === "granted" ? (
                             <button
                               type="button"
-                              onClick={() => {
-                                removeGrant(user.id, permission.key);
-                                toast.success("Grant withdrawn", { description: `${permission.key} removed from ${user.name}.` });
-                              }}
+                              onClick={() =>
+                                apply(
+                                  removeGrant(user.id, permission.key),
+                                  "Grant withdrawn",
+                                  `${permission.key} removed from ${user.name}.`,
+                                )
+                              }
                               className="grid size-6 place-items-center rounded-control text-sand-muted/50 hover:text-state-crit"
                               aria-label={`Withdraw ${permission.key}`}
                             >
@@ -202,10 +261,13 @@ export function UserDetailPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              revokeSession(session.id);
-                              toast.success("Session ended", { description: `${user.name} signed out of ${session.origin}.` });
-                            }}
+                            onClick={() =>
+                              apply(
+                                revokeSession(session.id),
+                                "Session ended",
+                                `${user.name} signed out of ${session.origin}.`,
+                              )
+                            }
                           >
                             Revoke
                           </Button>
@@ -285,10 +347,13 @@ export function UserDetailPage() {
                 variant="outline"
                 size="sm"
                 disabled={user.mfa === "unenrolled"}
-                onClick={() => {
-                  resetAuthenticator(user.id, "Enrolled device lost. Identity verified out of band.");
-                  toast.success("Authenticator reset", { description: `${user.name} must enrol again at next sign-in.` });
-                }}
+                onClick={() =>
+                  apply(
+                    resetAuthenticator(user.id, "Enrolled device lost. Identity verified out of band."),
+                    "Authenticator reset",
+                    `${user.name} must enrol again at next sign-in.`,
+                  )
+                }
               >
                 <ShieldOff className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Reset authenticator
@@ -297,10 +362,9 @@ export function UserDetailPage() {
                 variant="outline"
                 size="sm"
                 disabled={userSessions.length === 0}
-                onClick={() => {
-                  revokeUserSessions(user.id);
-                  toast.success("All sessions ended", { description: `${user.name} was signed out everywhere.` });
-                }}
+                onClick={() =>
+                  apply(revokeUserSessions(user.id), "All sessions ended", `${user.name} was signed out everywhere.`)
+                }
               >
                 <LogOut className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Revoke all sessions
@@ -309,10 +373,13 @@ export function UserDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setStatus(user.id, "active", "Account restored by an administrator.");
-                    toast.success("Account reactivated", { description: `${user.name} can sign in again.` });
-                  }}
+                  onClick={() =>
+                    apply(
+                      setStatus(user.id, "active", "Account restored by an administrator."),
+                      "Account reactivated",
+                      `${user.name} can sign in again.`,
+                    )
+                  }
                 >
                   <RotateCcw className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                   Reactivate
@@ -322,10 +389,13 @@ export function UserDetailPage() {
                   variant="danger"
                   size="sm"
                   disabled={user.isOwner}
-                  onClick={() => {
-                    setStatus(user.id, "deactivated", "Access withdrawn by an administrator.");
-                    toast.success("Account deactivated", { description: `${user.name} can no longer sign in.` });
-                  }}
+                  onClick={() =>
+                    apply(
+                      setStatus(user.id, "deactivated", "Access withdrawn by an administrator."),
+                      "Account deactivated",
+                      `${user.name} can no longer sign in.`,
+                    )
+                  }
                 >
                   <UserMinus className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                   Deactivate

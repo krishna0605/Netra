@@ -2,19 +2,20 @@ import { CheckCircle2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useDirectory } from "../data/store";
+import { DataRegion, SkeletonList } from "../components/states";
 import { Button, Panel, PanelHeader, Status, Tag } from "../components/ui/primitives";
 import { PageBody, PageHeader } from "../components/common";
 import { dateTimeLabel } from "../lib/utils";
 
 export function AuditPage() {
-  const { audit } = useDirectory();
+  const { audit, loading, error, refetch } = useDirectory();
   const head = audit[0];
 
   return (
     <>
       <PageHeader
         title="Audit trail"
-        summary={`${audit.length} administrator actions · sequence ${head.chainIndex}`}
+        summary={loading ? "Loading…" : `${audit.length} administrator actions · sequence ${head?.chainIndex ?? "—"}`}
         action={
           <Button
             variant="outline"
@@ -41,6 +42,14 @@ export function AuditPage() {
 
         <Panel>
           <PanelHeader title="Entries" hint="Newest first" />
+          <DataRegion
+            loading={loading}
+            error={error}
+            empty={audit.length === 0}
+            onRetry={() => void refetch()}
+            skeleton={<SkeletonList rows={4} />}
+            emptyState={<div className="px-5 py-14 text-center text-[13px] text-sand-muted">No administrator actions recorded yet.</div>}
+          >
           <ol className="divide-y divide-[color:var(--color-hairline)]">
             {audit.map((event) => (
               <li key={event.id} className="px-5 py-5 transition-colors hover:bg-cream-primary/3">
@@ -81,6 +90,7 @@ export function AuditPage() {
               </li>
             ))}
           </ol>
+          </DataRegion>
         </Panel>
       </PageBody>
     </>

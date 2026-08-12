@@ -7,12 +7,13 @@ import { MfaBadge, PageBody, PageHeader, RoleBadge, UserStatusBadge } from "../c
 import { AddUserDialog } from "../components/AddUserDialog";
 import { ROLE_BY_SLUG } from "../data/mock";
 import { useDirectory } from "../data/store";
+import { DataRegion, SkeletonTable } from "../components/states";
 import { initials, relativeLabel } from "../lib/utils";
 
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
 
 export function UsersPage() {
-  const { users } = useDirectory();
+  const { users, loading, error, refetch } = useDirectory();
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("all");
@@ -81,9 +82,14 @@ export function UsersPage() {
         </div>
 
         <Panel>
-          {rows.length === 0 ? (
-            <EmptyState title="No users match those filters" hint="Clear a filter to widen the result." />
-          ) : (
+          <DataRegion
+            loading={loading}
+            error={error}
+            empty={rows.length === 0}
+            onRetry={() => void refetch()}
+            skeleton={<SkeletonTable rows={7} columns={6} />}
+            emptyState={<EmptyState title="No users match those filters" hint="Clear a filter to widen the result." />}
+          >
             <TableWrap>
               <Table>
                 <thead>
@@ -151,7 +157,7 @@ export function UsersPage() {
                 </tbody>
               </Table>
             </TableWrap>
-          )}
+          </DataRegion>
         </Panel>
       </PageBody>
 
