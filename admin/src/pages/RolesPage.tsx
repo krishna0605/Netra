@@ -4,7 +4,6 @@ import { useState } from "react";
 
 import { Button, Panel, PanelHeader, TableWrap, Tag } from "../components/ui/primitives";
 import { CloneRoleDialog } from "../components/CloneRoleDialog";
-import { PERMISSIONS } from "../data/mock";
 import { PageBody, PageHeader, RiskBadge } from "../components/common";
 import { SkeletonTable } from "../components/states";
 import { cn } from "../lib/utils";
@@ -12,7 +11,7 @@ import { useDirectory } from "../data/store";
 import type { PermissionKey } from "../data/types";
 
 export function RolesPage() {
-  const { roles, setRolePermission, loading, error, refetch } = useDirectory();
+  const { roles, permissions, setRolePermission, loading, error, refetch } = useDirectory();
   const [focusedRole, setFocusedRole] = useState<string | null>(null);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
@@ -36,7 +35,7 @@ export function RolesPage() {
     <>
       <PageHeader
         title="Roles & permissions"
-        summary={`${systemCount} standard roles · ${customCount} custom · ${PERMISSIONS.length} permissions`}
+        summary={`${systemCount} standard roles · ${customCount} custom · ${permissions.length} permissions`}
         action={
           <Button variant="primary" size="sm" onClick={() => setCloneOpen(true)}>
             <Copy className="size-3.5" strokeWidth={2} aria-hidden="true" />
@@ -95,7 +94,7 @@ export function RolesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {PERMISSIONS.map((permission) => (
+                  {permissions.map((permission) => (
                     <tr key={permission.key} className="transition-colors hover:bg-cream-primary/3">
                       <th
                         scope="row"
@@ -182,7 +181,7 @@ export function RolesPage() {
                     <span className="text-[15px] font-medium text-cream-bright">{role.name}</span>
                     {role.isSystem ? <Tag tone="neutral">Standard</Tag> : <Tag tone="accent">Custom</Tag>}
                     <span className="ml-auto font-mono text-xs text-sand-muted/70">
-                      {role.permissions.length} of {PERMISSIONS.length}
+                      {role.permissions.length} of {permissions.length}
                     </span>
                   </div>
                   <p className="mt-1 text-[13px] text-sand-muted/80">{role.description}</p>
@@ -194,7 +193,7 @@ export function RolesPage() {
           <Panel>
             <PanelHeader title="Permissions by risk" />
             <ul className="divide-y divide-[color:var(--color-hairline)]">
-              {PERMISSIONS.map((permission) => (
+              {permissions.map((permission) => (
                 <li key={permission.key} className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors hover:bg-cream-primary/3">
                   <span className="font-mono text-[13px] text-cream-primary">{permission.key}</span>
                   <span className="text-xs text-sand-muted/70">{permission.category}</span>

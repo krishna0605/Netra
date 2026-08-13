@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useState } from "react";
 
-import { PERMISSION_BY_KEY } from "../data/mock";
 import { useDirectory } from "../data/store";
 import { ErrorState, SkeletonList } from "../components/states";
 import {
@@ -47,6 +46,7 @@ export function UserDetailPage() {
     revokeUserSessions,
     removeGrant,
     roles,
+    permissions: catalogue,
     loading,
     error,
     refetch,
@@ -213,7 +213,7 @@ export function UserDetailPage() {
                         <Td>
                           <span className="font-mono text-[13px] text-cream-primary">{permission.key}</span>
                           <span className="mt-0.5 block max-w-md text-xs text-sand-muted/70">
-                            {permission.reason || PERMISSION_BY_KEY.get(permission.key)?.description}
+                            {permission.reason || catalogue.find((entry) => entry.key === permission.key)?.description}
                           </span>
                         </Td>
                         <Td>

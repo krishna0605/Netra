@@ -3,7 +3,6 @@ import { X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button, Input, NativeSelect } from "./ui/primitives";
-import { PERMISSIONS } from "../data/mock";
 import { RiskBadge } from "./common";
 import { cn } from "../lib/utils";
 import { useDirectory } from "../data/store";
@@ -26,11 +25,11 @@ export function GrantPermissionDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { grantPermission } = useDirectory();
+  const { grantPermission, permissions } = useDirectory();
 
   const available = useMemo(
-    () => PERMISSIONS.filter((permission) => !user.permissions.some((held) => held.key === permission.key && held.source === "granted")),
-    [user.permissions],
+    () => permissions.filter((permission) => !user.permissions.some((held) => held.key === permission.key && held.source === "granted")),
+    [permissions, user.permissions],
   );
 
   const [key, setKey] = useState<PermissionKey | "">("");
@@ -39,7 +38,7 @@ export function GrantPermissionDialog({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
-  const permission = PERMISSIONS.find((entry) => entry.key === key);
+  const permission = permissions.find((entry) => entry.key === key);
 
   // High-risk permissions always carry a written justification. For the rest a
   // reason is still asked for, just not enforced — the audit entry reads better

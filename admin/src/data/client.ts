@@ -1,10 +1,12 @@
-import { ACTIVITY, AUDIT, CURRENT_OPERATOR, ORGANIZATION, ROLES, SESSIONS, USERS } from "./mock";
+import { ACTIVITY, AUDIT, CAPABILITIES, CURRENT_OPERATOR, ORGANIZATION, PERMISSIONS, ROLES, SESSIONS, USERS } from "./mock";
 import type {
   ActivityEvent,
   AdminUser,
   AuditEvent,
   EffectivePermission,
+  CapabilityFlag,
   OrganizationSettings,
+  Permission,
   PermissionKey,
   Role,
   RoleSlug,
@@ -34,6 +36,11 @@ export type DirectorySnapshot = {
   audit: AuditEvent[];
   roles: Role[];
   organization: OrganizationSettings;
+  /** The permission catalogue and feature flags are server-owned too, so they
+   *  travel in the snapshot rather than being imported from a seed file.
+   *  Otherwise a screen keeps reading fixtures after the backend lands. */
+  permissions: Permission[];
+  capabilities: CapabilityFlag[];
 };
 
 export class ApiFailure extends Error {
@@ -109,6 +116,8 @@ function seed(): DirectorySnapshot {
     audit: AUDIT,
     roles: ROLES,
     organization: ORGANIZATION,
+    permissions: PERMISSIONS,
+    capabilities: CAPABILITIES,
   };
 }
 
@@ -126,6 +135,8 @@ function load(): DirectorySnapshot {
       audit: parsed.audit ?? AUDIT,
       roles: parsed.roles ?? ROLES,
       organization: parsed.organization ?? ORGANIZATION,
+      permissions: parsed.permissions ?? PERMISSIONS,
+      capabilities: parsed.capabilities ?? CAPABILITIES,
     };
   } catch {
     return seed();

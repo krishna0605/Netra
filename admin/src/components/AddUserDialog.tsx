@@ -4,17 +4,16 @@ import { useState } from "react";
 
 import { Button, Input, NativeSelect, Panel, Tag } from "./ui/primitives";
 import { PasswordField } from "./PasswordField";
-import { ORGANIZATION, ROLES } from "../data/mock";
 import { generatePassword, passwordStrength, useDirectory } from "../data/store";
 
 type Handover = { name: string; email: string; password: string; roleName: string };
 
 export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { createUser } = useDirectory();
+  const { createUser, roles, organization } = useDirectory();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [department, setDepartment] = useState(ORGANIZATION.name);
+  const [department, setDepartment] = useState(organization.name);
   const [roleSlug, setRoleSlug] = useState("viewer");
   const [password, setPassword] = useState(generatePassword);
   const [requireChange, setRequireChange] = useState(true);
@@ -35,7 +34,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   function reset() {
     setName("");
     setEmail("");
-    setDepartment(ORGANIZATION.name);
+    setDepartment(organization.name);
     setRoleSlug("viewer");
     setPassword(generatePassword());
     setRequireChange(true);
@@ -54,7 +53,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         name: created.name,
         email: created.email,
         password,
-        roleName: ROLES.find((role) => role.slug === roleSlug)?.name ?? roleSlug,
+        roleName: roles.find((role) => role.slug === roleSlug)?.name ?? roleSlug,
       });
     } catch (cause) {
       // The dialog stays open with everything the operator typed intact. Closing
@@ -193,7 +192,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       onChange={(event) => setRoleSlug(event.target.value)}
                       className="h-9 w-full"
                     >
-                      {ROLES.filter((role) => role.slug !== "admin").map((role) => (
+                      {roles.filter((role) => role.slug !== "admin").map((role) => (
                         <option key={role.slug} value={role.slug}>
                           {role.name}
                         </option>
@@ -203,7 +202,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </div>
 
                 <p className="-mt-1 text-xs text-sand-muted/70">
-                  {ROLES.find((role) => role.slug === roleSlug)?.description}
+                  {roles.find((role) => role.slug === roleSlug)?.description}
                 </p>
 
                 <PasswordField value={password} onChange={setPassword} />

@@ -5,7 +5,6 @@ import { useMemo, useState } from "react";
 import { Avatar, Button, EmptyState, Input, NativeSelect, Panel, Table, TableWrap, Tag, Td, Th } from "../components/ui/primitives";
 import { MfaBadge, PageBody, PageHeader, RoleBadge, UserStatusBadge } from "../components/common";
 import { AddUserDialog } from "../components/AddUserDialog";
-import { ROLE_BY_SLUG } from "../data/mock";
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonTable } from "../components/states";
 import { LiveRegion, regionStatus } from "../components/a11y";
@@ -16,7 +15,7 @@ import { initials, relativeLabel } from "../lib/utils";
 type StatusFilter = "all" | "active" | "invited" | "locked_out" | "deactivated";
 
 export function UsersPage() {
-  const { users, loading, error, refetch } = useDirectory();
+  const { users, roles, loading, error, refetch } = useDirectory();
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("all");
@@ -67,7 +66,7 @@ export function UsersPage() {
 
           <NativeSelect value={role} onChange={(event) => setRole(event.target.value)} aria-label="Filter by role">
             <option value="all">All roles</option>
-            {[...ROLE_BY_SLUG.values()].map((entry) => (
+            {roles.map((entry) => (
               <option key={entry.slug} value={entry.slug}>
                 {entry.name}
               </option>
@@ -129,7 +128,7 @@ export function UsersPage() {
                       </Td>
                       <Td>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <RoleBadge name={ROLE_BY_SLUG.get(user.roleSlug)?.name ?? user.roleSlug} isOwner={user.isOwner} />
+                          <RoleBadge name={roles.find((entry) => entry.slug === user.roleSlug)?.name ?? user.roleSlug} isOwner={user.isOwner} />
                           {user.permissions
                             .filter((permission) => permission.source === "granted")
                             .map((permission) => (

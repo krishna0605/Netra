@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { ApiFailure, directoryApi, type CreateUserInput, type DirectorySnapshot, type SetPasswordInput } from "./client";
-import { ORGANIZATION, ROLES } from "./mock";
+import { CAPABILITIES, ORGANIZATION, PERMISSIONS, ROLES } from "./mock";
 import type { AdminUser, OrganizationSettings, PermissionKey, Role, RoleSlug, UserStatus } from "./types";
 
 /**
@@ -19,6 +19,8 @@ const EMPTY: DirectorySnapshot = {
   audit: [],
   roles: ROLES,
   organization: ORGANIZATION,
+  permissions: PERMISSIONS,
+  capabilities: CAPABILITIES,
 };
 
 type DirectoryValue = DirectorySnapshot & {
