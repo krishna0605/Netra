@@ -26,10 +26,10 @@ class TenancySchemaTests(TestCase):
     def test_schema_has_44_domain_and_10_framework_tables(self):
         domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
         self.assertEqual(len(domain_tables), 44)
-        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 18)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 19)
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0017_phase8_security_closure").exists())
-        self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0018_admin_audit_chain").exists())
+        self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0019_multiple_administrators").exists())
 
     def test_case_display_reference_is_unique_within_organization(self):
         Case.objects.create(
@@ -49,13 +49,24 @@ class TenancySchemaTests(TestCase):
                     investigator="Officer",
                 )
 
-    def test_only_one_admin_is_allowed_per_organization(self):
-        first = get_user_model().objects.create_user(username="phase2-admin-one")
-        second = get_user_model().objects.create_user(username="phase2-admin-two")
+    def test_an_organization_may_have_several_administrators(self):
+        """A station has a head and a deputy.
+
+        The single-administrator rule made the head unrecoverable: nothing may
+        act on an administrator, so with exactly one of them a lost
+        authenticator meant editing the database by hand. What replaces it is
+        an application rule — at least one must remain — because a constraint
+        can forbid a second row but cannot require a first.
+        """
+        first = get_user_model().objects.create_user(username="station-head")
+        second = get_user_model().objects.create_user(username="station-deputy")
+
         UserProfile.objects.create(user=first, organization=self.netra, role=UserProfile.Role.ADMIN)
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                UserProfile.objects.create(user=second, organization=self.netra, role=UserProfile.Role.ADMIN)
+        UserProfile.objects.create(user=second, organization=self.netra, role=UserProfile.Role.ADMIN)
+
+        self.assertEqual(
+            UserProfile.objects.filter(organization=self.netra, role=UserProfile.Role.ADMIN).count(), 2
+        )
 
     def test_rate_limit_scope_must_match_user_presence(self):
         now = timezone.now()
@@ -153,7 +164,7 @@ class MigrationHarnessRestoresLatestSchemaTests(MigrationHarnessMixin, Transacti
     """
 
     def test_latest_migration_tracks_the_graph_leaf(self):
-        self.assertEqual(latest_migration(), [("forensics", "0018_admin_audit_chain")])
+        self.assertEqual(latest_migration(), [("forensics", "0019_multiple_administrators")])
 
     def test_rewound_schema_breaks_current_models_and_is_restored(self):
         MigrationExecutor(connection).migrate([("forensics", "0015_custody_chain_index")])

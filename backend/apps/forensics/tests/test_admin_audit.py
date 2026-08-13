@@ -214,3 +214,128 @@ class AdminAuditChainTests(TestCase):
         second = calculate_event_hash("", {"a": 1, "b": 2})
 
         self.assertEqual(first, second)
+
+
+class AdministratorMutationRuleTests(TestCase):
+    """The rules that replaced "nothing may touch an administrator".
+
+    That rule, combined with one administrator per organization, meant the one
+    person who could act was the one person nobody could act on. A station head
+    who lost their authenticator could only be restored by editing the database.
+    """
+
+    def setUp(self):
+        from apps.forensics.models import Organization
+
+        self.organization = Organization.objects.create(name="Station A", slug="station-a")
+        User = get_user_model()
+        self.head = User.objects.create_user(username="head@station-a.test", email="head@station-a.test")
+        self.deputy = User.objects.create_user(username="deputy@station-a.test", email="deputy@station-a.test")
+        self.officer = User.objects.create_user(username="officer@station-a.test", email="officer@station-a.test")
+        for user, role in (
+            (self.head, UserProfile.Role.ADMIN),
+            (self.deputy, UserProfile.Role.ADMIN),
+            (self.officer, UserProfile.Role.INVESTIGATOR),
+        ):
+            UserProfile.objects.create(user=user, organization=self.organization, role=role)
+
+    def _actor(self, user):
+        from common.audit import Actor
+
+        return Actor(
+            user=user.username,
+            role="Admin",
+            authenticated=True,
+            django_user_id=user.id,
+            email=user.email,
+            organization_id=self.organization.id,
+            organization_slug=self.organization.slug,
+            aal="aal2",
+        )
+
+    def test_a_deputy_can_act_on_the_station_head_through_the_console(self):
+        """The case the old rule made impossible, and the reason it changed."""
+        from apps.forensics.services.administration import ensure_console_mutation_allowed
+
+        head_profile = UserProfile.objects.get(user=self.head)
+
+        self.assertIsNone(ensure_console_mutation_allowed(self._actor(self.deputy), head_profile))
+
+    def test_the_generic_user_route_still_refuses_administrator_changes(self):
+        """The older route writes nothing to the audit chain, so administrator
+        changes stay in the console where every one of them is sealed."""
+        from apps.forensics.services.administration import AdministrationProblem, ensure_admin_mutation_allowed
+
+        head_profile = UserProfile.objects.get(user=self.head)
+
+        with self.assertRaises(AdministrationProblem) as raised:
+            ensure_admin_mutation_allowed(self._actor(self.deputy), head_profile)
+
+        self.assertEqual(raised.exception.code, "administrator_change_forbidden")
+
+    def test_an_administrator_cannot_act_on_their_own_account(self):
+        """Resetting your own authenticator locks you out of the console that
+        would have fixed it. Someone else doing it also puts two names in the
+        audit trail instead of one."""
+        from apps.forensics.services.administration import AdministrationProblem, ensure_console_mutation_allowed
+
+        own_profile = UserProfile.objects.get(user=self.head)
+
+        with self.assertRaises(AdministrationProblem) as raised:
+            ensure_console_mutation_allowed(self._actor(self.head), own_profile)
+
+        self.assertEqual(raised.exception.code, "self_mutation_forbidden")
+        self.assertEqual(raised.exception.status, 409)
+
+    def test_an_ordinary_officer_can_still_be_administered(self):
+        from apps.forensics.services.administration import ensure_admin_mutation_allowed
+
+        officer_profile = UserProfile.objects.get(user=self.officer)
+
+        self.assertIsNone(ensure_admin_mutation_allowed(self._actor(self.head), officer_profile))
+
+    def test_the_last_administrator_cannot_be_removed(self):
+        """An organization with no administrator cannot add users, reset
+        credentials or recover anyone, and nothing inside the application can
+        undo it."""
+        from apps.forensics.services.administration import AdministrationProblem, ensure_administrator_remains
+
+        UserProfile.objects.filter(user=self.deputy).update(role=UserProfile.Role.INVESTIGATOR)
+
+        with self.assertRaises(AdministrationProblem) as raised:
+            ensure_administrator_remains(self.organization, losing_user_id=self.head.id)
+
+        self.assertEqual(raised.exception.code, "last_administrator")
+
+    def test_one_of_two_administrators_may_be_removed(self):
+        from apps.forensics.services.administration import ensure_administrator_remains
+
+        self.assertIsNone(ensure_administrator_remains(self.organization, losing_user_id=self.head.id))
+
+    def test_a_deactivated_administrator_does_not_count_as_cover(self):
+        """Counting rows rather than active people would let the last working
+        administrator be removed because a disabled account exists."""
+        from apps.forensics.services.administration import AdministrationProblem, ensure_administrator_remains
+
+        get_user_model().objects.filter(pk=self.deputy.pk).update(is_active=False)
+
+        with self.assertRaises(AdministrationProblem) as raised:
+            ensure_administrator_remains(self.organization, losing_user_id=self.head.id)
+
+        self.assertEqual(raised.exception.code, "last_administrator")
+
+    def test_administrators_in_another_organization_are_not_cover(self):
+        """Seven stations, seven sets of administrators. A head at Station B is
+        no help to Station A and must not satisfy its minimum."""
+        from apps.forensics.models import Organization
+        from apps.forensics.services.administration import AdministrationProblem, ensure_administrator_remains
+
+        other = Organization.objects.create(name="Station B", slug="station-b")
+        elsewhere = get_user_model().objects.create_user(username="head@station-b.test")
+        UserProfile.objects.create(user=elsewhere, organization=other, role=UserProfile.Role.ADMIN)
+        UserProfile.objects.filter(user=self.deputy).update(role=UserProfile.Role.INVESTIGATOR)
+
+        with self.assertRaises(AdministrationProblem) as raised:
+            ensure_administrator_remains(self.organization, losing_user_id=self.head.id)
+
+        self.assertEqual(raised.exception.code, "last_administrator")

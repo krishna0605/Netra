@@ -114,13 +114,15 @@ class UserProfile(TimeStampedModel):
 
     class Meta:
         indexes = [models.Index(fields=["organization", "role"], name="netra_profile_org_role_idx")]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["organization"],
-                condition=models.Q(role="Admin"),
-                name="netra_one_admin_per_org",
-            ),
-        ]
+        # An organization may have several administrators. A police station has
+        # a head and a deputy, and the single-administrator rule made the head
+        # unrecoverable: nothing may act on an administrator, so with exactly
+        # one of them, a lost authenticator meant editing the database by hand.
+        #
+        # What replaces it is an application rule rather than a database one,
+        # because it cannot be expressed as a constraint: an organization must
+        # keep at least one active administrator. See
+        # services/administration.py.
 
 
 class CaseMembership(TimeStampedModel):

@@ -63,7 +63,15 @@ class AdministratorInvariantTests(TestCase):
         self.assertEqual(rejected.status_code, 400)
         self.assertFalse(UserProfile.objects.filter(user__username="second-admin@netra.test").exists())
 
-    def test_current_admin_cannot_be_changed_through_generic_user_route(self):
+    def test_administrators_cannot_be_changed_through_the_generic_user_route(self):
+        """Administrator changes belong in the administration namespace,
+        where every one of them is sealed into the audit chain. The generic
+        route stays shut even though several administrators are now allowed.
+
+        The account here is the caller's own, so the narrower self-mutation
+        rule answers first — resetting your own access locks you out of the
+        console that would have fixed it.
+        """
         response = self.client.patch(
             f"/api/users/{self.admin.id}",
             data={"role": "Investigator", "active": False},
@@ -71,7 +79,7 @@ class AdministratorInvariantTests(TestCase):
             **self._headers(self.admin, aal="aal2"),
         )
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["error"]["code"], "sole_admin_required")
+        self.assertEqual(response.json()["error"]["code"], "self_mutation_forbidden")
         self.admin.refresh_from_db()
         self.assertTrue(self.admin.is_active)
         self.assertEqual(self.admin.netra_profile.role, UserProfile.Role.ADMIN)

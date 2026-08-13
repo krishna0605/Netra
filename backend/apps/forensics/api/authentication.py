@@ -294,8 +294,18 @@ def users(request):
                         status=409,
                     )
                 if profile and profile.role == UserProfile.Role.ADMIN:
+                    # Administrators are changed through the administration
+                    # namespace, which seals every change into the audit chain.
+                    # The refusal is kept now that several administrators are
+                    # permitted, but the old code named a rule that no longer
+                    # exists: there is no longer a sole administrator.
                     return JsonResponse(
-                        {"error": {"code": "sole_admin_required", "message": "Use administrator transfer."}},
+                        {
+                            "error": {
+                                "code": "administrator_change_forbidden",
+                                "message": "Administrator accounts are managed through the administration console.",
+                            }
+                        },
                         status=409,
                     )
                 user.email = email
