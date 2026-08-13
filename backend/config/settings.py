@@ -142,6 +142,12 @@ if NETRA_FREE_PLAN_GUARD and NETRA_REALTIME_PROVIDER == "supabase":
     # Keep stale deployment variables from overriding the guarded profile.
     NETRA_REALTIME_PROVIDER = "sse"
 NETRA_AUTH_PROVIDER = os.getenv("NETRA_AUTH_PROVIDER", "django").lower()
+# How recently a second factor must have been used before a destructive
+# administrative operation is allowed. Bounded at both ends deliberately: below
+# a minute an operator cannot finish a form in time and will be trained to keep
+# their authenticator open, which defeats the control; above an hour it stops
+# being a step-up and becomes a session check that aal already performs.
+NETRA_STEP_UP_MAX_AGE_SECONDS = max(60, min(3600, int(os.getenv("NETRA_STEP_UP_MAX_AGE_SECONDS", "300"))))
 NETRA_MFA_POLICY = os.getenv("NETRA_MFA_POLICY", "admin_required").strip().lower()
 if NETRA_MFA_POLICY not in {"admin_required", "optional"}:
     raise RuntimeError("NETRA_MFA_POLICY must be admin_required or optional")

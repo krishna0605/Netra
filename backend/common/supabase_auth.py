@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 
 from django.conf import settings
 
@@ -22,6 +23,7 @@ class SupabaseUser:
     display_name: str
     role: str
     aal: str = "aal1"
+    factor_verified_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,7 @@ def verify_supabase_request_token(token: str) -> SupabaseVerification:
                 display_name=display_name,
                 role="Viewer",
                 aal=verified.aal,
+                factor_verified_at=verified.factor_verified_at,
             ),
             verified_token=verified,
         )
@@ -114,6 +117,12 @@ def verify_supabase_request_token(token: str) -> SupabaseVerification:
     display_name = metadata.get("display_name") or metadata.get("name") or email or subject
     if not isinstance(display_name, str):
         display_name = email or subject
+    # factor_verified_at is deliberately left unset on this path. Establishing
+    # it would mean reading amr out of an unverified token, exactly as
+    # _remote_aal does for the assurance level — acceptable for deciding what
+    # to show, not for deciding whether a password may be reset. Absent means
+    # the step-up gate refuses, which is the correct answer when the claim
+    # cannot be trusted.
     return SupabaseVerification(
         user=SupabaseUser(id=subject, email=email, display_name=display_name[:200], role="Viewer", aal=_remote_aal(token))
     )

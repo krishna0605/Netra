@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, CaseMembership, UserProfile
+from common.step_up import factor_verified_at
 from common.tenancy import NETRA_ORGANIZATION_ID, netra_organization
 
 
@@ -33,6 +35,10 @@ class Actor:
     organization_id: UUID | None = None
     organization_slug: str = ""
     aal: str = "aal1"
+    # When this session last proved possession of a second factor. Distinct
+    # from aal, which says only that a factor was used at some point in the
+    # session. Destructive operations gate on this; see common/step_up.py.
+    factor_verified_at: datetime | None = None
 
 
 VALID_ROLES = {"Admin", "Investigator", "Analyst", "Viewer"}
@@ -63,6 +69,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
             email=username,
             external_id=getattr(supabase_user, "id", ""),
             aal=getattr(supabase_user, "aal", "aal1"),
+            factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
         )
     profile = UserProfile.objects.select_related("organization").filter(user=user).first()
     if profile is None or not user.is_active:
@@ -74,6 +81,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
             email=user.email or username,
             external_id=getattr(supabase_user, "id", ""),
             aal=getattr(supabase_user, "aal", "aal1"),
+            factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
         )
     return Actor(
         user=profile.display_name or user.username,
@@ -85,6 +93,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
         organization_id=profile.organization_id,
         organization_slug=profile.organization.slug,
         aal=getattr(supabase_user, "aal", "aal1"),
+        factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
     )
 
 
@@ -134,6 +143,10 @@ def actor_from_request(request) -> Actor:
                 organization_id=profile.organization_id,
                 organization_slug=profile.organization.slug,
                 aal=str(validated.get("aal", "aal1")),
+                # The local provider carries the same claim shape, so the
+                # step-up gate behaves identically under both. Without this a
+                # test could only ever exercise the refusal branch.
+                factor_verified_at=factor_verified_at(validated.get("amr")),
             )
         except Exception:
             return Actor(user="Unauthenticated", role="Viewer", authenticated=False)

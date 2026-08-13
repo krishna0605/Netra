@@ -15,6 +15,8 @@ from uuid import UUID
 import jwt
 from django.conf import settings
 
+from common.step_up import factor_verified_at
+
 
 MAX_TOKEN_BYTES = 16 * 1024
 MAX_KID_LENGTH = 128
@@ -36,6 +38,11 @@ class VerifiedSupabaseToken:
     subject: UUID
     email: str
     aal: str
+    # When the session last proved possession of a second factor, read from the
+    # amr claim. None when the token records no such challenge. Callers that
+    # gate destructive work must read this rather than aal, which only says a
+    # factor was used at some point in the session's life.
+    factor_verified_at: datetime | None
     issuer: str
     audience: tuple[str, ...]
     expires_at: datetime
@@ -215,6 +222,12 @@ def verify_es256_token(token: str, *, now: float | None = None) -> VerifiedSupab
         subject=subject,
         email=email,
         aal=claims["aal"],
+        # Deliberately not added to the require list above. A password-only
+        # session legitimately carries no second-factor entry, and demanding
+        # the claim would reject every one of them. Absence is handled where it
+        # matters — as a refusal at the step-up gate — not by making every
+        # ordinary request fail here.
+        factor_verified_at=factor_verified_at(claims.get("amr")),
         issuer=issuer,
         audience=audiences,
         expires_at=datetime.fromtimestamp(expires_at, UTC),
