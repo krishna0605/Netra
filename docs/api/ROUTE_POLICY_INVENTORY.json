@@ -40,6 +40,66 @@
     "view": "apps.forensics.api.admin_console.admin_session"
   },
   {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_users"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/factors",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_factors"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/password",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_password"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/role",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_role"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/sessions/revoke",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_sessions_revoke"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/status",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_status"
+  },
+  {
     "aal": "aal1",
     "authentication": "bearer",
     "capability": null,

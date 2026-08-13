@@ -122,3 +122,96 @@ def find_user_by_email(email: str, *, max_pages: int = 5) -> SupabaseAdminUser |
         if next_page is None:
             break
     return None
+
+
+@dataclass(frozen=True)
+class SupabaseFactor:
+    id: str
+    factor_type: str
+    status: str
+    friendly_name: str
+
+
+def _factor_from_payload(payload: dict[str, Any]) -> SupabaseFactor:
+    return SupabaseFactor(
+        id=str(payload.get("id") or ""),
+        factor_type=str(payload.get("factor_type") or ""),
+        status=str(payload.get("status") or ""),
+        friendly_name=str(payload.get("friendly_name") or ""),
+    )
+
+
+def create_user(email: str, password: str, *, email_confirm: bool = True) -> SupabaseAdminUser:
+    """Create an account with a password the administrator chose.
+
+    email_confirm defaults to True because nothing is sent. The deployment has
+    no approved custom SMTP domain, so an unconfirmed account would wait on a
+    message that never arrives. The administrator hands the password over in
+    person or by whatever channel the unit already trusts, which is also why
+    this exists instead of the invitation flow.
+    """
+    payload = _request(
+        "admin/users",
+        method="POST",
+        payload={"email": email, "password": password, "email_confirm": email_confirm},
+    )
+    return _user_from_payload(payload)
+
+
+def get_user(user_id: str) -> SupabaseAdminUser | None:
+    try:
+        return _user_from_payload(_request(f"admin/users/{urllib.parse.quote(user_id, safe='')}"))
+    except SupabaseAdminError:
+        return None
+
+
+def set_password(user_id: str, password: str) -> SupabaseAdminUser:
+    """Replace an account's password.
+
+    GoTrue invalidates the account's refresh tokens as a side effect, so no new
+    access tokens can be minted afterwards. Already-issued access tokens are a
+    separate problem and are handled by the Netra-side denylist; see
+    common/session_revocation.py.
+    """
+    return _user_from_payload(
+        _request(
+            f"admin/users/{urllib.parse.quote(user_id, safe='')}",
+            method="PUT",
+            payload={"password": password},
+        )
+    )
+
+
+def set_ban(user_id: str, *, banned: bool) -> SupabaseAdminUser:
+    """Disable or restore an account at the identity provider.
+
+    Deactivation is a ban, never a delete. Deleting the Supabase identity would
+    orphan every custody and audit row that names it, and those rows are
+    evidence handling records that must keep resolving to a person long after
+    that person has left the unit.
+
+    "none" is GoTrue's spelling for lifting a ban; a duration lifts it by
+    expiry, and there is no separate unban call.
+    """
+    return _user_from_payload(
+        _request(
+            f"admin/users/{urllib.parse.quote(user_id, safe='')}",
+            method="PUT",
+            payload={"ban_duration": "876000h" if banned else "none"},
+        )
+    )
+
+
+def list_factors(user_id: str) -> list[SupabaseFactor]:
+    payload = _request(f"admin/users/{urllib.parse.quote(user_id, safe='')}/factors")
+    rows = payload.get("factors") if isinstance(payload.get("factors"), list) else []
+    if not rows and isinstance(payload.get("data"), list):
+        rows = payload["data"]
+    return [_factor_from_payload(row) for row in rows if isinstance(row, dict)]
+
+
+def delete_factor(user_id: str, factor_id: str) -> None:
+    _request(
+        f"admin/users/{urllib.parse.quote(user_id, safe='')}/factors/{urllib.parse.quote(factor_id, safe='')}",
+        method="DELETE",
+    )

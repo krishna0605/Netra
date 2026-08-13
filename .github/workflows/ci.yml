@@ -88,6 +88,7 @@ jobs:
           apps.forensics.tests.test_admin_invariants
           apps.forensics.tests.test_admin_console
           apps.forensics.tests.test_admin_audit
+          apps.forensics.tests.test_admin_write_path
           apps.forensics.tests.test_user_provisioning
           apps.forensics.tests.test_jwt_verification
 

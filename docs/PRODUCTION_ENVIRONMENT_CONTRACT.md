@@ -98,6 +98,7 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 |---|---|
 | `NETRA_ADMIN_ORIGINS` | Browser origins permitted to reach `/api/admin/v1/`. Deliberately narrower than `NETRA_FRONTEND_ORIGINS`. Unset falls back to the frontend origins rather than to a wildcard, so a missing value narrows instead of opening. Defence in depth only — never the authorization control |
 | `NETRA_ACCESS_LOG_RETENTION_DAYS` | `365`; reported to the console so the window is stated rather than assumed |
+| `NETRA_STEP_UP_MAX_AGE_SECONDS` | `300`; how recently a second factor must have been used before a destructive administrative operation is allowed. Bounded to 60–3600 in code: below a minute an operator cannot finish a form and learns to keep their authenticator open, which defeats the control; above an hour it is no longer a step-up |
 
 ### Railway JWT verification variables
 

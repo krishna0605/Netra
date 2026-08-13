@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, CaseMembership, UserProfile
+from common.session_revocation import token_is_revoked
 from common.step_up import factor_verified_at
 from common.tenancy import NETRA_ORGANIZATION_ID, netra_organization
 
@@ -97,6 +98,20 @@ def sync_supabase_actor(supabase_user) -> Actor:
     )
 
 
+def _session_was_revoked(django_user_id: int, issued_at) -> bool:
+    """One primary-key lookup on the authentication path.
+
+    Deliberately its own query rather than a join onto the profile read: the
+    common case is that no revocation exists, and this stays a single indexed
+    miss instead of widening every authenticated request's main query.
+    """
+    User = get_user_model()
+    user = User.objects.select_related("netra_session_revocation").filter(pk=django_user_id).first()
+    if user is None:
+        return False
+    return token_is_revoked(user, issued_at)
+
+
 def actor_from_request(request) -> Actor:
     cached_actor = getattr(request, "netra_actor", None)
     if isinstance(cached_actor, Actor):
@@ -126,11 +141,21 @@ def actor_from_request(request) -> Actor:
                 return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
             request.netra_verified_supabase_token = verification.verified_token
             request.netra_supabase_bearer_token = token
-            return sync_supabase_actor(verification.user)
+            actor = sync_supabase_actor(verification.user)
+            issued_at = getattr(verification.verified_token, "issued_at", None)
+            if actor.django_user_id and _session_was_revoked(actor.django_user_id, issued_at):
+                request.netra_auth_error = "session_revoked"
+                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+            return actor
         try:
             auth = JWTAuthentication()
             validated = auth.get_validated_token(token)
             user = auth.get_user(validated)
+            issued = validated.get("iat")
+            issued_at = datetime.fromtimestamp(issued, UTC) if isinstance(issued, (int, float)) else None
+            if _session_was_revoked(user.id, issued_at):
+                request.netra_auth_error = "session_revoked"
+                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
             profile = UserProfile.objects.select_related("organization").filter(user=user).first()
             if profile is None or not user.is_active:
                 return Actor(user=user.get_username(), role="Viewer", authenticated=True, django_user_id=user.id, aal=str(validated.get("aal", "aal1")))

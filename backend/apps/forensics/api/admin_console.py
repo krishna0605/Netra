@@ -16,17 +16,30 @@ serve.
 
 from __future__ import annotations
 
+import json
+
 from django.conf import settings
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from apps.forensics.api.errors import api_error
 from apps.forensics.models import Organization, UserProfile
 from apps.forensics.services.administration import AdministrationProblem, require_privileged_admin
+from apps.forensics.services.admin_users import (
+    account_payload,
+    change_role,
+    clear_authenticator,
+    end_sessions,
+    provision_account,
+    replace_password,
+    set_account_active,
+)
 from apps.forensics.services.admin_directory import directory_snapshot, role_slug
 from common.admin_audit import verify_admin_chain
 from common.audit import ROLE_PERMISSIONS, Actor, actor_from_request, log_access
 from common.step_up import is_fresh
+from common.supabase_admin import SupabaseAdminError
 
 
 def _privileged_actor(request) -> tuple[Actor | None, JsonResponse | None]:
@@ -120,3 +133,150 @@ def admin_directory(request):
         return api_error(request, "resource_not_found", "The requested resource was not found.", status=404)
     log_access(actor, "admin_console.directory", resource_type="AdminConsole", result="allowed")
     return JsonResponse(directory_snapshot(organization))
+
+
+def _json_body(request) -> tuple[dict, JsonResponse | None]:
+    try:
+        return (json.loads(request.body.decode("utf-8")) if request.body else {}), None
+    except (UnicodeDecodeError, ValueError):
+        return {}, api_error(request, "invalid_request_body", "A valid JSON request body is required.", status=400)
+
+
+def _organization(request, actor):
+    return Organization.objects.filter(pk=actor.organization_id).first()
+
+
+def _write(request, operation):
+    """Shared shape for every administrative write.
+
+    Resolve the actor, refuse anything the guards refuse, and translate an
+    AdministrationProblem into its own status rather than a generic 500 — the
+    console distinguishes "confirm with your authenticator" from "you may not
+    do this" from "the provider is down", and each needs its own answer.
+    """
+    actor, denied = _privileged_actor(request)
+    if denied:
+        return denied
+    payload, invalid = _json_body(request)
+    if invalid:
+        return invalid
+    organization = _organization(request, actor)
+    if organization is None:
+        return api_error(request, "resource_not_found", "The requested resource was not found.", status=404)
+    try:
+        return operation(actor, organization, payload)
+    except AdministrationProblem as problem:
+        log_access(
+            actor,
+            f"admin_console.{problem.code}",
+            resource_type="User",
+            result="denied",
+        )
+        return api_error(request, problem.code, problem.message, status=problem.status)
+    except SupabaseAdminError:
+        return api_error(
+            request,
+            "identity_provider_unavailable",
+            "The identity provider is temporarily unavailable. No change was made.",
+            status=503,
+        )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_users(request):
+    def operation(actor, organization, payload):
+        change = provision_account(
+            actor=actor,
+            organization=organization,
+            email=payload.get("email", ""),
+            name=payload.get("name", ""),
+            role=payload.get("role", ""),
+            department=payload.get("department", ""),
+            reason=payload.get("reason", ""),
+        )
+        # The only time this password is ever transmitted. It is not stored
+        # here, not written to the audit entry, and cannot be retrieved again.
+        return JsonResponse(
+            {"user": account_payload(change.profile), "password": change.password},
+            status=201,
+        )
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_user_password(request, user_id: int):
+    def operation(actor, organization, payload):
+        change = replace_password(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"user": account_payload(change.profile), "password": change.password})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def admin_user_factors(request, user_id: int):
+    def operation(actor, organization, payload):
+        profile = clear_authenticator(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_user_status(request, user_id: int):
+    def operation(actor, organization, payload):
+        profile = set_account_active(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            active=bool(payload.get("active")),
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_user_sessions_revoke(request, user_id: int):
+    def operation(actor, organization, payload):
+        profile = end_sessions(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def admin_user_role(request, user_id: int):
+    def operation(actor, organization, payload):
+        profile = change_role(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            role=payload.get("role", ""),
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)

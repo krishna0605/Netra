@@ -51,6 +51,19 @@ _MUTATION_MARKERS = (
     "/test",
     "/credential",
 )
+# Matched on the end of the route rather than anywhere inside it. "/role" as a
+# substring also appears in compliance/roles, which is a read; as a suffix it
+# only matches the administration console's role change, which is not.
+_MUTATION_SUFFIXES = (
+    "/password",
+    "/factors",
+    "/role",
+    "/sessions/revoke",
+)
+# POST-only collections. The classifier sees a path and not a method, so a
+# route that only ever creates something has to say so here or it is rated as
+# though it were a listing.
+_MUTATION_ROUTES = frozenset({"admin/v1/users"})
 _DEPRECATED_PREFIXES = (
     "dashboard/",
     "alerts",
@@ -135,6 +148,8 @@ def _rate_category(route: str, authentication: AuthenticationPolicy) -> RatePoli
         )
     ):
         return "specialized"
+    if route in _MUTATION_ROUTES or route.endswith(_MUTATION_SUFFIXES):
+        return "mutation"
     if any(marker in route for marker in _MUTATION_MARKERS):
         return "mutation"
     return "read"

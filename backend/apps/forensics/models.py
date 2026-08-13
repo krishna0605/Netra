@@ -983,3 +983,33 @@ class AdminAuditEvent(TimeStampedModel):
                 name="netra_admin_audit_chain_unique",
             ),
         ]
+
+
+class SessionRevocation(TimeStampedModel):
+    """The moment before which an account's tokens are no longer accepted.
+
+    Netra verifies Supabase access tokens offline against a public key — that
+    is what makes authorization cheap enough to run on every request. The cost
+    is that revoking a session at the identity provider does not reach us:
+    GoTrue invalidates the refresh token, so no *new* access tokens can be
+    minted, but one already in a browser keeps working until it expires.
+
+    For an ordinary product that window is an acceptable trade. For a reset
+    performed *because* an account is compromised it is not, and "revoke all
+    sessions" would be a button that does not do what it says.
+
+    One row per account, rewritten rather than accumulated: only the most
+    recent revocation matters, and a growing table on the authentication hot
+    path would be a cost with no benefit.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, related_name="netra_session_revocation", on_delete=models.CASCADE
+    )
+    organization = models.ForeignKey(Organization, related_name="session_revocations", on_delete=models.PROTECT)
+    revoked_at = models.DateTimeField()
+    reason = models.TextField(blank=True)
+    revoked_by_label = models.CharField(max_length=160, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["organization", "revoked_at"], name="netra_revocation_org_idx")]
