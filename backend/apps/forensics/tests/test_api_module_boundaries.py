@@ -21,6 +21,7 @@ class ApiModuleBoundaryTests(SimpleTestCase):
     def test_feature_modules_are_bounded_and_do_not_wildcard_import_legacy(self):
         api_root = Path(__file__).resolve().parents[1] / "api"
         for filename in (
+            "admin_console.py",
             "cases.py",
             "evidence.py",
             "capture.py",

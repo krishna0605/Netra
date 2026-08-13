@@ -10,6 +10,26 @@
     "view": "apps.forensics.api.authentication.admin_transfer"
   },
   {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "admin/v1/directory",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_directory"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "admin/v1/session",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_session"
+  },
+  {
     "aal": "aal1",
     "authentication": "bearer",
     "capability": null,

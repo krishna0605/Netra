@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.forensics.route_policies import attach_route_policies
+from apps.forensics.api import admin_console as admin_console_views
 from apps.forensics.api import analysis as analysis_views
 from apps.forensics.api import authentication as auth_views
 from apps.forensics.api import capture as capture_views
@@ -26,6 +27,8 @@ urlpatterns = [
     path("users", auth_views.users),
     path("users/<str:user_id>", auth_views.user_detail),
     path("admin/organizations/<uuid:organization_id>/admin-transfer", auth_views.admin_transfer),
+    path("admin/v1/session", admin_console_views.admin_session),
+    path("admin/v1/directory", admin_console_views.admin_directory),
     path("cases", case_views.cases),
     path("cases/<str:case_id>", case_views.case_detail),
     path("cases/<str:case_id>/workspace", case_views.case_workspace),

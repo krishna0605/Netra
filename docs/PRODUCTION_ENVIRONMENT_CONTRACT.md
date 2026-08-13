@@ -90,6 +90,14 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 | `NETRA_AUTH_ADMIN_TIMEOUT_SECONDS` | `5` |
 | `NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES` | `65536` |
 | `NETRA_AUTH_ADMIN_LIST_PAGE_SIZE` | Maximum `100` |
+| `NETRA_AUTH_ADMIN_MAX_LIST_PAGES` | `10`; ceiling on the identity pages one directory read may walk |
+
+### Railway administration console variables
+
+| Variable | Reviewed contract |
+|---|---|
+| `NETRA_ADMIN_ORIGINS` | Browser origins permitted to reach `/api/admin/v1/`. Deliberately narrower than `NETRA_FRONTEND_ORIGINS`. Unset falls back to the frontend origins rather than to a wildcard, so a missing value narrows instead of opening. Defence in depth only — never the authorization control |
+| `NETRA_ACCESS_LOG_RETENTION_DAYS` | `365`; reported to the console so the window is stated rather than assumed |
 
 ### Railway JWT verification variables
 

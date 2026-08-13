@@ -57,6 +57,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "common.cors.LocalCorsMiddleware",
+    # Inside LocalCors so a rejection still carries CORS headers and stays
+    # debuggable for a misconfigured deployment, rather than surfacing to the
+    # operator as an opaque browser error.
+    "common.admin_origin.AdminConsoleOriginMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "common.security_headers.ApiSecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -147,6 +151,12 @@ NETRA_AUTH_INVITE_REDIRECT_URL = os.getenv("NETRA_AUTH_INVITE_REDIRECT_URL", "")
 NETRA_AUTH_ADMIN_TIMEOUT_SECONDS = max(1, min(15, int(os.getenv("NETRA_AUTH_ADMIN_TIMEOUT_SECONDS", "5"))))
 NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES = max(4096, min(1048576, int(os.getenv("NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES", "65536"))))
 NETRA_AUTH_ADMIN_LIST_PAGE_SIZE = max(1, min(100, int(os.getenv("NETRA_AUTH_ADMIN_LIST_PAGE_SIZE", "100"))))
+# Ceiling on the pages one directory read may walk, so a large tenant cannot
+# turn a single console load into an unbounded fan-out against Supabase Auth.
+NETRA_AUTH_ADMIN_MAX_LIST_PAGES = max(1, min(50, int(os.getenv("NETRA_AUTH_ADMIN_MAX_LIST_PAGES", "10"))))
+# Reported to the administration console so the retention window is stated
+# rather than assumed. Enforcing it is a scheduled-job concern, not a read one.
+NETRA_ACCESS_LOG_RETENTION_DAYS = max(1, min(3650, int(os.getenv("NETRA_ACCESS_LOG_RETENTION_DAYS", "365"))))
 NETRA_SEARCH_PROVIDER = os.getenv("NETRA_SEARCH_PROVIDER", "postgres").lower()
 NETRA_DATABASE_MODE = os.getenv("NETRA_DATABASE_MODE", "docker-postgres")
 NETRA_KAFKA_BOOTSTRAP = os.getenv("NETRA_KAFKA_BOOTSTRAP", "localhost:9092")
@@ -331,6 +341,18 @@ NETRA_KAFKA_LAG_CRITICAL = int(os.getenv("NETRA_KAFKA_LAG_CRITICAL", "5000"))
 NETRA_DISK_WARNING_PERCENT = int(os.getenv("NETRA_DISK_WARNING_PERCENT", "80"))
 NETRA_DISK_CRITICAL_PERCENT = int(os.getenv("NETRA_DISK_CRITICAL_PERCENT", "90"))
 NETRA_FRONTEND_ORIGINS = os.getenv("NETRA_FRONTEND_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080").split(",")
+# Browser origins permitted to reach /api/admin/v1/. Deliberately a separate,
+# narrower list than NETRA_FRONTEND_ORIGINS: the investigator console is served
+# to every officer, the administration console to a handful of them. It falls
+# back to the frontend list rather than to "everything" so that an unset
+# variable narrows to the origins already trusted instead of opening the
+# namespace to any site. The admin console ships from the console origin, so
+# that fallback is correct for the same-origin hosting decision.
+NETRA_ADMIN_ORIGINS = [
+    item.strip()
+    for item in os.getenv("NETRA_ADMIN_ORIGINS", ",".join(NETRA_FRONTEND_ORIGINS)).split(",")
+    if item.strip()
+]
 NETRA_PUBLIC_BASE_URL = os.getenv("NETRA_PUBLIC_BASE_URL", "http://localhost:8080")
 NETRA_REQUIRE_HTTPS = os.getenv("NETRA_REQUIRE_HTTPS", "0") == "1"
 NETRA_RELEASE_ID = os.getenv("NETRA_RELEASE_ID", "local-dev")
