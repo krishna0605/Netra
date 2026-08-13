@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { AuthContext, STEP_UP_WINDOW_MS, type AdminProfile, type AuthStage, type AuthValue } from "./AuthContext";
-import { IS_LOCAL } from "../../lib/env";
-import { ORGANIZATION, USERS } from "../../data/mock";
+import { ApiFailure, fetchAdminSession } from "../../data/client";
 import { supabase } from "../../lib/supabase";
 
 /**
@@ -42,37 +41,33 @@ function describeFailure(error: unknown): string {
   return GENERIC_REJECTION;
 }
 
-function profileFor(email: string, userId: string): AdminProfile | null {
-  const known = USERS.find((user) => user.email.toLowerCase() === email.toLowerCase());
-
-  if (known) {
-    const administrative = known.isOwner || known.roleSlug === "admin";
+/**
+ * Resolve administrative standing from the server.
+ *
+ * Returns null when the account may not administer the organization, which the
+ * caller turns into the "not permitted" stage. A network failure is not a
+ * refusal and must not be silently treated as one, so it propagates.
+ */
+async function profileFor(email: string, userId: string): Promise<AdminProfile | null> {
+  try {
+    const session = await fetchAdminSession();
     return {
       userId,
-      email: known.email,
-      displayName: known.name,
-      role: known.isOwner ? "Owner" : (known.roleSlug ?? "Viewer"),
-      organizationName: ORGANIZATION.name,
-      isOwner: known.isOwner,
-      isAdministrative: administrative,
+      email: session.email || email,
+      displayName: session.name || email.split("@")[0] || email,
+      role: session.isOwner ? "Owner" : session.role,
+      organizationName: session.organization.name,
+      isOwner: session.isOwner,
+      isAdministrative: true,
     };
+  } catch (failure) {
+    // 401/403 are the server answering the question: this account is not an
+    // administrator. Anything else is the question going unanswered.
+    if (failure instanceof ApiFailure && (failure.status === 401 || failure.status === 403 || failure.status === 404)) {
+      return null;
+    }
+    throw failure;
   }
-
-  // Local development: any account that can authenticate against the project is
-  // treated as an administrator, so the console is usable before the directory
-  // endpoint exists. In every other profile an unknown account is refused —
-  // authenticating is not the same as being authorized.
-  if (!IS_LOCAL) return null;
-
-  return {
-    userId,
-    email,
-    displayName: email.split("@")[0] ?? email,
-    role: "Admin",
-    organizationName: ORGANIZATION.name,
-    isOwner: false,
-    isAdministrative: true,
-  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -97,7 +92,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const settleAfterFactor = useCallback(async (email: string, userId: string) => {
-    const resolved = profileFor(email, userId);
+    let resolved: AdminProfile | null;
+    try {
+      resolved = await profileFor(email, userId);
+    } catch (failure) {
+      // The directory could not be asked. Refusing here would tell an
+      // administrator they lack permission they actually hold, so say what
+      // happened and leave them able to retry.
+      setProfile(null);
+      setError(
+        failure instanceof ApiFailure
+          ? failure.message
+          : "Could not confirm your administrative access. Try again.",
+      );
+      setStage("anonymous");
+      return;
+    }
     if (!resolved || !resolved.isAdministrative) {
       setProfile(null);
       setStage("not_permitted");

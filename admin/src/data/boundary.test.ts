@@ -20,12 +20,15 @@ import { join, relative } from "node:path";
 const SRC = join(import.meta.dirname, "..");
 
 /**
- * client.ts owns the seed data. store.tsx needs it for its empty state.
- * AuthProvider uses it only for the local-development profile fallback, which
- * is fenced behind IS_LOCAL and goes away with the /me endpoint. Tests may
- * read fixtures freely.
+ * client.ts owns the seed data; store.tsx needs it for its empty state. Tests
+ * may read fixtures freely.
+ *
+ * AuthProvider used to be on this list. It resolved administrative standing
+ * from the seed file, falling back to "yes" for any account that could
+ * authenticate. It now asks the server, so the exemption is gone — and the
+ * list is shorter than it was, which is the direction it should move.
  */
-const ALLOWED = new Set(["data/client.ts", "data/store.tsx", "features/auth/AuthProvider.tsx"]);
+const ALLOWED = new Set(["data/client.ts", "data/store.tsx"]);
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

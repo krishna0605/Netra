@@ -1,5 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import {
+  ACTIVITY,
+  AUDIT,
+  CAPABILITIES,
+  ORGANIZATION,
+  PERMISSIONS,
+  ROLES,
+  SESSIONS,
+  USERS,
+} from "../src/data/mock";
+
 /**
  * The path a judge would walk: sign in, choose the workspace, create a user,
  * set their password, and confirm the audit trail recorded both.
@@ -43,7 +54,57 @@ function fakeJwt(claims: Record<string, unknown>) {
   ].join(".");
 }
 
+/**
+ * The administration namespace, stubbed with the same seed the console used to
+ * import directly.
+ *
+ * Stubbing it here rather than running Django keeps the suite able to run in CI
+ * without a database, and — more importantly — keeps this a test of the
+ * console. The server's own behaviour is covered by its own tests, against a
+ * real Postgres.
+ */
+async function stubDirectory(page: Page) {
+  await page.route("**/api/admin/v1/**", async (route) => {
+    const url = route.request().url();
+
+    if (url.includes("/session")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          userId: 1,
+          name: "Operator",
+          email: USER.email,
+          role: "Admin",
+          roleSlug: "admin",
+          isOwner: true,
+          aal: "aal2",
+          permissions: ["manage_users", "view"],
+          organization: { id: ORGANIZATION.id, name: ORGANIZATION.name, slug: ORGANIZATION.slug },
+        }),
+      });
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        users: USERS,
+        sessions: SESSIONS,
+        activity: ACTIVITY,
+        audit: AUDIT,
+        roles: ROLES,
+        organization: ORGANIZATION,
+        permissions: PERMISSIONS,
+        capabilities: CAPABILITIES,
+        sources: { identityProvider: "supabase", sessions: "pending", audit: "pending" },
+      }),
+    });
+  });
+}
+
 async function stubAuth(page: Page) {
+  await stubDirectory(page);
   await page.route(SUPABASE, async (route) => {
     const url = route.request().url();
 
@@ -221,4 +282,48 @@ test("a failing directory shows a distinct failure, not an empty table", async (
   await expect(page.getByRole("button", { name: /Try again/ }).first()).toBeVisible();
 
   await page.evaluate(() => window.localStorage.removeItem("netra.simulate"));
+});
+
+test("a directory the server refuses shows the failure, not an empty table", async ({ page }) => {
+  await signIn(page);
+
+  // The genuine failure, rather than the client-side simulation above: the
+  // server answers and the answer is an error. This is the path that will
+  // actually run in production, so it is the one worth pinning.
+  await page.route("**/api/admin/v1/directory", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "service_unavailable", message: "Temporarily unavailable." } }),
+    }),
+  );
+
+  await page.getByRole("button", { name: /Administration/ }).click();
+
+  await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: /Try again/ }).first()).toBeVisible();
+});
+
+test("an account the server does not recognise as an administrator is refused", async ({ page }) => {
+  // The console no longer decides this for itself. Whatever the browser
+  // believes, a 403 from the directory means the answer is no — and that must
+  // reach the operator as a refusal rather than an empty console.
+  await stubAuth(page);
+  // Registered after stubAuth: Playwright matches the most recently added
+  // route first, so this narrower pattern overrides the directory stub.
+  await page.route("**/api/admin/v1/session", (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Permission denied", code: "permission_denied" }),
+    }),
+  );
+
+  await page.goto("/");
+  await page.getByLabel("Official email").fill("operator@gcc.gov.in");
+  await page.getByLabel("Password").fill("not-a-real-password");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await expect(page.getByRole("heading", { name: "Not available" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 });

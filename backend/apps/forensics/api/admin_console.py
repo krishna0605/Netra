@@ -20,7 +20,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from apps.forensics.api.errors import api_error
-from apps.forensics.models import Organization
+from apps.forensics.models import Organization, UserProfile
 from apps.forensics.services.administration import AdministrationProblem, require_privileged_admin
 from apps.forensics.services.admin_directory import directory_snapshot, role_slug
 from common.audit import ROLE_PERMISSIONS, Actor, actor_from_request, log_access
@@ -53,6 +53,9 @@ def admin_session(request):
     actor, denied = _privileged_actor(request)
     if denied:
         return denied
+    organization = Organization.objects.filter(pk=actor.organization_id).first()
+    if organization is None:
+        return api_error(request, "resource_not_found", "The requested resource was not found.", status=404)
     log_access(actor, "admin_console.session", resource_type="AdminConsole", result="allowed")
     return JsonResponse(
         {
@@ -61,11 +64,15 @@ def admin_session(request):
             "email": actor.email,
             "role": actor.role,
             "roleSlug": role_slug(actor.role),
+            # Ownership is inferred from the sole-Admin constraint until
+            # Organization grows its own owner column.
+            "isOwner": actor.role == UserProfile.Role.ADMIN,
             "aal": actor.aal,
             "permissions": sorted(ROLE_PERMISSIONS.get(actor.role, set())),
             "organization": {
-                "id": str(actor.organization_id),
-                "slug": actor.organization_slug,
+                "id": str(organization.id),
+                "name": organization.name,
+                "slug": organization.slug,
             },
         }
     )

@@ -35,7 +35,11 @@ export function OverviewPage() {
       deniedTrend: dailyCounts(activity, (event) => event.result === "denied"),
       topDenied: topDeniedActor(activity),
       mfaEnrolled: users.filter((user) => user.mfa === "verified").length,
-      mfaTotal: active.length,
+      // Accounts whose enrolment could not be read are excluded from the
+      // denominator rather than counted as gaps. A ratio that drops because
+      // the identity provider was briefly unreachable would send someone
+      // chasing a problem that does not exist.
+      mfaTotal: active.filter((user) => user.mfa !== "unknown").length,
       invites: users.filter((user) => user.status === "invited").length,
       expiringToday: invitationsExpiringToday(users),
       grants: users.flatMap((user) => user.permissions).filter((permission) => permission.expiresAt).length,

@@ -1,12 +1,32 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiFailure, directoryApi, resetDirectory } from "./client";
+import { supabase } from "../lib/supabase";
+import { ApiFailure, directoryApi, currentDirectory, resetDirectory } from "./client";
 import { generatePassword, passwordStrength } from "./store";
 
 beforeEach(() => {
   // Each test starts from the seed. The module holds one state, as a server
   // does, so without this they would pass or fail by ordering.
   resetDirectory();
+
+  // read() is a network call now. These tests are about the write operations,
+  // which still run locally, so the transport is stubbed to hand back whatever
+  // the module currently holds. Stubbing rather than bypassing keeps the fact
+  // that reads leave the browser visible in the test, instead of hiding it
+  // behind a local accessor that production never uses.
+  vi.spyOn(supabase.auth, "getSession").mockResolvedValue({
+    data: { session: { access_token: "test-token" } },
+    error: null,
+  } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(currentDirectory()), { status: 200 })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("generatePassword", () => {

@@ -45,7 +45,11 @@ export type Role = {
 };
 
 export type UserStatus = "active" | "invited" | "locked_out" | "deactivated";
-export type MfaState = "verified" | "unenrolled" | "factor_lost";
+/** "unknown" is not a state an account can be in — it is the server admitting
+ *  it could not reach the identity provider. It exists because the honest
+ *  alternative was reporting "not enrolled", which would send an administrator
+ *  to reset an authenticator that was never broken. */
+export type MfaState = "verified" | "unenrolled" | "factor_lost" | "unknown";
 
 export type PermissionSource = "role" | "granted" | "revoked";
 

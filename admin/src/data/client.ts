@@ -1,3 +1,5 @@
+import { API_BASE_URL } from "../lib/env";
+import { supabase } from "../lib/supabase";
 import { ACTIVITY, AUDIT, CAPABILITIES, CURRENT_OPERATOR, ORGANIZATION, PERMISSIONS, ROLES, SESSIONS, USERS } from "./mock";
 import type {
   ActivityEvent,
@@ -26,8 +28,6 @@ import type {
  * Passwords are deliberately absent from every request and response shape.
  * They are shown once at the moment they are set and never stored.
  */
-
-const STORAGE_KEY = "netra.directory.v1";
 
 export type DirectorySnapshot = {
   users: AdminUser[];
@@ -121,37 +121,22 @@ function seed(): DirectorySnapshot {
   };
 }
 
-function load(): DirectorySnapshot {
-  if (typeof window === "undefined") return seed();
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seed();
-    const parsed = JSON.parse(raw) as Partial<DirectorySnapshot>;
-    if (!Array.isArray(parsed.users) || parsed.users.length === 0) return seed();
-    return {
-      users: parsed.users,
-      sessions: parsed.sessions ?? SESSIONS,
-      activity: parsed.activity ?? ACTIVITY,
-      audit: parsed.audit ?? AUDIT,
-      roles: parsed.roles ?? ROLES,
-      organization: parsed.organization ?? ORGANIZATION,
-      permissions: parsed.permissions ?? PERMISSIONS,
-      capabilities: parsed.capabilities ?? CAPABILITIES,
-    };
-  } catch {
-    return seed();
-  }
-}
-
-let state: DirectorySnapshot = load();
+/**
+ * State lives in memory for the lifetime of the tab, and nowhere else.
+ *
+ * It used to persist to localStorage, which was reasonable while this module
+ * stood in for a database. It is not reasonable now that a real one exists.
+ * The admin console already goes out of its way to keep its Supabase session
+ * out of localStorage — memory-only storage under a separate key — precisely
+ * because the two consoles share an origin and therefore share that store.
+ * Writing the full directory there anyway would have put every officer's
+ * address, role and denial count into the same place, on what may be a shared
+ * machine, surviving sign-out.
+ */
+let state: DirectorySnapshot = seed();
 
 function commit(next: DirectorySnapshot): DirectorySnapshot {
   state = next;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Storage being unavailable must never break the console.
-  }
   return state;
 }
 
@@ -227,16 +212,131 @@ export type SetPasswordInput = {
  * already loaded.
  */
 export function resetDirectory() {
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to clear.
-  }
   state = seed();
 }
 
+/** Test seam. The write operations still run against the in-memory snapshot
+ *  until their endpoints exist, and a test needs to see that snapshot without
+ *  going through the network. Not used by the console itself. */
+export function currentDirectory(): DirectorySnapshot {
+  return state;
+}
+
+/* ---------------------------------------------------------------------------
+   The network
+   --------------------------------------------------------------------------- */
+
+/** Maps a failed response onto a sentence an operator can act on.
+ *
+ *  The distinction that matters is "you are not allowed" versus "we could not
+ *  ask". Collapsing them is what made a suspended Supabase project look like a
+ *  rejected password during the frontend build, and cost an evening.
+ */
+function describe(status: number, code: string): string {
+  if (status === 401) return "This session is no longer valid. Sign in again.";
+  if (status === 403 && code === "aal2_required") {
+    return "Administration requires a verified authenticator on this session.";
+  }
+  if (status === 403) return "This account is not permitted to administer the organization.";
+  if (status === 404) return "The administration service is not available on this address.";
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  if (status >= 500) return "The administration service is temporarily unavailable.";
+  return "The administration service refused the request.";
+}
+
+async function authorizedRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // The dev controls have to apply here too, not only to the local writes.
+  // Reads are the calls most likely to be slow or to fail in production, so
+  // they are exactly the ones whose loading and failure states need to be
+  // reachable on demand.
+  const mode = simulation();
+  if (mode === "slow") {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  if (mode === "error") {
+    throw new ApiFailure("upstream_unavailable", "The directory service did not respond.", 503);
+  }
+
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) {
+    throw new ApiFailure("session_missing", "This session is no longer valid. Sign in again.", 401);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(init.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+  } catch {
+    // fetch only rejects for transport failures — offline, DNS, CORS, a server
+    // that is not running. None of those are the operator's fault and none
+    // should read as a rejection.
+    throw new ApiFailure(
+      "service_unreachable",
+      "Could not reach the administration service. Check that it is running.",
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    let code = "request_failed";
+    try {
+      const body = await response.json();
+      // Two error shapes are in play: the auth middleware answers flat, the
+      // view helper nests under "error".
+      code = (typeof body?.error === "object" ? body.error?.code : body?.code) || code;
+    } catch {
+      // A non-JSON error body is still a failure; the status carries the meaning.
+    }
+    throw new ApiFailure(code, describe(response.status, code), response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
+/** What the server says about the caller's own administrative standing. */
+export type AdminSession = {
+  userId: number;
+  name: string;
+  email: string;
+  role: string;
+  roleSlug: string;
+  isOwner: boolean;
+  aal: "aal1" | "aal2";
+  permissions: string[];
+  organization: { id: string; name: string; slug: string };
+};
+
+/**
+ * Ask the server whether this account may administer the organization.
+ *
+ * The console used to answer this itself, from a seed file, falling back to
+ * "yes" for any account that could authenticate against the project. That was
+ * fenced behind a development flag and still the wrong shape of answer: whether
+ * someone is an administrator is a fact about a row in Postgres, and the only
+ * honest way to learn it is to ask.
+ */
+export function fetchAdminSession(): Promise<AdminSession> {
+  return authorizedRequest<AdminSession>("/admin/v1/session");
+}
+
 export const directoryApi = {
-  read: () => settle(state),
+  /** The only read the console performs. Every screen renders from this. */
+  async read(): Promise<DirectorySnapshot> {
+    const snapshot = await authorizedRequest<DirectorySnapshot>("/admin/v1/directory");
+    // Writes below still operate on the in-memory snapshot until their
+    // endpoints exist, so the fetched state has to become the state they see.
+    // Without this a create would be applied to seed data and vanish on the
+    // next read, which looks exactly like the server silently rejecting it.
+    state = snapshot;
+    return snapshot;
+  },
 
   async createUser(input: CreateUserInput) {
     const email = input.email.trim().toLowerCase();

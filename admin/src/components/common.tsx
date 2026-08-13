@@ -123,6 +123,8 @@ const MFA_STATE: Record<MfaState, { label: string; tone: "ok" | "warn" | "crit" 
   verified: { label: "Authenticator", tone: "ok" },
   unenrolled: { label: "Not enrolled", tone: "crit" },
   factor_lost: { label: "Factor lost", tone: "warn" },
+  // Deliberately neutral rather than alarming: nothing is known to be wrong.
+  unknown: { label: "Unknown", tone: "warn" },
 };
 
 export function MfaBadge({ state }: { state: MfaState }) {
