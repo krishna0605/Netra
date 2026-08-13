@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryProvider } from "../data/store";
-import { LanguageProvider } from "../i18n";
 import { GrantPermissionDialog } from "./GrantPermissionDialog";
 import { PasswordDialog } from "./PasswordDialog";
 import { resetDirectory } from "../data/client";
@@ -19,16 +18,7 @@ import { USERS } from "../data/mock";
 const user = USERS[2];
 
 function withProvider(node: React.ReactNode) {
-  return render(
-    <LanguageProvider>
-      <DirectoryProvider>{node}</DirectoryProvider>
-    </LanguageProvider>,
-  );
-}
-
-/** For components that need translation but not the directory. */
-function withLanguage(node: React.ReactNode) {
-  return render(<LanguageProvider>{node}</LanguageProvider>);
+  return render(<DirectoryProvider>{node}</DirectoryProvider>);
 }
 
 function typeInto(element: HTMLElement, value: string) {
@@ -44,7 +34,7 @@ describe("ConfirmDialog", () => {
   const consequences = ["They are signed out immediately.", "Nothing is deleted."];
 
   it("keeps the action disabled until reason and code are both satisfied", () => {
-    withLanguage(
+    render(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -66,7 +56,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("rejects a reason too short to be worth reading", () => {
-    withLanguage(
+    render(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -83,7 +73,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("requires the exact confirmation phrase when one is demanded", () => {
-    withLanguage(
+    render(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -108,7 +98,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("stays open and shows why when the action fails", async () => {
-    withLanguage(
+    render(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -132,7 +122,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("accepts only digits in the authenticator field", () => {
-    withLanguage(
+    render(
       <ConfirmDialog
         open
         onOpenChange={() => {}}

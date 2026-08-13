@@ -13,32 +13,27 @@ import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { SkipLink } from "./a11y";
-import { useT } from "../i18n";
-import type { Dict } from "../i18n/messagesEn";
-
-type MessageKey = keyof Dict;
 import { UserMenu } from "./UserMenu";
 import { cn } from "../lib/utils";
 import { useAuth } from "../features/auth/AuthContext";
 
-type NavItem = { to: string; label: MessageKey; icon: LucideIcon; end?: boolean };
+type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
 const PRIMARY_NAV: NavItem[] = [
-  { to: "/", label: "navOverview", icon: LayoutDashboard, end: true },
-  { to: "/users", label: "navUsers", icon: Users },
-  { to: "/roles", label: "navRoles", icon: KeyRound },
-  { to: "/activity", label: "navActivity", icon: Activity },
-  { to: "/sessions", label: "navSessions", icon: MonitorSmartphone },
+  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/users", label: "Users", icon: Users },
+  { to: "/roles", label: "Roles & permissions", icon: KeyRound },
+  { to: "/activity", label: "Activity", icon: Activity },
+  { to: "/sessions", label: "Sessions", icon: MonitorSmartphone },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
-  { to: "/organization", label: "navOrganization", icon: Building2 },
-  { to: "/capabilities", label: "navCapabilities", icon: ToggleLeft },
-  { to: "/audit", label: "navAudit", icon: ScrollText },
+  { to: "/organization", label: "Organization", icon: Building2 },
+  { to: "/capabilities", label: "Capabilities", icon: ToggleLeft },
+  { to: "/audit", label: "Audit trail", icon: ScrollText },
 ];
 
 function NavSection({ items, label }: { items: NavItem[]; label: string }) {
-  const t = useT();
   return (
     <div className="flex flex-col gap-0.5 px-2.5">
       <p className="px-2.5 pt-5 pb-2 text-[11px] font-medium tracking-[0.1em] text-sand-muted/70 uppercase">{label}</p>
@@ -55,7 +50,7 @@ function NavSection({ items, label }: { items: NavItem[]; label: string }) {
           }
         >
           <item.icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-          <span className="truncate">{t(item.label)}</span>
+          <span className="truncate">{item.label}</span>
         </NavLink>
       ))}
     </div>
@@ -64,7 +59,6 @@ function NavSection({ items, label }: { items: NavItem[]; label: string }) {
 
 export function AppShell({ children, idleWarning, secondsLeft }: { children: ReactNode; idleWarning?: boolean; secondsLeft?: number }) {
   const { profile } = useAuth();
-  const t = useT();
 
   return (
     <div className="app-theme flex min-h-screen">
@@ -75,7 +69,7 @@ export function AppShell({ children, idleWarning, secondsLeft }: { children: Rea
             <img src="/brand/netra-logo-mark.svg" alt="" className="size-8 shrink-0" aria-hidden="true" />
             <div className="min-w-0">
               <p className="font-mono text-[15px] leading-tight font-semibold tracking-[0.05em] text-cream-bright">NETRA</p>
-              <p className="truncate text-[11px] leading-tight text-sand-muted/70">{t("brandSuffix")}</p>
+              <p className="truncate text-[11px] leading-tight text-sand-muted/70">Administration</p>
             </div>
           </div>
           <p className="mt-3.5 truncate rounded-control border border-hairline bg-cream-primary/4 px-2.5 py-1.5 text-[12px] text-sand-muted">
@@ -83,9 +77,9 @@ export function AppShell({ children, idleWarning, secondsLeft }: { children: Rea
           </p>
         </div>
 
-        <nav className="flex-1 overflow-y-auto pb-5" aria-label={t("sections")}>
-          <NavSection items={PRIMARY_NAV} label={t("navGroupAccess")} />
-          <NavSection items={SECONDARY_NAV} label={t("navGroupRecord")} />
+        <nav className="flex-1 overflow-y-auto pb-5" aria-label="Sections">
+          <NavSection items={PRIMARY_NAV} label="Access" />
+          <NavSection items={SECONDARY_NAV} label="Record" />
         </nav>
 
         <div className="border-t border-hairline px-2.5 py-2.5">
@@ -97,7 +91,7 @@ export function AppShell({ children, idleWarning, secondsLeft }: { children: Rea
               className="mb-2 rounded-control border border-state-warn/50 bg-state-warn/10 px-2.5 py-1.5 text-[11.5px] text-state-warn"
               role="status"
             >
-              {t("sessionEndsIn")} {Math.max(0, Math.ceil(secondsLeft))}s
+              Session ends in {Math.max(0, Math.ceil(secondsLeft))}s
             </p>
           ) : null}
           <UserMenu />
@@ -120,7 +114,7 @@ export function AppShell({ children, idleWarning, secondsLeft }: { children: Rea
             }
           >
             <item.icon className="size-4" strokeWidth={1.75} aria-hidden="true" />
-            <span className="truncate">{t(item.label).split(" ")[0]}</span>
+            <span className="truncate">{item.label.split(" ")[0]}</span>
           </NavLink>
         ))}
       </nav>

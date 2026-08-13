@@ -3,7 +3,6 @@ import { Toaster } from "sonner";
 
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/states";
-import { LanguageProvider } from "./i18n";
 import { AuthProvider } from "./features/auth/AuthProvider";
 import { ChooserPage } from "./features/auth/ChooserPage";
 import { DirectoryProvider } from "./data/store";
@@ -87,10 +86,9 @@ function Gate() {
 export function App() {
   return (
     <ErrorBoundary>
-      <LanguageProvider>
-        <AuthProvider>
-          <Gate />
-          <Toaster
+      <AuthProvider>
+        <Gate />
+        <Toaster
           position="bottom-right"
           toastOptions={{
             style: {
@@ -100,10 +98,9 @@ export function App() {
               borderRadius: "6px",
               fontFamily: '"Geist", ui-sans-serif, system-ui, sans-serif',
             },
-            }}
-          />
-        </AuthProvider>
-      </LanguageProvider>
+          }}
+        />
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

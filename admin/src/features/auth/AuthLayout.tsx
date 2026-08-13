@@ -1,7 +1,5 @@
 import type { ReactNode } from "react";
 
-import { useT } from "../../i18n";
-
 /**
  * Shared frame for every pre-workspace screen.
  *
@@ -22,7 +20,6 @@ export function AuthLayout({
   footer?: ReactNode;
   width?: "narrow" | "wide";
 }) {
-  const t = useT();
   return (
     <div className="app-theme flex min-h-screen flex-col items-center justify-center px-5 py-12">
       <div className={width === "wide" ? "w-full max-w-2xl" : "w-full max-w-md"}>
@@ -30,7 +27,7 @@ export function AuthLayout({
           <img src="/brand/netra-logo-mark.svg" alt="" className="size-9 shrink-0" aria-hidden="true" />
           <div className="min-w-0">
             <p className="font-mono text-[16px] leading-tight font-semibold tracking-[0.05em] text-cream-bright">NETRA</p>
-            <p className="text-[12px] leading-tight text-sand-muted/70">{t("platformName")}</p>
+            <p className="text-[12px] leading-tight text-sand-muted/70">Network evidence platform</p>
           </div>
         </div>
 

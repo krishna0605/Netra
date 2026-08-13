@@ -3,11 +3,9 @@ import { useState, type FormEvent } from "react";
 import { AuthLayout } from "./AuthLayout";
 import { Button, Input } from "../../components/ui/primitives";
 import { useAuth } from "./AuthContext";
-import { useT } from "../../i18n";
 
 export function SignInPage() {
   const { signIn, error, busy, clearError } = useAuth();
-  const t = useT();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -20,11 +18,11 @@ export function SignInPage() {
   }
 
   return (
-    <AuthLayout title={t("signInTitle")} subtitle={t("signInSubtitle")}>
+    <AuthLayout title="Sign in" subtitle="Authorized personnel only. All access is recorded.">
       <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
         <div>
           <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="email">
-            {t("officialEmail")}
+            Official email
           </label>
           <Input
             id="email"
@@ -43,7 +41,7 @@ export function SignInPage() {
 
         <div>
           <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="password">
-            {t("password")}
+            Password
           </label>
           <Input
             id="password"
@@ -67,7 +65,7 @@ export function SignInPage() {
         ) : null}
 
         <Button type="submit" variant="primary" disabled={!canSubmit} className="mt-1 w-full">
-          {busy ? t("checking") : t("continue")}
+          {busy ? "Checking…" : "Continue"}
         </Button>
       </form>
     </AuthLayout>

@@ -2,7 +2,6 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Clock } from "lucide-react";
 
 import { Button } from "../../components/ui/primitives";
-import { useT } from "../../i18n";
 
 /**
  * A modal rather than a page, so an operator mid-way through a form does not
@@ -19,7 +18,6 @@ export function SessionExpiryDialog({
   onStay: () => void;
   onEnd: () => void;
 }) {
-  const t = useT();
   const seconds = Math.max(0, Math.ceil(msRemaining / 1000));
   const minutes = Math.floor(seconds / 60);
   const label = minutes > 0 ? `${minutes}:${String(seconds % 60).padStart(2, "0")}` : `${seconds}s`;
@@ -38,7 +36,7 @@ export function SessionExpiryDialog({
               <Clock className="size-5" strokeWidth={1.75} aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <Dialog.Title className="text-[17px] font-semibold text-cream-bright">{t("stillThere")}</Dialog.Title>
+              <Dialog.Title className="text-[17px] font-semibold text-cream-bright">Still there?</Dialog.Title>
               <Dialog.Description className="mt-1.5 text-[13.5px] leading-relaxed text-sand-muted">
                 Your administrative session ends in{" "}
                 <span className="font-mono tabular-nums text-state-warn">{label}</span>. You will return to the workspace
@@ -49,10 +47,10 @@ export function SessionExpiryDialog({
 
           <div className="mt-6 flex gap-2">
             <Button variant="ghost" size="sm" onClick={onEnd} className="flex-1">
-              {t("endNow")}
+              End now
             </Button>
             <Button variant="primary" size="sm" onClick={onStay} className="flex-1" autoFocus>
-              {t("staySignedIn")}
+              Stay signed in
             </Button>
           </div>
         </Dialog.Content>

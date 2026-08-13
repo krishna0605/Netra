@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import { Panel, Status, Tag } from "./ui/primitives";
 import { cn } from "../lib/utils";
-import { useT } from "../i18n";
 import type { ActivityResult, MfaState, RiskLevel, UserStatus } from "../data/types";
 
 /* ---------------------------------------------------------------------------
@@ -108,58 +107,53 @@ export function StatTile({
    Shared state indicators. Centralised so "denied" looks identical on every
    screen — an operator should recognise it without reading.
    --------------------------------------------------------------------------- */
-const USER_STATUS = {
-  active: { key: "statusActive", tone: "ok" },
-  invited: { key: "statusInvited", tone: "warn" },
-  locked_out: { key: "statusLockedOut", tone: "warn" },
-  deactivated: { key: "statusDeactivated", tone: "neutral" },
-} as const;
+const USER_STATUS: Record<UserStatus, { label: string; tone: "ok" | "warn" | "neutral" }> = {
+  active: { label: "Active", tone: "ok" },
+  invited: { label: "Invited", tone: "warn" },
+  locked_out: { label: "Locked out", tone: "warn" },
+  deactivated: { label: "Deactivated", tone: "neutral" },
+};
 
 export function UserStatusBadge({ status }: { status: UserStatus }) {
-  const t = useT();
   const entry = USER_STATUS[status];
-  return <Status tone={entry.tone}>{t(entry.key)}</Status>;
+  return <Status tone={entry.tone}>{entry.label}</Status>;
 }
 
-const MFA_STATE = {
-  verified: { key: "mfaVerified", tone: "ok" },
-  unenrolled: { key: "mfaUnenrolled", tone: "crit" },
-  factor_lost: { key: "mfaFactorLost", tone: "warn" },
-} as const;
+const MFA_STATE: Record<MfaState, { label: string; tone: "ok" | "warn" | "crit" }> = {
+  verified: { label: "Authenticator", tone: "ok" },
+  unenrolled: { label: "Not enrolled", tone: "crit" },
+  factor_lost: { label: "Factor lost", tone: "warn" },
+};
 
 export function MfaBadge({ state }: { state: MfaState }) {
-  const t = useT();
   const entry = MFA_STATE[state];
-  return <Status tone={entry.tone}>{t(entry.key)}</Status>;
+  return <Status tone={entry.tone}>{entry.label}</Status>;
 }
 
-const RESULT = {
-  allowed: { key: "resultAllowed", tone: "ok" },
-  denied: { key: "resultDenied", tone: "crit" },
-  recorded: { key: "resultRecorded", tone: "info" },
-} as const;
+const RESULT: Record<ActivityResult, { label: string; tone: "ok" | "crit" | "info" }> = {
+  allowed: { label: "Allowed", tone: "ok" },
+  denied: { label: "Denied", tone: "crit" },
+  recorded: { label: "Recorded", tone: "info" },
+};
 
 export function ResultBadge({ result }: { result: ActivityResult }) {
-  const t = useT();
   const entry = RESULT[result];
-  return <Status tone={entry.tone}>{t(entry.key)}</Status>;
+  return <Status tone={entry.tone}>{entry.label}</Status>;
 }
 
-const RISK = {
-  standard: { key: "riskStandard", tone: "neutral" },
-  elevated: { key: "riskElevated", tone: "warn" },
-  high: { key: "riskHigh", tone: "crit" },
-} as const;
+const RISK: Record<RiskLevel, { label: string; tone: "neutral" | "warn" | "crit" }> = {
+  standard: { label: "Standard", tone: "neutral" },
+  elevated: { label: "Elevated", tone: "warn" },
+  high: { label: "High risk", tone: "crit" },
+};
 
 export function RiskBadge({ risk }: { risk: RiskLevel }) {
-  const t = useT();
   const entry = RISK[risk];
-  return <Status tone={entry.tone}>{t(entry.key)}</Status>;
+  return <Status tone={entry.tone}>{entry.label}</Status>;
 }
 
 /** Role is categorical, not state — so it keeps the bordered pill. */
 export function RoleBadge({ name, isOwner = false }: { name: string; isOwner?: boolean }) {
-  const t = useT();
-  if (isOwner) return <Tag tone="accent">{t("owner")}</Tag>;
+  if (isOwner) return <Tag tone="accent">Owner</Tag>;
   return <Tag tone="neutral">{name}</Tag>;
 }
