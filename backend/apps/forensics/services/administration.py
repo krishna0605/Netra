@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.forensics.models import AccessLog, OperationalEvent, Organization, UserProfile
 from common.audit import Actor
+from common.step_up import is_fresh
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,28 @@ def transfer_administrator(*, actor: Actor, organization_id, target_user_id: int
         "newAdminId": target.user_id,
         "transferredAt": occurred_at.isoformat(),
     }
+
+
+def require_recent_factor(actor: Actor) -> None:
+    """Refuse unless the authenticator was used in the last few minutes.
+
+    require_privileged_admin already establishes that a second factor exists
+    and was used at some point in this session. That is not the same claim. An
+    administrator who verified at nine in the morning still satisfies it at
+    five in the afternoon, on the same session, at an unattended desk.
+
+    Destructive operations ask again, and this is what makes the asking mean
+    something. It is separate from require_privileged_admin rather than folded
+    into it because read endpoints correctly need the weaker check — prompting
+    for a code to look at a list would train operators to keep their
+    authenticator permanently open, which would defeat both.
+    """
+    if not is_fresh(actor.factor_verified_at):
+        raise AdministrationProblem(
+            "step_up_required",
+            "Confirm this action with your authenticator.",
+            401,
+        )
 
 
 def ensure_admin_mutation_allowed(actor: Actor, target: UserProfile | None = None) -> None:

@@ -16,6 +16,7 @@ serve.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
@@ -23,7 +24,9 @@ from apps.forensics.api.errors import api_error
 from apps.forensics.models import Organization, UserProfile
 from apps.forensics.services.administration import AdministrationProblem, require_privileged_admin
 from apps.forensics.services.admin_directory import directory_snapshot, role_slug
+from common.admin_audit import verify_admin_chain
 from common.audit import ROLE_PERMISSIONS, Actor, actor_from_request, log_access
+from common.step_up import is_fresh
 
 
 def _privileged_actor(request) -> tuple[Actor | None, JsonResponse | None]:
@@ -68,6 +71,15 @@ def admin_session(request):
             # Organization grows its own owner column.
             "isOwner": actor.role == UserProfile.Role.ADMIN,
             "aal": actor.aal,
+            # Advisory only. The console reads this to decide whether to prompt
+            # before showing a destructive dialog; the server re-checks it when
+            # the operation actually arrives, because a value computed here is
+            # stale by the time anyone acts on it.
+            "stepUp": {
+                "fresh": is_fresh(actor.factor_verified_at),
+                "verifiedAt": actor.factor_verified_at.isoformat() if actor.factor_verified_at else None,
+                "maxAgeSeconds": settings.NETRA_STEP_UP_MAX_AGE_SECONDS,
+            },
             "permissions": sorted(ROLE_PERMISSIONS.get(actor.role, set())),
             "organization": {
                 "id": str(organization.id),
@@ -76,6 +88,25 @@ def admin_session(request):
             },
         }
     )
+
+
+@require_http_methods(["GET"])
+def admin_audit_verify(request):
+    """Recompute the audit chain and report where it stops agreeing.
+
+    Behind the console's Verify button. Deliberately a read: verification must
+    never be able to alter what it is verifying, so it takes no step-up and
+    writes nothing — including no audit entry of its own, which would grow the
+    chain every time someone checked it.
+    """
+    actor, denied = _privileged_actor(request)
+    if denied:
+        return denied
+    organization = Organization.objects.filter(pk=actor.organization_id).first()
+    if organization is None:
+        return api_error(request, "resource_not_found", "The requested resource was not found.", status=404)
+    log_access(actor, "admin_console.audit_verify", resource_type="AdminAuditEvent", result="allowed")
+    return JsonResponse(verify_admin_chain(organization))
 
 
 @require_http_methods(["GET"])

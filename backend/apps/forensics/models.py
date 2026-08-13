@@ -932,3 +932,52 @@ class RetentionCandidate(TimeStampedModel):
     expires_at = models.DateTimeField()
     legal_hold = models.BooleanField(default=False)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
+
+
+class AdminAuditEvent(TimeStampedModel):
+    """Append-only, hash-chained record of every administrative change.
+
+    Mirrors CustodyLedgerEvent, which does the same job for evidence, with two
+    deliberate differences.
+
+    It chains per organization rather than per case, because that is the
+    boundary an administrative action belongs to.
+
+    The recorded time is covered by the hash. CustodyLedgerEvent omits
+    created_at from its hashed payload, so a timestamp there could in principle
+    be altered without breaking the chain. For a trail whose purpose is to
+    answer "who changed this, and when", when has to be inside the seal — hence
+    an explicit recorded_at set by the service before hashing rather than an
+    auto_now_add field that only exists after the row is written.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    organization = models.ForeignKey(Organization, related_name="admin_audit_events", on_delete=models.PROTECT)
+    chain_index = models.PositiveBigIntegerField()
+    recorded_at = models.DateTimeField()
+    actor_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    actor_label = models.CharField(max_length=160)
+    actor_email = models.CharField(max_length=320, blank=True)
+    actor_role = models.CharField(max_length=32)
+    action = models.CharField(max_length=160)
+    target_type = models.CharField(max_length=80, blank=True)
+    target_id = models.CharField(max_length=160, blank=True)
+    before_json = models.JSONField(default=dict, blank=True)
+    after_json = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+    previous_hash = models.CharField(max_length=64, blank=True)
+    event_hash = models.CharField(max_length=64)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "chain_index"], name="netra_admin_audit_chain_idx"),
+            models.Index(fields=["organization", "recorded_at"], name="netra_admin_audit_time_idx"),
+        ]
+        constraints = [
+            # A gap or a duplicate is the signature of a lost or replayed
+            # append. The database refuses both even if the service is wrong.
+            models.UniqueConstraint(
+                fields=["organization", "chain_index"],
+                name="netra_admin_audit_chain_unique",
+            ),
+        ]

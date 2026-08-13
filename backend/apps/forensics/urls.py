@@ -29,6 +29,7 @@ urlpatterns = [
     path("admin/organizations/<uuid:organization_id>/admin-transfer", auth_views.admin_transfer),
     path("admin/v1/session", admin_console_views.admin_session),
     path("admin/v1/directory", admin_console_views.admin_directory),
+    path("admin/v1/audit/verify", admin_console_views.admin_audit_verify),
     path("cases", case_views.cases),
     path("cases/<str:case_id>", case_views.case_detail),
     path("cases/<str:case_id>/workspace", case_views.case_workspace),

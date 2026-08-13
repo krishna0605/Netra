@@ -153,3 +153,75 @@ class PostgreSQLSecurityConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(AccessLog.objects.filter(action="organization.admin_transfer").count(), 1)
         self.assertEqual(OperationalEvent.objects.filter(event_type="organization.admin_transferred").count(), 1)
+
+
+class AdminAuditChainConcurrencyTests(TransactionTestCase):
+    """The failure that never reproduces on a laptop.
+
+    Without the lock on the organization row, two administrators acting at the
+    same moment both read the same highest chain index and both try to write
+    the next one. The unique constraint saves the chain from corruption, but
+    the losing append is simply gone — an administrative change that happened
+    and left no record. SQLite serialises writes anyway, so only PostgreSQL can
+    show whether the lock is doing its job.
+    """
+
+    reset_sequences = True
+
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Audit Concurrency", slug="audit-concurrency")
+        user = get_user_model().objects.create_user(username="chief@concurrency.test", email="chief@concurrency.test")
+        UserProfile.objects.create(user=user, organization=self.organization, role=UserProfile.Role.ADMIN)
+        self.actor = Actor(
+            user="Chief A. Rao",
+            role="Admin",
+            authenticated=True,
+            django_user_id=user.id,
+            email="chief@concurrency.test",
+            organization_id=self.organization.id,
+            organization_slug=self.organization.slug,
+            aal="aal2",
+        )
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_fifty_concurrent_appends_lose_nothing_and_form_one_valid_chain(self):
+        from apps.forensics.models import AdminAuditEvent
+        from common.admin_audit import record_admin_event, verify_admin_chain
+
+        self.assertEqual(connection.vendor, "postgresql")
+
+        def append(sequence: int) -> None:
+            connections.close_all()
+            organization = Organization.objects.get(pk=self.organization.pk)
+            record_admin_event(
+                organization=organization,
+                actor=self.actor,
+                action="user.role_changed",
+                target_type="User",
+                target_id=str(sequence),
+                reason="Concurrent append under test.",
+            )
+            connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            list(pool.map(append, range(50)))
+
+        report = verify_admin_chain(Organization.objects.get(pk=self.organization.pk))
+
+        self.assertEqual(report["eventCount"], 50, "an append was lost")
+        self.assertTrue(report["verified"])
+        self.assertEqual(report["failures"], [])
+        self.assertEqual(
+            list(
+                AdminAuditEvent.objects.filter(organization=self.organization)
+                .order_by("chain_index")
+                .values_list("chain_index", flat=True)
+            ),
+            list(range(1, 51)),
+        )
+        # Every recorded target survived. Counting rows alone would pass even
+        # if the same change were written twice and another lost entirely.
+        self.assertEqual(
+            {row.target_id for row in AdminAuditEvent.objects.filter(organization=self.organization)},
+            {str(sequence) for sequence in range(50)},
+        )

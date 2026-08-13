@@ -324,16 +324,24 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
 
         self.assertEqual(row["deniedLast24h"], 2)
 
-    def test_sessions_and_audit_are_empty_rather_than_invented(self):
-        """Both need work that lands in later phases. An empty list makes the
-        console show its empty state, which is true. Plausible rows here would
-        put fiction in front of someone deciding whether to revoke access."""
+    def test_sessions_are_empty_rather_than_invented(self):
+        """Supabase does not expose a session list through the client SDK, and
+        the Auth Admin call that does arrives with the write path. An empty list
+        makes the console show its empty state, which is true. Plausible rows
+        would put fiction in front of someone deciding whether to revoke
+        a colleague's access."""
         snapshot = self._snapshot()
 
         self.assertEqual(snapshot["sessions"], [])
-        self.assertEqual(snapshot["audit"], [])
         self.assertEqual(snapshot["sources"]["sessions"], "pending")
-        self.assertEqual(snapshot["sources"]["audit"], "pending")
+
+    def test_the_audit_chain_is_live_and_empty_until_something_is_recorded(self):
+        """Empty because nothing has happened, not because nothing is wired.
+        The source marker is what tells those two apart."""
+        snapshot = self._snapshot()
+
+        self.assertEqual(snapshot["audit"], [])
+        self.assertEqual(snapshot["sources"]["audit"], "live")
 
     def test_capabilities_come_from_the_registry(self):
         snapshot = self._snapshot()
@@ -362,3 +370,162 @@ class AdminSessionTests(AdminConsoleTestBase):
 
         for forbidden in ("Bearer", "secret", "service_role", "password"):
             self.assertNotIn(forbidden, body)
+
+
+@SECURE_SETTINGS
+class AdminAuditEndpointTests(AdminConsoleTestBase):
+    def _record(self, count=3):
+        from common.admin_audit import record_admin_event
+        from common.audit import Actor
+
+        actor = Actor(
+            user="Chief A. Rao",
+            role="Admin",
+            authenticated=True,
+            django_user_id=self.admin.id,
+            email="chief@netra.test",
+            organization_id=self.organization.id,
+            organization_slug="netra",
+            aal="aal2",
+        )
+        for index in range(count):
+            record_admin_event(
+                organization=self.organization,
+                actor=actor,
+                action=f"user.action_{index}",
+                target_type="User",
+                target_id=str(self.investigator.id),
+                reason="Recorded under test.",
+            )
+
+    def test_the_directory_carries_the_chain(self):
+        self._record()
+        snapshot = self.client.get(DIRECTORY, **self._headers(self.admin)).json()
+
+        self.assertEqual(len(snapshot["audit"]), 3)
+        self.assertEqual(snapshot["sources"]["audit"], "live")
+        # Newest first, by chain index rather than by time: the index cannot be
+        # tampered with without breaking verification, a timestamp sort could
+        # let a forged row present itself out of position.
+        self.assertEqual([row["chainIndex"] for row in snapshot["audit"]], [3, 2, 1])
+
+    def test_administrator_events_appear_in_activity(self):
+        self._record(count=1)
+        snapshot = self.client.get(DIRECTORY, **self._headers(self.admin)).json()
+
+        self.assertIn("AdminAudit", {row["source"] for row in snapshot["activity"]})
+
+    def test_verify_reports_an_intact_chain(self):
+        self._record()
+        response = self.client.get("/api/admin/v1/audit/verify", **self._headers(self.admin))
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["verified"])
+        self.assertEqual(body["eventCount"], 3)
+        self.assertIsNone(body["firstBrokenIndex"])
+
+    def test_verify_reports_where_a_tampered_chain_breaks(self):
+        from apps.forensics.models import AdminAuditEvent
+
+        self._record()
+        AdminAuditEvent.objects.filter(chain_index=2).update(reason="Routine maintenance.")
+
+        body = self.client.get("/api/admin/v1/audit/verify", **self._headers(self.admin)).json()
+
+        self.assertFalse(body["verified"])
+        self.assertEqual(body["firstBrokenIndex"], 2)
+
+    def test_verify_does_not_grow_the_chain_it_verifies(self):
+        """Recording the check would add an entry every time anyone looked."""
+        from apps.forensics.models import AdminAuditEvent
+
+        self._record()
+        for _ in range(3):
+            self.client.get("/api/admin/v1/audit/verify", **self._headers(self.admin))
+
+        self.assertEqual(AdminAuditEvent.objects.count(), 3)
+
+    def test_verify_requires_an_administrator(self):
+        self.assertEqual(
+            self.client.get("/api/admin/v1/audit/verify", **self._headers(self.investigator)).status_code, 403
+        )
+        self.assertEqual(self.client.get("/api/admin/v1/audit/verify").status_code, 401)
+
+
+@SECURE_SETTINGS
+class StepUpGateTests(AdminConsoleTestBase):
+    def _headers_with_factor(self, user, *, seconds_ago: int):
+        import time
+
+        token = RefreshToken.for_user(user).access_token
+        token["aal"] = "aal2"
+        token["amr"] = [
+            {"method": "password", "timestamp": int(time.time()) - 40_000},
+            {"method": "totp", "timestamp": int(time.time()) - seconds_ago},
+        ]
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_reading_the_directory_does_not_require_a_recent_factor(self):
+        """Prompting for a code to look at a list would train operators to keep
+        their authenticator permanently open, defeating the control where it
+        actually matters."""
+        response = self.client.get(DIRECTORY, **self._headers(self.admin, aal="aal2"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_recent_challenge_reports_as_fresh(self):
+        body = self.client.get(SESSION, **self._headers_with_factor(self.admin, seconds_ago=30)).json()
+
+        self.assertTrue(body["stepUp"]["fresh"])
+        self.assertIsNotNone(body["stepUp"]["verifiedAt"])
+        self.assertEqual(body["stepUp"]["maxAgeSeconds"], 300)
+
+    def test_a_stale_challenge_reports_as_not_fresh(self):
+        """The nine-in-the-morning session. Still aal2, still signed in, and no
+        longer sufficient to reset someone's credentials."""
+        body = self.client.get(SESSION, **self._headers_with_factor(self.admin, seconds_ago=8 * 3600)).json()
+
+        self.assertFalse(body["stepUp"]["fresh"])
+        self.assertIsNotNone(body["stepUp"]["verifiedAt"])
+
+    def test_a_session_with_no_second_factor_reports_as_not_fresh(self):
+        body = self.client.get(SESSION, **self._headers(self.admin, aal="aal2")).json()
+
+        self.assertFalse(body["stepUp"]["fresh"])
+        self.assertIsNone(body["stepUp"]["verifiedAt"])
+
+    def test_the_gate_refuses_a_stale_session(self):
+        from apps.forensics.services.administration import AdministrationProblem, require_recent_factor
+        from common.audit import Actor
+        from django.utils import timezone
+        from datetime import timedelta
+
+        stale = Actor(
+            user="Chief A. Rao",
+            role="Admin",
+            authenticated=True,
+            aal="aal2",
+            factor_verified_at=timezone.now() - timedelta(hours=8),
+        )
+        with self.assertRaises(AdministrationProblem) as raised:
+            require_recent_factor(stale)
+
+        self.assertEqual(raised.exception.code, "step_up_required")
+        self.assertEqual(raised.exception.status, 401)
+
+    def test_the_gate_accepts_a_fresh_session(self):
+        from apps.forensics.services.administration import require_recent_factor
+        from common.audit import Actor
+        from django.utils import timezone
+        from datetime import timedelta
+
+        fresh = Actor(
+            user="Chief A. Rao",
+            role="Admin",
+            authenticated=True,
+            aal="aal2",
+            factor_verified_at=timezone.now() - timedelta(seconds=30),
+        )
+
+        self.assertIsNone(require_recent_factor(fresh))

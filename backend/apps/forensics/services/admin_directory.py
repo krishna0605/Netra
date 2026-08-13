@@ -28,12 +28,14 @@ from django.contrib.auth import get_user_model
 
 from apps.forensics.models import (
     AccessLog,
+    AdminAuditEvent,
     CaseHistoryEvent,
     CustodyLedgerEvent,
     OperationalEvent,
     Organization,
     UserProfile,
 )
+from common.admin_audit import admin_event_dict
 from common.audit import ROLE_PERMISSIONS
 from common.capabilities import capability_registry
 from common.supabase_admin import SupabaseAdminError, list_users
@@ -414,6 +416,38 @@ def _activity_from_custody(organization: Organization, limit: int) -> list[dict[
     ]
 
 
+def audit_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> list[dict[str, Any]]:
+    """The administrator chain, newest first.
+
+    Ordered by chain_index rather than time. The index is the chain's own
+    sequence and cannot be tampered with without breaking verification, while a
+    timestamp sort would let a forged row present itself out of position.
+    """
+    rows = (
+        AdminAuditEvent.objects.filter(organization=organization).order_by("-chain_index")[:limit]
+    )
+    return [admin_event_dict(row) for row in rows]
+
+
+def _activity_from_admin_audit(organization: Organization, limit: int) -> list[dict[str, Any]]:
+    rows = AdminAuditEvent.objects.filter(organization=organization).order_by("-chain_index")[:limit]
+    return [
+        {
+            "id": f"admin-{row.id}",
+            "at": row.recorded_at.isoformat(),
+            "actor": row.actor_label,
+            "actorEmail": row.actor_email,
+            "role": row.actor_role,
+            "action": row.action,
+            "target": " ".join(part for part in (row.target_type, row.target_id) if part),
+            "result": "recorded",
+            "source": "AdminAudit",
+            "chainIndex": row.chain_index,
+        }
+        for row in rows
+    ]
+
+
 def activity_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> list[dict[str, Any]]:
     """Merge the four streams Django owns into one reverse-chronological list.
 
@@ -422,6 +456,7 @@ def activity_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> li
     """
     merged = [
         *_activity_from_access_logs(organization, limit),
+        *_activity_from_admin_audit(organization, limit),
         *_activity_from_operational_events(organization, limit),
         *_activity_from_case_history(organization, limit),
         *_activity_from_custody(organization, limit),
@@ -441,9 +476,7 @@ def directory_snapshot(organization: Organization) -> dict[str, Any]:
         # administrator deciding whether to revoke someone's access.
         "sessions": [],
         "activity": activity_rows(organization),
-        # The hash-chained administrator audit table lands in the next phase.
-        # Until it exists there is nothing truthful to return.
-        "audit": [],
+        "audit": audit_rows(organization),
         "roles": role_rows(organization),
         "organization": organization_row(organization),
         "permissions": [dict(entry) for entry in PERMISSION_CATALOGUE],
@@ -451,6 +484,6 @@ def directory_snapshot(organization: Organization) -> dict[str, Any]:
         "sources": {
             "identityProvider": "supabase" if identities_known else "unavailable",
             "sessions": "pending",
-            "audit": "pending",
+            "audit": "live",
         },
     }
