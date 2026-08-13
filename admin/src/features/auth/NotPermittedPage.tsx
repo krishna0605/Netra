@@ -1,6 +1,7 @@
 import { AuthLayout } from "./AuthLayout";
 import { Button } from "../../components/ui/primitives";
 import { useAuth } from "./AuthContext";
+import { useT } from "../../i18n";
 
 /**
  * Shown when an account authenticates successfully but holds no administrative
@@ -9,15 +10,16 @@ import { useAuth } from "./AuthContext";
  */
 export function NotPermittedPage() {
   const { signOut } = useAuth();
+  const t = useT();
 
   return (
-    <AuthLayout title="Not available" subtitle="This workspace is not available for your account.">
+    <AuthLayout title={t("notAvailable")} subtitle={t("notAvailableSubtitle")}>
       <div className="flex flex-col gap-4">
         <p className="text-[13.5px] leading-relaxed text-sand-muted">
-          If you believe this is a mistake, contact your department administrator.
+          {t("notAvailableBody")}
         </p>
         <Button variant="outline" onClick={() => void signOut()} className="w-full">
-          Sign out
+          {t("signOut")}
         </Button>
       </div>
     </AuthLayout>

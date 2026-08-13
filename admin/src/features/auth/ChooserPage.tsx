@@ -6,6 +6,7 @@ import { Avatar, Tag } from "../../components/ui/primitives";
 import { CONSOLE_URL, IS_LOCAL } from "../../lib/env";
 import { cn, initials } from "../../lib/utils";
 import { useAuth } from "./AuthContext";
+import { useT } from "../../i18n";
 
 const REMEMBER_KEY = "netra.admin.preferInvestigation";
 
@@ -25,6 +26,7 @@ function leaveForConsole() {
  */
 export function ChooserPage() {
   const { profile, chooseAdministration, signOut } = useAuth();
+  const t = useT();
   const [remember, setRemember] = useState(() => localStorage.getItem(REMEMBER_KEY) === "1");
 
   function toggleRemember(next: boolean) {
@@ -37,7 +39,7 @@ export function ChooserPage() {
   }
 
   return (
-    <AuthLayout title="Choose a workspace" subtitle="You have access to more than one." width="wide">
+    <AuthLayout title={t("chooseWorkspace")} subtitle={t("chooseWorkspaceSubtitle")} width="wide">
       <div className="flex flex-col gap-5">
         {profile ? (
           <div className="flex items-center gap-3 rounded-panel border border-hairline bg-charcoal-panel px-4 py-3">
@@ -48,16 +50,16 @@ export function ChooserPage() {
                 {profile.email} · {profile.organizationName}
               </p>
             </div>
-            <Tag tone="ok">Verified</Tag>
+            <Tag tone="ok">{t("verified")}</Tag>
           </div>
         ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <WorkspaceCard
             icon={FolderSearch}
-            name="Investigation Console"
-            description="Cases, evidence, analysis and reports. Your day-to-day work."
-            action="Open"
+            name={t("investigationConsole")}
+            description={t("investigationConsoleBlurb")}
+            action={t("open")}
             // Locally this is a separate dev server. Naming it means a console
             // that is not running reads as "nothing at that address" rather
             // than as a broken button.
@@ -67,10 +69,10 @@ export function ChooserPage() {
           <WorkspaceCard
             elevated
             icon={KeyRound}
-            name="Administration"
-            description="User accounts, roles, permissions and the access record."
-            note="Elevated privileges"
-            action="Open"
+            name={t("administration")}
+            description={t("administrationBlurb")}
+            note={t("elevatedPrivileges")}
+            action={t("open")}
             onSelect={chooseAdministration}
           />
         </div>
@@ -83,14 +85,14 @@ export function ChooserPage() {
               onChange={(event) => toggleRemember(event.target.checked)}
               className="size-4 shrink-0 accent-[var(--color-signal)]"
             />
-            Always take me to the Investigation Console
+            {t("alwaysInvestigation")}
           </label>
           <button
             type="button"
             onClick={() => void signOut()}
             className="text-[12.5px] text-sand-muted/70 underline underline-offset-2 hover:text-cream-bright"
           >
-            Sign out
+            {t("signOut")}
           </button>
         </div>
       </div>

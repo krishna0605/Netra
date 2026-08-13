@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { Button, Panel } from "./ui/primitives";
 import { cn } from "../lib/utils";
+import { useT } from "../i18n";
 
 /* ---------------------------------------------------------------------------
    Skeletons — shaped like the content they replace, so the layout does not
@@ -75,7 +76,7 @@ export function SkeletonList({ rows = 5 }: { rows?: number }) {
  * misleading thing a console like this can do.
  */
 export function ErrorState({
-  title = "Could not load this",
+  title,
   detail,
   onRetry,
   retrying = false,
@@ -85,17 +86,18 @@ export function ErrorState({
   onRetry?: () => void;
   retrying?: boolean;
 }) {
+  const t = useT();
   return (
     <div role="alert" className="flex flex-col items-center gap-3 px-6 py-14 text-center">
       <span className="grid size-11 place-items-center rounded-control border border-state-crit/40 bg-state-crit/10 text-state-crit">
         <AlertTriangle className="size-5" strokeWidth={1.75} aria-hidden="true" />
       </span>
-      <p className="text-[15px] font-medium text-cream-bright">{title}</p>
+      <p className="text-[15px] font-medium text-cream-bright">{title ?? t("couldNotLoad")}</p>
       <p className="max-w-md text-[13px] leading-relaxed text-sand-muted/80">{detail}</p>
       {onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying} className="mt-1">
           <RotateCw className={cn("size-3.5", retrying && "animate-spin")} strokeWidth={1.75} aria-hidden="true" />
-          {retrying ? "Retrying…" : "Try again"}
+          {retrying ? t("retrying") : t("tryAgain")}
         </Button>
       ) : null}
     </div>

@@ -4,6 +4,7 @@ import { AuthLayout } from "./AuthLayout";
 import { Button } from "../../components/ui/primitives";
 import { cn } from "../../lib/utils";
 import { useAuth } from "./AuthContext";
+import { useT } from "../../i18n";
 
 const LENGTH = 6;
 
@@ -14,6 +15,7 @@ const LENGTH = 6;
  */
 export function VerifyPage() {
   const { verifyCode, error, busy, signOut, clearError } = useAuth();
+  const t = useT();
   const [digits, setDigits] = useState<string[]>(Array(LENGTH).fill(""));
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -80,11 +82,11 @@ export function VerifyPage() {
 
   return (
     <AuthLayout
-      title="Verification"
-      subtitle="Enter the six-digit code from your authenticator."
+      title={t("verifyTitle")}
+      subtitle={t("verifySubtitle")}
       footer={
         <button type="button" onClick={() => void signOut()} className="underline underline-offset-2 hover:text-cream-bright">
-          Use a different account
+          {t("useDifferentAccount")}
         </button>
       }
     >
@@ -102,7 +104,7 @@ export function VerifyPage() {
               inputMode="numeric"
               autoComplete={index === 0 ? "one-time-code" : "off"}
               maxLength={1}
-              aria-label={`Digit ${index + 1} of ${LENGTH}`}
+              aria-label={`${t("digitOf")} ${index + 1} / ${LENGTH}`}
               disabled={busy}
               className={cn(
                 "h-14 w-11 rounded-control border bg-charcoal-deep text-center font-mono text-xl text-cream-bright",
@@ -120,11 +122,11 @@ export function VerifyPage() {
         ) : null}
 
         <Button type="button" variant="primary" disabled={!complete || busy} onClick={submit} className="w-full">
-          {busy ? "Verifying…" : "Verify"}
+          {busy ? t("verifying") : t("verify")}
         </Button>
 
         <p className="text-center text-[12.5px] text-sand-muted/70">
-          Lost your authenticator? Contact your department administrator.
+          {t("lostAuthenticator")}
         </p>
       </div>
     </AuthLayout>
