@@ -233,6 +233,11 @@ export function currentDirectory(): DirectorySnapshot {
  *  rejected password during the frontend build, and cost an evening.
  */
 function describe(status: number, code: string): string {
+  // Also a 401, and emphatically not a dead session — the operator is signed
+  // in and permitted, they simply have not touched their authenticator
+  // recently enough for a destructive action. Treating it as a dead session
+  // would sign them out for asking to do their job.
+  if (code === "step_up_required") return "Confirm this action with your authenticator.";
   if (status === 401) return "This session is no longer valid. Sign in again.";
   if (status === 403 && code === "aal2_required") {
     return "Administration requires a verified authenticator on this session.";
@@ -324,6 +329,32 @@ export type AdminSession = {
  */
 export function fetchAdminSession(): Promise<AdminSession> {
   return authorizedRequest<AdminSession>("/admin/v1/session");
+}
+
+/** The result of recomputing the audit chain server-side. */
+export type ChainVerification = {
+  verified: boolean;
+  eventCount: number;
+  rootHash: string;
+  latestHash: string;
+  /** Where the chain stops agreeing, or null when it is intact. An auditor
+   *  needs to know how much of the record still stands, not just that
+   *  something is wrong. */
+  firstBrokenIndex: number | null;
+  failures: number[];
+  checkedAt: string;
+};
+
+/**
+ * Ask the server to recompute the chain.
+ *
+ * This button used to raise a success toast unconditionally — it displayed a
+ * verification it had never performed, which is worse than having no button at
+ * all. The hashes it would need are computed and held server-side; the browser
+ * cannot check them and must not appear to.
+ */
+export function verifyAuditChain(): Promise<ChainVerification> {
+  return authorizedRequest<ChainVerification>("/admin/v1/audit/verify");
 }
 
 export const directoryApi = {

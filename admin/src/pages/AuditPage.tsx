@@ -1,6 +1,8 @@
-import { CheckCircle2, Link2 } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, Link2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
+import { ApiFailure, verifyAuditChain, type ChainVerification } from "../data/client";
 import { useDirectory } from "../data/store";
 import { DataRegion, SkeletonList } from "../components/states";
 import { LoadMore, useIncremental } from "../components/LoadMore";
@@ -12,6 +14,39 @@ export function AuditPage() {
   const { audit, loading, error, refetch } = useDirectory();
   const head = audit[0];
   const page = useIncremental(audit, 20);
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<ChainVerification | null>(null);
+
+  const verified = result?.verified === true;
+  const broken = result?.verified === false;
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      const report = await verifyAuditChain();
+      setResult(report);
+      if (report.verified) {
+        toast.success("Trail verified", {
+          description: `${report.eventCount} ${report.eventCount === 1 ? "entry" : "entries"}, no gaps, every link intact.`,
+        });
+      } else {
+        // Deliberately not a toast that fades. A broken chain is a finding
+        // somebody has to act on, so it stays on the panel until re-checked.
+        toast.error("Trail verification failed", {
+          description: `The chain stops agreeing at entry ${report.firstBrokenIndex}. Entries after it cannot be relied on.`,
+        });
+      }
+    } catch (failure) {
+      // An unreachable service is not a verified chain and not a broken one.
+      // Saying either would be a lie in a different direction.
+      setResult(null);
+      toast.error("Could not verify", {
+        description: failure instanceof ApiFailure ? failure.message : "The verification service did not respond.",
+      });
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <>
@@ -19,27 +54,41 @@ export function AuditPage() {
         title="Audit trail"
         summary={loading ? "Loading…" : `${audit.length} administrator actions · sequence ${head?.chainIndex ?? "—"}`}
         action={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast.success("Trail verified", { description: `${audit.length} entries, no gaps, every link intact.` })}
-          >
+          <Button variant="outline" size="sm" onClick={() => void check()} disabled={checking}>
             <CheckCircle2 className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
-            Verify
+            {checking ? "Verifying…" : "Verify"}
           </Button>
         }
       />
 
       <PageBody>
+        {/* The badge reports what was actually checked, and says so until it
+            has been. Claiming "Intact" before anyone verified anything is the
+            reassurance a tamper-evident trail exists to withhold. */}
         <Panel className="flex flex-wrap items-center gap-4 px-5 py-4">
-          <span className="grid size-9 shrink-0 place-items-center rounded-control border border-state-ok/40 bg-state-ok/10 text-state-ok">
-            <CheckCircle2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          <span
+            className={
+              broken
+                ? "grid size-9 shrink-0 place-items-center rounded-control border border-state-crit/40 bg-state-crit/10 text-state-crit"
+                : verified
+                  ? "grid size-9 shrink-0 place-items-center rounded-control border border-state-ok/40 bg-state-ok/10 text-state-ok"
+                  : "grid size-9 shrink-0 place-items-center rounded-control border border-[color:var(--color-control-edge)] bg-cream-primary/5 text-sand-muted/70"
+            }
+          >
+            {broken ? (
+              <ShieldAlert className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            )}
           </span>
-          <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-sand-muted">
-            Every administrator action is recorded here and cryptographically linked to the one before it. Entries cannot be edited or
-            removed, including by the people they record.
+          <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-sand-muted/70">
+            {broken
+              ? `The chain stops agreeing at entry ${result?.firstBrokenIndex}. Entries before it are still sealed; everything after cannot be relied on.`
+              : "Every administrator action is recorded here and cryptographically linked to the one before it. Entries cannot be edited or removed, including by the people they record."}
           </p>
-          <Status tone="ok">Intact</Status>
+          <Status tone={broken ? "crit" : verified ? "ok" : "neutral"}>
+            {broken ? "Broken" : verified ? "Verified" : "Not verified"}
+          </Status>
         </Panel>
 
         <Panel>

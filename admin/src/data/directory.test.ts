@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { supabase } from "../lib/supabase";
-import { ApiFailure, directoryApi, currentDirectory, resetDirectory } from "./client";
+import { ApiFailure, directoryApi, currentDirectory, resetDirectory, verifyAuditChain } from "./client";
 import { generatePassword, passwordStrength } from "./store";
 
 beforeEach(() => {
@@ -148,15 +148,28 @@ describe("setPassword", () => {
     expect(after.sessions.some((session) => session.userId === withSessions)).toBe(false);
   });
 
-  it("never writes the password into stored state", async () => {
-    await directoryApi.setPassword({
+  it("records that a password was set without recording what it was", async () => {
+    const snapshot = await directoryApi.setPassword({
       userId: 41,
       reason: "Routine replacement for this test.",
       requireChange: true,
       revokeSessions: false,
     });
 
-    expect(JSON.stringify(window.localStorage.getItem("netra.directory.v1"))).not.toContain("password:");
+    // This used to read localStorage, which the console no longer writes to,
+    // so it was asserting that null does not contain a password and would have
+    // passed however badly the code behaved.
+    //
+    // The real guarantee is stronger than "not stored": the operation never
+    // receives the password. It travels from the dialog to the server and is
+    // shown once. Nothing here can leak it because nothing here has it.
+    const entry = snapshot.audit[0];
+    expect(entry.action).toBe("credential.password_set");
+    expect(entry.after).toContain("password replaced");
+
+    const serialised = JSON.stringify(snapshot);
+    expect(serialised).not.toMatch(/"password"\s*:/);
+    expect(window.localStorage.getItem("netra.directory.v1")).toBeNull();
   });
 });
 
@@ -206,6 +219,89 @@ describe("transferOwnership", () => {
 
     await expect(directoryApi.transferOwnership(inactive.id, "Should not be permitted.")).rejects.toMatchObject({
       code: "inactive_target",
+    });
+  });
+});
+
+describe("audit chain verification", () => {
+  it("reports an intact chain", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              verified: true,
+              eventCount: 12,
+              rootHash: "a".repeat(64),
+              latestHash: "b".repeat(64),
+              firstBrokenIndex: null,
+              failures: [],
+              checkedAt: new Date().toISOString(),
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const report = await verifyAuditChain();
+
+    expect(report.verified).toBe(true);
+    expect(report.firstBrokenIndex).toBeNull();
+  });
+
+  it("reports where a tampered chain stops agreeing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              verified: false,
+              eventCount: 12,
+              rootHash: "a".repeat(64),
+              latestHash: "b".repeat(64),
+              firstBrokenIndex: 7,
+              failures: [7, 8],
+              checkedAt: new Date().toISOString(),
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const report = await verifyAuditChain();
+
+    expect(report.verified).toBe(false);
+    // An auditor needs to know how much of the record still stands, not only
+    // that something is wrong.
+    expect(report.firstBrokenIndex).toBe(7);
+  });
+
+  it("does not report an unreachable service as either verified or broken", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network"); }));
+
+    await expect(verifyAuditChain()).rejects.toMatchObject({ code: "service_unreachable" });
+  });
+});
+
+describe("step-up refusals", () => {
+  it("are not treated as a dead session", async () => {
+    // Shares the 401 status with an expired session and means the opposite:
+    // the operator is signed in and permitted, and simply needs to touch their
+    // authenticator. Signing them out here would be the wrong response to
+    // someone asking to do their job.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { code: "step_up_required", message: "" } }), { status: 401 }),
+      ),
+    );
+
+    await expect(directoryApi.read()).rejects.toMatchObject({
+      code: "step_up_required",
+      message: "Confirm this action with your authenticator.",
     });
   });
 });

@@ -61,8 +61,16 @@ async function profileFor(email: string, userId: string): Promise<AdminProfile |
       isAdministrative: true,
     };
   } catch (failure) {
-    // 401/403 are the server answering the question: this account is not an
-    // administrator. Anything else is the question going unanswered.
+    // 401/403/404 are the server answering the question: this account is not
+    // an administrator. Anything else is the question going unanswered.
+    //
+    // step_up_required is excluded deliberately. It shares the 401 status but
+    // means the opposite — the account is permitted and merely needs to touch
+    // its authenticator again. Reading it as a refusal would lock an
+    // administrator out of their own console for having been signed in a while.
+    if (failure instanceof ApiFailure && failure.code === "step_up_required") {
+      throw failure;
+    }
     if (failure instanceof ApiFailure && (failure.status === 401 || failure.status === 403 || failure.status === 404)) {
       return null;
     }

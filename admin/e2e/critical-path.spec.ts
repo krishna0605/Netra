@@ -327,3 +327,68 @@ test("an account the server does not recognise as an administrator is refused", 
   await expect(page.getByRole("heading", { name: "Not available" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 });
+
+test("a broken audit chain is reported as broken, not quietly verified", async ({ page }) => {
+  await stubAuth(page);
+  await page.route("**/api/admin/v1/audit/verify", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        verified: false,
+        eventCount: 12,
+        rootHash: "a".repeat(64),
+        latestHash: "b".repeat(64),
+        firstBrokenIndex: 7,
+        failures: [7, 8],
+        checkedAt: new Date().toISOString(),
+      }),
+    }),
+  );
+
+  await signIn(page);
+  await enterAdministration(page);
+  await page.getByRole("link", { name: "Audit trail" }).click();
+
+  // Before anyone checks, the panel must not claim the trail is intact. That
+  // reassurance is exactly what a tamper-evident record exists to withhold
+  // until it has actually been recomputed.
+  await expect(page.getByText("Not verified")).toBeVisible();
+
+  await page.getByRole("button", { name: "Verify" }).click();
+
+  await expect(page.getByText("Broken")).toBeVisible({ timeout: 15_000 });
+
+  // The panel keeps the finding on screen and says how much of the record
+  // still stands; the toast announces it. Both name the index, so each is
+  // matched on its own wording rather than on the shared phrase.
+  await expect(page.getByText(/Entries before it are still sealed/)).toBeVisible();
+  await expect(page.getByText(/Entries after it cannot be relied on/)).toBeVisible();
+});
+
+test("an intact audit chain reports as verified only after it is checked", async ({ page }) => {
+  await stubAuth(page);
+  await page.route("**/api/admin/v1/audit/verify", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        verified: true,
+        eventCount: 12,
+        rootHash: "a".repeat(64),
+        latestHash: "b".repeat(64),
+        firstBrokenIndex: null,
+        failures: [],
+        checkedAt: new Date().toISOString(),
+      }),
+    }),
+  );
+
+  await signIn(page);
+  await enterAdministration(page);
+  await page.getByRole("link", { name: "Audit trail" }).click();
+
+  await expect(page.getByText("Not verified")).toBeVisible();
+  await page.getByRole("button", { name: "Verify" }).click();
+  await expect(page.getByText("Verified", { exact: true })).toBeVisible({ timeout: 15_000 });
+});
