@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 
 from apps.forensics.models import (
     AccessLog,
@@ -41,7 +40,6 @@ from apps.forensics.models import (
 )
 from common.admin_audit import admin_event_dict
 from common.audit import ROLE_PERMISSIONS
-from common.permissions import effective_permissions
 from common.capabilities import capability_registry
 from common.supabase_admin import SupabaseAdminError, list_users
 from common.supabase_sessions import list_sessions, session_payload
@@ -159,7 +157,9 @@ def _supabase_identities() -> tuple[dict[str, _Identity], bool]:
     an empty mapping because the organization has no accounts are the same
     value and must not produce the same answer.
     """
-    if not getattr(settings, "SUPABASE_URL", "") or not getattr(settings, "SUPABASE_SECRET_KEY", ""):
+    if not getattr(settings, "SUPABASE_URL", "") or not getattr(
+        settings, "SUPABASE_SECRET_KEY", ""
+    ):
         return {}, False
     identities: dict[str, _Identity] = {}
     page: int | None = 1
@@ -211,7 +211,9 @@ def _denied_counts(organization: Organization) -> dict[int, int]:
 
     since = timezone.now() - timedelta(hours=24)
     rows = (
-        AccessLog.objects.filter(organization=organization, result="denied", created_at__gte=since)
+        AccessLog.objects.filter(
+            organization=organization, result="denied", created_at__gte=since
+        )
         .exclude(user_id=None)
         .values("user_id")
         .annotate(total=Count("id"))
@@ -246,14 +248,46 @@ def resolve_owner_id(organization: Organization) -> int:
     if organization.owner_id:
         return organization.owner_id
     earliest = (
-        UserProfile.objects.filter(organization=organization, role=UserProfile.Role.ADMIN)
+        UserProfile.objects.filter(
+            organization=organization, role=UserProfile.Role.ADMIN
+        )
         .order_by("created_at", "id")
         .first()
     )
     return earliest.user_id if earliest else 0
 
 
-def _permission_rows(profile: UserProfile, grants: list) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class _RoleState:
+    roles: tuple[Role, ...]
+    permissions_by_role: dict[int, frozenset[str]]
+    role_id_by_slug: dict[str, int]
+
+
+def _role_state(organization: Organization) -> _RoleState:
+    """Load every role and permission edge for one organization in two queries."""
+    roles = tuple(
+        Role.objects.filter(organization=organization).order_by("is_system", "name")
+    )
+    permissions_by_role: dict[int, set[str]] = {role.id: set() for role in roles}
+    for role_id, permission_id in RolePermission.objects.filter(
+        role__organization=organization
+    ).values_list("role_id", "permission_id"):
+        permissions_by_role.setdefault(role_id, set()).add(permission_id)
+    return _RoleState(
+        roles=roles,
+        permissions_by_role={
+            role_id: frozenset(keys) for role_id, keys in permissions_by_role.items()
+        },
+        role_id_by_slug={role.slug: role.id for role in roles},
+    )
+
+
+def _permission_rows(
+    profile: UserProfile,
+    grants: list[PermissionGrant],
+    role_permissions: frozenset[str] | set[str],
+) -> list[dict[str, Any]]:
     """Effective permissions, each saying where it came from.
 
     The source is what makes the screen useful. An administrator looking at an
@@ -262,15 +296,28 @@ def _permission_rows(profile: UserProfile, grants: list) -> list[dict[str, Any]]
     an expiry.
     """
     overrides = {grant.permission_id: grant for grant in grants}
+    granted_keys = {
+        grant.permission_id
+        for grant in grants
+        if grant.mode == PermissionGrant.Mode.GRANT
+    }
+    revoked_keys = {
+        grant.permission_id
+        for grant in grants
+        if grant.mode == PermissionGrant.Mode.REVOKE
+    }
+    effective = (set(role_permissions) | granted_keys) - revoked_keys
     rows = []
-    for key in sorted(effective_permissions(profile)):
+    for key in sorted(effective):
         grant = overrides.get(key)
         granted = grant is not None and grant.mode == PermissionGrant.Mode.GRANT
         rows.append(
             {
                 "key": key,
                 "source": "granted" if granted else "role",
-                "expiresAt": grant.expires_at.isoformat() if granted and grant.expires_at else None,
+                "expiresAt": grant.expires_at.isoformat()
+                if granted and grant.expires_at
+                else None,
                 "reason": grant.reason if granted else "",
                 "grantedBy": grant.granted_by_label if granted else "",
             }
@@ -284,7 +331,9 @@ def _permission_rows(profile: UserProfile, grants: list) -> list[dict[str, Any]]
                 {
                     "key": key,
                     "source": "revoked",
-                    "expiresAt": grant.expires_at.isoformat() if grant.expires_at else None,
+                    "expiresAt": grant.expires_at.isoformat()
+                    if grant.expires_at
+                    else None,
                     "reason": grant.reason,
                     "grantedBy": grant.granted_by_label,
                 }
@@ -292,11 +341,20 @@ def _permission_rows(profile: UserProfile, grants: list) -> list[dict[str, Any]]
     return rows
 
 
-def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
+def user_rows(
+    organization: Organization, role_state: _RoleState | None = None
+) -> tuple[list[dict[str, Any]], bool]:
+    from django.db.models import Q
+    from django.utils import timezone
+
     identities, identities_known = _supabase_identities()
     owner_id = resolve_owner_id(organization)
+    role_state = role_state or _role_state(organization)
     grants_by_user: dict[int, list] = {}
-    for grant in PermissionGrant.objects.filter(organization=organization):
+    active_grants = PermissionGrant.objects.filter(organization=organization).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+    )
+    for grant in active_grants:
         grants_by_user.setdefault(grant.user_id, []).append(grant)
     denied = _denied_counts(organization)
     last_activity = _last_activity(organization)
@@ -310,23 +368,39 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
         user = profile.user
         email = (user.email or user.get_username() or "").strip().lower()
         identity = identities.get(email)
-        permissions = _permission_rows(profile, grants_by_user.get(profile.user_id, []))
+        role_id = profile.role_ref_id or role_state.role_id_by_slug.get(
+            role_slug(profile.role)
+        )
+        role_permissions = role_state.permissions_by_role.get(role_id, frozenset())
+        if not role_permissions and role_id is None:
+            role_permissions = ROLE_PERMISSIONS.get(profile.role, set())
+        permissions = _permission_rows(
+            profile,
+            grants_by_user.get(profile.user_id, []),
+            role_permissions,
+        )
         rows.append(
             {
                 "id": user.id,
                 "email": email,
                 "name": profile.display_name or user.get_username(),
-                "roleSlug": profile.role_ref.slug if profile.role_ref_id else role_slug(profile.role),
+                "roleSlug": profile.role_ref.slug
+                if profile.role_ref_id
+                else role_slug(profile.role),
                 "isOwner": owner_id == profile.user_id,
                 "status": _status(user, identity),
                 # Never guessed. When Supabase could not be consulted the
                 # console shows "unknown" and the overview excludes the account
                 # from its enrolment ratio rather than counting it as a gap.
-                "mfa": identity.mfa_state if identity else ("unenrolled" if identities_known else "unknown"),
+                "mfa": identity.mfa_state
+                if identity
+                else ("unenrolled" if identities_known else "unknown"),
                 "department": profile.department,
                 "supabaseId": identity.supabase_id if identity else "",
                 "joinedAt": profile.created_at.isoformat(),
-                "lastSignInAt": (identity.last_sign_in_at or None) if identity else None,
+                "lastSignInAt": (identity.last_sign_in_at or None)
+                if identity
+                else None,
                 "lastActivityAt": last_activity.get(user.id),
                 "invitationState": _invitation_state(identity),
                 "deniedLast24h": denied.get(user.id, 0),
@@ -339,7 +413,9 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
     return rows, identities_known
 
 
-def role_rows(organization: Organization) -> list[dict[str, Any]]:
+def role_rows(
+    organization: Organization, role_state: _RoleState | None = None
+) -> list[dict[str, Any]]:
     """Roles as the database holds them, including any the console created.
 
     isSystem now means something. The seeded roles cannot be edited and a clone
@@ -350,18 +426,23 @@ def role_rows(organization: Organization) -> list[dict[str, Any]]:
 
     counts = {
         row["role"]: row["total"]
-        for row in UserProfile.objects.filter(organization=organization).values("role").annotate(total=Count("id"))
+        for row in UserProfile.objects.filter(organization=organization)
+        .values("role")
+        .annotate(total=Count("id"))
     }
     by_ref = {
         row["role_ref"]: row["total"]
-        for row in UserProfile.objects.filter(organization=organization, role_ref__isnull=False)
+        for row in UserProfile.objects.filter(
+            organization=organization, role_ref__isnull=False
+        )
         .values("role_ref")
         .annotate(total=Count("id"))
     }
 
+    role_state = role_state or _role_state(organization)
     rows = []
-    for role in Role.objects.filter(organization=organization).order_by("is_system", "name"):
-        keys = sorted(RolePermission.objects.filter(role=role).values_list("permission_id", flat=True))
+    for role in role_state.roles:
+        keys = sorted(role_state.permissions_by_role.get(role.id, frozenset()))
         rows.append(
             {
                 "slug": role.slug,
@@ -424,7 +505,9 @@ def capability_rows() -> list[dict[str, Any]]:
     ]
 
 
-def _activity_from_access_logs(organization: Organization, limit: int) -> list[dict[str, Any]]:
+def _activity_from_access_logs(
+    organization: Organization, limit: int
+) -> list[dict[str, Any]]:
     rows = (
         AccessLog.objects.filter(organization=organization)
         .select_related("user")
@@ -438,7 +521,11 @@ def _activity_from_access_logs(organization: Organization, limit: int) -> list[d
             "actorEmail": (row.user.email if row.user else "") or "",
             "role": row.role,
             "action": row.action,
-            "target": " ".join(part for part in (row.resource_type, row.resource_id) if part) or row.case_id or "",
+            "target": " ".join(
+                part for part in (row.resource_type, row.resource_id) if part
+            )
+            or row.case_id
+            or "",
             "result": row.result if row.result in {"allowed", "denied"} else "recorded",
             "source": "AccessLog",
             "chainIndex": None,
@@ -447,8 +534,12 @@ def _activity_from_access_logs(organization: Organization, limit: int) -> list[d
     ]
 
 
-def _activity_from_operational_events(organization: Organization, limit: int) -> list[dict[str, Any]]:
-    rows = OperationalEvent.objects.filter(organization=organization).order_by("-created_at", "-id")[:limit]
+def _activity_from_operational_events(
+    organization: Organization, limit: int
+) -> list[dict[str, Any]]:
+    rows = OperationalEvent.objects.filter(organization=organization).order_by(
+        "-created_at", "-id"
+    )[:limit]
     return [
         {
             "id": f"ops-{row.id}",
@@ -466,7 +557,9 @@ def _activity_from_operational_events(organization: Organization, limit: int) ->
     ]
 
 
-def _activity_from_case_history(organization: Organization, limit: int) -> list[dict[str, Any]]:
+def _activity_from_case_history(
+    organization: Organization, limit: int
+) -> list[dict[str, Any]]:
     rows = (
         CaseHistoryEvent.objects.filter(case__organization=organization)
         .select_related("case")
@@ -489,7 +582,9 @@ def _activity_from_case_history(organization: Organization, limit: int) -> list[
     ]
 
 
-def _activity_from_custody(organization: Organization, limit: int) -> list[dict[str, Any]]:
+def _activity_from_custody(
+    organization: Organization, limit: int
+) -> list[dict[str, Any]]:
     rows = (
         CustodyLedgerEvent.objects.filter(case__organization=organization)
         .select_related("case")
@@ -503,7 +598,10 @@ def _activity_from_custody(organization: Organization, limit: int) -> list[dict[
             "actorEmail": "",
             "role": row.actor_role,
             "action": row.action,
-            "target": " ".join(part for part in (row.resource_type, row.resource_id) if part) or row.case_id,
+            "target": " ".join(
+                part for part in (row.resource_type, row.resource_id) if part
+            )
+            or row.case_id,
             "result": "recorded",
             "source": "Custody",
             "chainIndex": row.chain_index,
@@ -512,21 +610,27 @@ def _activity_from_custody(organization: Organization, limit: int) -> list[dict[
     ]
 
 
-def audit_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> list[dict[str, Any]]:
+def audit_rows(
+    organization: Organization, limit: int = ACTIVITY_LIMIT
+) -> list[dict[str, Any]]:
     """The administrator chain, newest first.
 
     Ordered by chain_index rather than time. The index is the chain's own
     sequence and cannot be tampered with without breaking verification, while a
     timestamp sort would let a forged row present itself out of position.
     """
-    rows = (
-        AdminAuditEvent.objects.filter(organization=organization).order_by("-chain_index")[:limit]
-    )
+    rows = AdminAuditEvent.objects.filter(organization=organization).order_by(
+        "-chain_index"
+    )[:limit]
     return [admin_event_dict(row) for row in rows]
 
 
-def _activity_from_admin_audit(organization: Organization, limit: int) -> list[dict[str, Any]]:
-    rows = AdminAuditEvent.objects.filter(organization=organization).order_by("-chain_index")[:limit]
+def _activity_from_admin_audit(
+    organization: Organization, limit: int
+) -> list[dict[str, Any]]:
+    rows = AdminAuditEvent.objects.filter(organization=organization).order_by(
+        "-chain_index"
+    )[:limit]
     return [
         {
             "id": f"admin-{row.id}",
@@ -535,7 +639,9 @@ def _activity_from_admin_audit(organization: Organization, limit: int) -> list[d
             "actorEmail": row.actor_email,
             "role": row.actor_role,
             "action": row.action,
-            "target": " ".join(part for part in (row.target_type, row.target_id) if part),
+            "target": " ".join(
+                part for part in (row.target_type, row.target_id) if part
+            ),
             "result": "recorded",
             "source": "AdminAudit",
             "chainIndex": row.chain_index,
@@ -544,7 +650,9 @@ def _activity_from_admin_audit(organization: Organization, limit: int) -> list[d
     ]
 
 
-def activity_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> list[dict[str, Any]]:
+def activity_rows(
+    organization: Organization, limit: int = ACTIVITY_LIMIT
+) -> list[dict[str, Any]]:
     """Merge the four streams Django owns into one reverse-chronological list.
 
     Each stream is capped before the merge so that one noisy source cannot
@@ -561,7 +669,9 @@ def activity_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> li
     return merged[:limit]
 
 
-def session_rows(organization: Organization, users: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+def session_rows(
+    organization: Organization, users: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], str]:
     """Live sessions, joined back to the people they belong to.
 
     Read straight from GoTrue's own table rather than through the Auth Admin
@@ -579,20 +689,23 @@ def session_rows(organization: Organization, users: list[dict[str, Any]]) -> tup
             # show.
             continue
         rows.append(
-            session_payload(session, user_id=owner["id"], name=owner["name"], email=owner["email"])
+            session_payload(
+                session, user_id=owner["id"], name=owner["name"], email=owner["email"]
+            )
         )
     return rows, status
 
 
 def directory_snapshot(organization: Organization) -> dict[str, Any]:
-    users, identities_known = user_rows(organization)
+    role_state = _role_state(organization)
+    users, identities_known = user_rows(organization, role_state)
     sessions, sessions_status = session_rows(organization, users)
     return {
         "users": users,
         "sessions": sessions,
         "activity": activity_rows(organization),
         "audit": audit_rows(organization),
-        "roles": role_rows(organization),
+        "roles": role_rows(organization, role_state),
         "organization": organization_row(organization),
         "permissions": permission_catalogue_rows(),
         "capabilities": capability_rows(),

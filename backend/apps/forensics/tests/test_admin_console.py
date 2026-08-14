@@ -8,11 +8,21 @@ against the happy path alone.
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, OperationalEvent, PermissionGrant, UserProfile
+from apps.forensics.models import (
+    AccessLog,
+    Case,
+    CaseHistoryEvent,
+    OperationalEvent,
+    PermissionGrant,
+    Role,
+    UserProfile,
+)
 from apps.forensics.services.admin_directory import PERMISSION_CATALOGUE
 from common.audit import ROLE_PERMISSIONS
 from common.tenancy import netra_organization
@@ -58,7 +68,9 @@ class AdminConsoleTestBase(TestCase):
         self.client = Client()
         self.organization = netra_organization()
         User = get_user_model()
-        self.admin = User.objects.create_user(username="chief@netra.test", email="chief@netra.test", is_active=True)
+        self.admin = User.objects.create_user(
+            username="chief@netra.test", email="chief@netra.test", is_active=True
+        )
         UserProfile.objects.create(
             user=self.admin,
             organization=self.organization,
@@ -66,7 +78,9 @@ class AdminConsoleTestBase(TestCase):
             display_name="Chief A. Rao",
         )
         self.investigator = User.objects.create_user(
-            username="inspector@netra.test", email="inspector@netra.test", is_active=True
+            username="inspector@netra.test",
+            email="inspector@netra.test",
+            is_active=True,
         )
         UserProfile.objects.create(
             user=self.investigator,
@@ -166,7 +180,9 @@ class AdminConsoleAccessTests(AdminConsoleTestBase):
         self.client.get(DIRECTORY, **self._headers(self.admin, aal="aal1"))
 
         self.assertTrue(
-            AccessLog.objects.filter(action="admin_console.denied", result="denied").exists()
+            AccessLog.objects.filter(
+                action="admin_console.denied", result="denied"
+            ).exists()
         )
 
 
@@ -176,14 +192,20 @@ class AdminConsoleOriginTests(AdminConsoleTestBase):
     def test_disallowed_origin_gets_404_not_403(self):
         """404 so nothing confirms the namespace exists. A 403 would tell an
         attacker the route is real and worth pursuing."""
-        response = self.client.get(DIRECTORY, HTTP_ORIGIN="https://evil.example", **self._headers(self.admin))
+        response = self.client.get(
+            DIRECTORY, HTTP_ORIGIN="https://evil.example", **self._headers(self.admin)
+        )
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["code"], "resource_not_found")
 
     @override_settings(NETRA_ADMIN_ORIGINS=["https://console.example"])
     def test_allowed_origin_passes(self):
-        response = self.client.get(DIRECTORY, HTTP_ORIGIN="https://console.example", **self._headers(self.admin))
+        response = self.client.get(
+            DIRECTORY,
+            HTTP_ORIGIN="https://console.example",
+            **self._headers(self.admin),
+        )
 
         self.assertEqual(response.status_code, 200)
 
@@ -192,8 +214,15 @@ class AdminConsoleOriginTests(AdminConsoleTestBase):
         """Server-to-server calls carry no Origin. Rejecting them would break
         operational tooling while stopping nothing, since anything that can omit
         a header can forge one. The aal2 administrator check still applies."""
-        self.assertEqual(self.client.get(DIRECTORY, **self._headers(self.admin)).status_code, 200)
-        self.assertEqual(self.client.get(DIRECTORY, **self._headers(self.admin, aal="aal1")).status_code, 403)
+        self.assertEqual(
+            self.client.get(DIRECTORY, **self._headers(self.admin)).status_code, 200
+        )
+        self.assertEqual(
+            self.client.get(
+                DIRECTORY, **self._headers(self.admin, aal="aal1")
+            ).status_code,
+            403,
+        )
 
     @override_settings(NETRA_ADMIN_ORIGINS=["https://console.example"])
     def test_guard_does_not_touch_the_investigator_namespace(self):
@@ -212,7 +241,16 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
     def test_snapshot_carries_every_key_the_console_reads(self):
         snapshot = self._snapshot()
 
-        for key in ("users", "sessions", "activity", "audit", "roles", "organization", "permissions", "capabilities"):
+        for key in (
+            "users",
+            "sessions",
+            "activity",
+            "audit",
+            "roles",
+            "organization",
+            "permissions",
+            "capabilities",
+        ):
             self.assertIn(key, snapshot)
 
     def test_users_come_from_profiles_not_fixtures(self):
@@ -230,7 +268,10 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
         snapshot = self._snapshot()
         by_email = {row["email"]: row for row in snapshot["users"]}
 
-        for email, role in (("chief@netra.test", "Admin"), ("inspector@netra.test", "Investigator")):
+        for email, role in (
+            ("chief@netra.test", "Admin"),
+            ("inspector@netra.test", "Investigator"),
+        ):
             granted = {entry["key"] for entry in by_email[email]["permissions"]}
             self.assertEqual(granted, ROLE_PERMISSIONS[role], email)
 
@@ -245,7 +286,11 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
     def test_deactivated_accounts_are_reported_as_deactivated(self):
         get_user_model().objects.filter(pk=self.investigator.pk).update(is_active=False)
         snapshot = self._snapshot()
-        row = next(entry for entry in snapshot["users"] if entry["email"] == "inspector@netra.test")
+        row = next(
+            entry
+            for entry in snapshot["users"]
+            if entry["email"] == "inspector@netra.test"
+        )
 
         self.assertEqual(row["status"], "deactivated")
 
@@ -292,7 +337,9 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
             event_type="capture.started",
             payload_json={"operator": "Chief A. Rao"},
         )
-        CaseHistoryEvent.objects.create(case=case, actor_name="Chief A. Rao", action="case.opened", details="Opened")
+        CaseHistoryEvent.objects.create(
+            case=case, actor_name="Chief A. Rao", action="case.opened", details="Opened"
+        )
 
         snapshot = self._snapshot()
         sources = {row["source"] for row in snapshot["activity"]}
@@ -312,7 +359,9 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
                 action=f"permission:view-{index}",
                 result="allowed",
             )
-        backdate_access_logs(AccessLog.objects.filter(action="permission:view-0"), older)
+        backdate_access_logs(
+            AccessLog.objects.filter(action="permission:view-0"), older
+        )
 
         stamps = [row["at"] for row in self._snapshot()["activity"]]
 
@@ -336,9 +385,15 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
             action="permission:export",
             result="denied",
         )
-        backdate_access_logs(AccessLog.objects.filter(pk=stale.pk), timezone.now() - timedelta(days=2))
+        backdate_access_logs(
+            AccessLog.objects.filter(pk=stale.pk), timezone.now() - timedelta(days=2)
+        )
 
-        row = next(entry for entry in self._snapshot()["users"] if entry["email"] == "inspector@netra.test")
+        row = next(
+            entry
+            for entry in self._snapshot()["users"]
+            if entry["email"] == "inspector@netra.test"
+        )
 
         self.assertEqual(row["deniedLast24h"], 2)
 
@@ -375,7 +430,59 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
         keys = {row["key"] for row in snapshot["capabilities"]}
 
         self.assertIn("user_invitations", keys)
-        self.assertTrue(all("state" in row and "requiresAal2" in row for row in snapshot["capabilities"]))
+        self.assertTrue(
+            all(
+                "state" in row and "requiresAal2" in row
+                for row in snapshot["capabilities"]
+            )
+        )
+
+
+@SECURE_SETTINGS
+class AdminDirectoryScaleTests(AdminConsoleTestBase):
+    def test_directory_query_count_stays_flat_for_a_realistic_roster(self):
+        """A console load must not issue permission queries per member."""
+        headers = self._headers(self.admin)
+
+        with CaptureQueriesContext(connection) as baseline_queries:
+            baseline_response = self.client.get(DIRECTORY, **headers)
+            self.assertEqual(baseline_response.status_code, 200)
+
+        User = get_user_model()
+        users = User.objects.bulk_create(
+            [
+                User(
+                    username=f"member-{index:03d}@netra.test",
+                    email=f"member-{index:03d}@netra.test",
+                    is_active=True,
+                )
+                for index in range(250)
+            ]
+        )
+        viewer_role = Role.objects.get(organization=self.organization, slug="viewer")
+        UserProfile.objects.bulk_create(
+            [
+                UserProfile(
+                    user=user,
+                    organization=self.organization,
+                    role=UserProfile.Role.VIEWER,
+                    role_ref=viewer_role,
+                    display_name=f"Member {index:03d}",
+                )
+                for index, user in enumerate(users)
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as loaded_queries:
+            response = self.client.get(DIRECTORY, **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(response.json()["users"]), 252)
+
+        self.assertLessEqual(
+            len(loaded_queries),
+            len(baseline_queries) + 4,
+            f"directory queries grew from {len(baseline_queries)} to {len(loaded_queries)}",
+        )
 
 
 @SECURE_SETTINGS
@@ -460,7 +567,9 @@ class AdminAuditEndpointTests(AdminConsoleTestBase):
 
     def test_verify_reports_an_intact_chain(self):
         self._record()
-        response = self.client.get("/api/admin/v1/audit/verify", **self._headers(self.admin))
+        response = self.client.get(
+            "/api/admin/v1/audit/verify", **self._headers(self.admin)
+        )
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -472,9 +581,13 @@ class AdminAuditEndpointTests(AdminConsoleTestBase):
         from apps.forensics.models import AdminAuditEvent
 
         self._record()
-        AdminAuditEvent.objects.filter(chain_index=2).update(reason="Routine maintenance.")
+        AdminAuditEvent.objects.filter(chain_index=2).update(
+            reason="Routine maintenance."
+        )
 
-        body = self.client.get("/api/admin/v1/audit/verify", **self._headers(self.admin)).json()
+        body = self.client.get(
+            "/api/admin/v1/audit/verify", **self._headers(self.admin)
+        ).json()
 
         self.assertFalse(body["verified"])
         self.assertEqual(body["firstBrokenIndex"], 2)
@@ -491,7 +604,10 @@ class AdminAuditEndpointTests(AdminConsoleTestBase):
 
     def test_verify_requires_an_administrator(self):
         self.assertEqual(
-            self.client.get("/api/admin/v1/audit/verify", **self._headers(self.investigator)).status_code, 403
+            self.client.get(
+                "/api/admin/v1/audit/verify", **self._headers(self.investigator)
+            ).status_code,
+            403,
         )
         self.assertEqual(self.client.get("/api/admin/v1/audit/verify").status_code, 401)
 
@@ -518,7 +634,9 @@ class StepUpGateTests(AdminConsoleTestBase):
         self.assertEqual(response.status_code, 200)
 
     def test_a_recent_challenge_reports_as_fresh(self):
-        body = self.client.get(SESSION, **self._headers_with_factor(self.admin, seconds_ago=30)).json()
+        body = self.client.get(
+            SESSION, **self._headers_with_factor(self.admin, seconds_ago=30)
+        ).json()
 
         self.assertTrue(body["stepUp"]["fresh"])
         self.assertIsNotNone(body["stepUp"]["verifiedAt"])
@@ -527,7 +645,9 @@ class StepUpGateTests(AdminConsoleTestBase):
     def test_a_stale_challenge_reports_as_not_fresh(self):
         """The nine-in-the-morning session. Still aal2, still signed in, and no
         longer sufficient to reset someone's credentials."""
-        body = self.client.get(SESSION, **self._headers_with_factor(self.admin, seconds_ago=8 * 3600)).json()
+        body = self.client.get(
+            SESSION, **self._headers_with_factor(self.admin, seconds_ago=8 * 3600)
+        ).json()
 
         self.assertFalse(body["stepUp"]["fresh"])
         self.assertIsNotNone(body["stepUp"]["verifiedAt"])
@@ -539,7 +659,10 @@ class StepUpGateTests(AdminConsoleTestBase):
         self.assertIsNone(body["stepUp"]["verifiedAt"])
 
     def test_the_gate_refuses_a_stale_session(self):
-        from apps.forensics.services.administration import AdministrationProblem, require_recent_factor
+        from apps.forensics.services.administration import (
+            AdministrationProblem,
+            require_recent_factor,
+        )
         from common.audit import Actor
         from django.utils import timezone
         from datetime import timedelta
