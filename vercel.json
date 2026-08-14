@@ -1,10 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/build-vercel-site.mjs",
   "ignoreCommand": "node scripts/vercel-ignore-build.mjs",
   "outputDirectory": "dist",
   "rewrites": [
+    {
+      "source": "/workspace",
+      "destination": "/workspace/index.html"
+    },
+    {
+      "source": "/workspace/(.*)",
+      "destination": "/workspace/index.html"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

@@ -96,7 +96,7 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 
 | Variable | Reviewed contract |
 |---|---|
-| `NETRA_ADMIN_ORIGINS` | Browser origins permitted to reach `/api/admin/v1/`. Deliberately narrower than `NETRA_FRONTEND_ORIGINS`. Unset falls back to the frontend origins rather than to a wildcard, so a missing value narrows instead of opening. Defence in depth only — never the authorization control |
+| `NETRA_ADMIN_ORIGINS` | Exact browser origin permitted to reach `/api/admin/v1/`. The single-project deployment uses the same origin as the investigator console; no wildcard is allowed. Unset falls back to the reviewed frontend origins. Defence in depth only — never the authorization control |
 | `NETRA_ACCESS_LOG_RETENTION_DAYS` | `365`; reported to the console so the window is stated rather than assumed |
 | `NETRA_ACCESS_LOG_MAINTENANCE_SECONDS` | `86400`; the worker maintains the rolling monthly partitions once per day and reports the result in its heartbeat |
 | `NETRA_STEP_UP_MAX_AGE_SECONDS` | `300`; how recently a second factor must have been used before a destructive administrative operation is allowed. Bounded to 60–3600 in code: below a minute an operator cannot finish a form and learns to keep their authenticator open, which defeats the control; above an hour it is no longer a step-up |
@@ -135,9 +135,21 @@ startup, even if its value matches `SUPABASE_SECRET_KEY`.
 
 The Auth Admin adapter uses the backend-only modern Supabase secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON. For this release, no Resend key or Supabase custom-SMTP credential is provisioned.
 
-## Vercel frontend
+## Vercel browser applications
 
-Vercel receives only the public API URL, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs, Supabase secret keys, evidence keys, custody private keys, sensor secrets, webhook secrets, and SMTP credentials must never use a `VITE_` prefix or enter Vercel. `VITE_SUPABASE_REALTIME_ENABLED` is retired and must not be reintroduced. The production frontend origin is `https://netra-hackathon-console-20260714.vercel.app`; the API origin is `https://netra-api-production.up.railway.app`.
+One Vercel project builds both browser workspaces atomically. The investigator
+console is served at `/`; the administration workspace is served at the neutral
+`/workspace` path on the same origin. Its Supabase client keeps the privileged
+session in memory only, never localStorage or sessionStorage.
+
+Vercel receives only the public API URL, `VITE_SUPABASE_URL`,
+`VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs,
+Supabase secret keys, evidence keys, custody private keys, sensor secrets,
+webhook secrets, and SMTP credentials must never use a `VITE_` prefix or enter
+Vercel. `VITE_SUPABASE_REALTIME_ENABLED` is retired and must not be
+reintroduced. The production browser origin is
+`https://netra-hackathon-console-20260714.vercel.app`; the API origin is
+`https://netra-api-production.up.railway.app`.
 
 ## Local concurrency tests
 

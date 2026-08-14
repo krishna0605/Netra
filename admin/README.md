@@ -3,15 +3,16 @@
 The administration surface for Netra — user provisioning, role and permission
 assignment, credential recovery, and the record of what everyone did.
 
-This is a **separate workspace from `frontend/`** on purpose. The admin console
-is designed to run on its own origin, because a shared origin means a shared
-`localStorage`, and a script-injection flaw anywhere in the investigator console
-would reach the admin session. See §2 of the implementation plan.
+This is a **separate source workspace from `frontend/`** so its dependencies and
+tests remain independently reviewable. Production builds both workspaces into
+one Vercel project: the investigator console at `/` and administration at the
+neutral `/workspace` path. The administration token is memory-only and is never
+written to browser storage.
 
 > **Status: production-wired Phase 5 implementation.** Authentication, the
 > directory, administrative writes, audit verification, live sessions, roles,
 > grants and ownership use `/api/admin/v1/*`. Browser tests stub that namespace
-> deliberately; the separate Vercel project is validated against the same API
+> deliberately; the combined Vercel artifact is validated against the same API
 > and Supabase project used by the investigator console.
 
 ## Running it
@@ -22,7 +23,7 @@ cd admin && npm install && npm run dev
 
 Then open <http://localhost:5180>.
 
-`frontend/` uses 5173, so both consoles can run side by side — which is the point.
+`frontend/` uses 5173, so both consoles can run side by side during development.
 
 | Script | Does |
 |---|---|

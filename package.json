@@ -2,6 +2,7 @@
   "name": "netra-platform",
   "private": true,
   "scripts": {
+    "build:vercel": "node scripts/build-vercel-site.mjs",
     "netra": "npm run netra:start",
     "netra:start": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra-production.ps1",
     "netra:start:production": "powershell -ExecutionPolicy Bypass -File ./infra/scripts/start-netra-production.ps1",

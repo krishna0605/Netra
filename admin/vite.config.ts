@@ -2,10 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// The admin console is deliberately a separate origin from the investigator
-// console. Locally that means its own port; in a deployment it would be its own
-// project entirely. 5173 belongs to frontend/, so this one takes 5180.
+// The source remains an independent workspace, while the production artifact
+// is mounted at /workspace inside Netra's one Vercel project. Locally it keeps
+// its own port so both applications can still run side by side.
 export default defineConfig({
+  base: "/workspace/",
   plugins: [react(), tailwindcss()],
   server: {
     port: 5180,

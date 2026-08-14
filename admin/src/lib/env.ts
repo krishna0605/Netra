@@ -63,8 +63,8 @@ export const IS_LOCAL = DEPLOYMENT_PROFILE === "local";
 /**
  * Where the investigator console lives.
  *
- * The consoles use separate origins in every environment so their browser
- * storage remains isolated. Locally the investigator console uses its own dev
- * server; production receives the exact investigator origin from Vercel.
+ * Locally the investigator console uses its own dev server. Production mounts
+ * both applications in one Vercel project, so the default returns to Netra's
+ * root without depending on a second deployment hostname.
  */
 export const CONSOLE_URL = read("VITE_CONSOLE_URL") || (IS_LOCAL ? "http://localhost:8080" : "/");

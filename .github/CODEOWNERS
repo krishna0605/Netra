@@ -6,8 +6,9 @@
 /backend/Dockerfile @krishna0605
 /backend/Dockerfile.worker @krishna0605
 /frontend/Dockerfile @krishna0605
-/frontend/vercel.json @krishna0605
-/admin/vercel.json @krishna0605
+/vercel.json @krishna0605
+/scripts/build-vercel-site.mjs @krishna0605
+/scripts/vercel-ignore-build.mjs @krishna0605
 /infra/ @krishna0605
 
 # Authentication, tenancy, administration, crypto and custody

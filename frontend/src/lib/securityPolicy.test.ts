@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import config from "../../vercel.json";
+import config from "../../../vercel.json";
 
 const headers = Object.fromEntries(config.headers[0].headers.map((entry: { key: string; value: string }) => [entry.key, entry.value]));
 const csp = headers["Content-Security-Policy"];

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Netra administration console — isolated workspace, runs independently of the investigator console.",
+  "description": "Netra administration console — an independent source workspace deployed with the investigator console.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

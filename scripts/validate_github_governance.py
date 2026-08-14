@@ -29,7 +29,13 @@ def main() -> int:
     if contexts != REQUIRED_CONTEXTS:
         raise ValueError("The protected-main status contexts do not match the required policy gates")
     codeowners = Path(".github/CODEOWNERS").read_text(encoding="utf-8")
-    for required_path in ("/.github/", "/backend/common/jwt_verifier.py", "/frontend/vercel.json", "/backend/apps/forensics/migrations/"):
+    for required_path in (
+        "/.github/",
+        "/backend/common/jwt_verifier.py",
+        "/vercel.json",
+        "/scripts/build-vercel-site.mjs",
+        "/backend/apps/forensics/migrations/",
+    ):
         if required_path not in codeowners:
             raise ValueError(f"CODEOWNERS is missing {required_path}")
     print("Validated CODEOWNERS and the signed, no-bypass main-only contract.")
