@@ -43,6 +43,7 @@ class VerifiedSupabaseToken:
     # gate destructive work must read this rather than aal, which only says a
     # factor was used at some point in the session's life.
     factor_verified_at: datetime | None
+    session_id: str
     issuer: str
     audience: tuple[str, ...]
     expires_at: datetime
@@ -216,6 +217,13 @@ def verify_es256_token(token: str, *, now: float | None = None) -> VerifiedSupab
     email = claims.get("email", "")
     if not isinstance(email, str) or len(email) > MAX_EMAIL_LENGTH:
         raise SupabaseTokenInvalid("JWT email is invalid")
+    token_fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    session_id = claims.get("session_id", "")
+    if not isinstance(session_id, str) or not session_id or len(session_id) > 128:
+        # Older/local tokens may not carry Supabase's session_id claim. Binding
+        # the context to the verified token fingerprint remains fail-closed;
+        # a refresh simply creates a new context.
+        session_id = token_fingerprint
     aud_claim = claims.get("aud")
     audiences = (aud_claim,) if isinstance(aud_claim, str) else tuple(aud_claim)
     return VerifiedSupabaseToken(
@@ -228,11 +236,12 @@ def verify_es256_token(token: str, *, now: float | None = None) -> VerifiedSupab
         # matters — as a refusal at the step-up gate — not by making every
         # ordinary request fail here.
         factor_verified_at=factor_verified_at(claims.get("amr")),
+        session_id=session_id,
         issuer=issuer,
         audience=audiences,
         expires_at=datetime.fromtimestamp(expires_at, UTC),
         issued_at=datetime.fromtimestamp(issued_at, UTC),
         key_id=kid,
         algorithm="ES256",
-        token_fingerprint=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        token_fingerprint=token_fingerprint,
     )

@@ -44,6 +44,7 @@ class Actor:
     # from aal, which says only that a factor was used at some point in the
     # session. Destructive operations gate on this; see common/step_up.py.
     factor_verified_at: datetime | None = None
+    session_id: str = ""
 
 
 VALID_ROLES = {"Admin", "Investigator", "Analyst", "Viewer"}
@@ -75,6 +76,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
             external_id=getattr(supabase_user, "id", ""),
             aal=getattr(supabase_user, "aal", "aal1"),
             factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
+            session_id=getattr(supabase_user, "session_id", ""),
         )
     profile = UserProfile.objects.select_related("organization").filter(user=user).first()
     if profile is None or not user.is_active:
@@ -87,6 +89,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
             external_id=getattr(supabase_user, "id", ""),
             aal=getattr(supabase_user, "aal", "aal1"),
             factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
+            session_id=getattr(supabase_user, "session_id", ""),
         )
     return Actor(
         user=profile.display_name or user.username,
@@ -100,6 +103,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
         permissions=_resolved_permissions(user.id, profile.organization_id),
         aal=getattr(supabase_user, "aal", "aal1"),
         factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
+        session_id=getattr(supabase_user, "session_id", ""),
     )
 
 
@@ -178,6 +182,7 @@ def actor_from_request(request) -> Actor:
                 # step-up gate behaves identically under both. Without this a
                 # test could only ever exercise the refusal branch.
                 factor_verified_at=factor_verified_at(validated.get("amr")),
+                session_id=str(validated.get("jti", ""))[:128],
             )
         except Exception:
             return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
@@ -191,6 +196,7 @@ def actor_from_request(request) -> Actor:
             authenticated=True,
             organization_id=NETRA_ORGANIZATION_ID,
             organization_slug="netra",
+            session_id="development-header",
         )
     return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
 

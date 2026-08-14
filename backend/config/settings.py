@@ -148,9 +148,25 @@ NETRA_AUTH_PROVIDER = os.getenv("NETRA_AUTH_PROVIDER", "django").lower()
 # their authenticator open, which defeats the control; above an hour it stops
 # being a step-up and becomes a session check that aal already performs.
 NETRA_STEP_UP_MAX_AGE_SECONDS = max(60, min(3600, int(os.getenv("NETRA_STEP_UP_MAX_AGE_SECONDS", "300"))))
-NETRA_MFA_POLICY = os.getenv("NETRA_MFA_POLICY", "admin_required").strip().lower()
-if NETRA_MFA_POLICY not in {"admin_required", "optional"}:
-    raise RuntimeError("NETRA_MFA_POLICY must be admin_required or optional")
+NETRA_MFA_POLICY = os.getenv("NETRA_MFA_POLICY", "all_required").strip().lower()
+if NETRA_MFA_POLICY not in {"all_required", "admin_required", "optional"}:
+    raise RuntimeError("NETRA_MFA_POLICY must be all_required, admin_required or optional")
+NETRA_CONSOLE_CONTEXT_REQUIRED = os.getenv(
+    "NETRA_CONSOLE_CONTEXT_REQUIRED",
+    "1" if NETRA_DEPLOYMENT_PROFILE == "production" else "0",
+) == "1"
+NETRA_CONSOLE_CONTEXT_MAX_AGE_SECONDS = max(
+    900,
+    min(43200, int(os.getenv("NETRA_CONSOLE_CONTEXT_MAX_AGE_SECONDS", "28800"))),
+)
+NETRA_INVESTIGATION_IDLE_SECONDS = max(
+    300,
+    min(7200, int(os.getenv("NETRA_INVESTIGATION_IDLE_SECONDS", "1800"))),
+)
+NETRA_ADMINISTRATION_IDLE_SECONDS = max(
+    300,
+    min(3600, int(os.getenv("NETRA_ADMINISTRATION_IDLE_SECONDS", "900"))),
+)
 NETRA_AUTH_INVITATIONS_ENABLED = os.getenv("NETRA_AUTH_INVITATIONS_ENABLED", "0") == "1"
 NETRA_PASSWORD_RECOVERY_ENABLED = os.getenv("NETRA_PASSWORD_RECOVERY_ENABLED", "0") == "1"
 NETRA_AUTH_INVITE_REDIRECT_URL = os.getenv("NETRA_AUTH_INVITE_REDIRECT_URL", "").strip()
@@ -429,6 +445,10 @@ if not DEBUG:
         raise RuntimeError("Hosted deployments require bearer access mode and disabled development role headers")
     if NETRA_AUTH_PROVIDER == "supabase" and (not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY):
         raise RuntimeError("SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are required for Supabase authentication")
+    if NETRA_MFA_POLICY != "all_required" or not NETRA_CONSOLE_CONTEXT_REQUIRED:
+        raise RuntimeError("Hosted deployments require universal MFA and server-bound console contexts")
+    if NETRA_AUTH_PROVIDER == "supabase" and NETRA_SUPABASE_JWT_MODE != "asymmetric-jwks":
+        raise RuntimeError("Hosted Supabase authentication requires asymmetric JWKS verification")
     if NETRA_AUTH_INVITATIONS_ENABLED:
         if NETRA_AUTH_PROVIDER != "supabase" or not SUPABASE_SECRET_KEY:
             raise RuntimeError("Hosted invitations require Supabase Auth and a backend secret key")

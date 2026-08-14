@@ -240,6 +240,16 @@
     "view": "apps.forensics.api.compliance.audit_export"
   },
   {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "auth/context",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_context"
+  },
+  {
     "aal": "none",
     "authentication": "anonymous",
     "capability": null,
@@ -268,6 +278,26 @@
     "route": "auth/me",
     "scope": "none",
     "view": "apps.forensics.api.authentication.auth_me"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "auth/mfa-complete",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_mfa_complete"
+  },
+  {
+    "aal": "aal1",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "read",
+    "route": "auth/password-complete",
+    "scope": "none",
+    "view": "apps.forensics.api.authentication.auth_password_complete"
   },
   {
     "aal": "none",

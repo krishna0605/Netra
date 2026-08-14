@@ -56,6 +56,19 @@ def _session_invalid() -> JsonResponse:
     return JsonResponse({"error": "Session is invalid.", "code": "session_invalid"}, status=401)
 
 
+def _console_context_error(code: str = "console_context_required", message: str = "Console context is required.", status: int = 401) -> JsonResponse:
+    return JsonResponse({"error": message, "code": code}, status=status)
+
+
+_CONTEXT_EXEMPT_ROUTES = {
+    "/api/auth/me",
+    "/api/auth/context",
+    "/api/auth/logout",
+    "/api/auth/password-complete",
+    "/api/auth/mfa-complete",
+}
+
+
 def _feature_disabled(feature: str) -> JsonResponse:
     return JsonResponse(
         {
@@ -162,6 +175,31 @@ class NetraApiAuthMiddleware:
         actor = getattr(request, "netra_actor", None)
         if actor is None:
             return None
+
+        normalized_path = request.path.rstrip("/")
+        if settings.NETRA_MFA_POLICY == "all_required" and normalized_path not in _CONTEXT_EXEMPT_ROUTES and actor.aal != "aal2":
+            if normalized_path.startswith(("/api/admin/", "/api/users")):
+                from common.audit import log_access
+
+                log_access(actor, "admin_console.denied", resource_type="AdminConsole", result="denied")
+            return _console_context_error("aal2_required", "Multi-factor authentication is required.", 403)
+
+        if settings.NETRA_CONSOLE_CONTEXT_REQUIRED and normalized_path not in _CONTEXT_EXEMPT_ROUTES:
+            from apps.forensics.services.console_context import ConsoleContextProblem, validate_console_context
+
+            raw_context_id = request.headers.get("X-Netra-Context-ID", "")
+            if not raw_context_id:
+                return _console_context_error()
+            try:
+                request.netra_console_context = validate_console_context(actor, raw_context_id)
+            except ConsoleContextProblem as problem:
+                return _console_context_error(problem.code, problem.message, problem.status)
+            if normalized_path.startswith(("/api/admin/", "/api/users")) and request.netra_console_context.active_workspace != "administration":
+                return _console_context_error(
+                    "workspace_not_active",
+                    "The Administration workspace is not active for this console context.",
+                    403,
+                )
 
         self._record_deprecated_route_use(request, actor)
 

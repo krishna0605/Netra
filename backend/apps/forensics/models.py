@@ -130,6 +130,8 @@ class UserProfile(TimeStampedModel):
     )
     display_name = models.CharField(max_length=160, blank=True)
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")
+    must_change_password = models.BooleanField(default=False)
+    mfa_reset_required = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         return f"{self.display_name or self.user.get_username()} ({self.role})"
@@ -1138,3 +1140,31 @@ class PermissionGrant(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.mode}:{self.permission_id} for {self.user_id}"
+
+
+class ConsoleContext(TimeStampedModel):
+    """Short-lived server binding for a browser console session.
+
+    The UUID is a correlation handle, never an authentication credential. A
+    valid bearer token, current profile, organization, permission version and
+    assurance level are still checked whenever the context is used.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="netra_console_contexts", on_delete=models.CASCADE)
+    organization = models.ForeignKey(Organization, related_name="console_contexts", on_delete=models.CASCADE)
+    session_id = models.CharField(max_length=128)
+    permissions_version = models.PositiveBigIntegerField()
+    assurance_level = models.CharField(max_length=8, default="aal2")
+    active_workspace = models.CharField(max_length=24, default="investigation")
+    allowed_workspaces_json = models.JSONField(default=list)
+    last_seen_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=160, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "session_id", "revoked_at"], name="netra_ctx_user_session_idx"),
+            models.Index(fields=["organization", "expires_at"], name="netra_ctx_org_expiry_idx"),
+        ]

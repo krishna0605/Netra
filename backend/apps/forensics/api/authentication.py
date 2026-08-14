@@ -26,6 +26,15 @@ from apps.forensics.services.administration import (
     ensure_admin_mutation_allowed,
     transfer_administrator,
 )
+from apps.forensics.services.console_context import (
+    ConsoleContextProblem,
+    context_payload,
+    create_console_context,
+    revoke_console_context,
+    switch_console_workspace,
+    validate_console_context,
+    workspace_contract,
+)
 from common.audit import actor_from_request, can, require_permission, sync_supabase_actor
 from common.capabilities import public_capabilities
 from common.case_metadata import server_case_identity
@@ -154,6 +163,12 @@ def auth_me(request):
     if not actor.authenticated:
         return JsonResponse({"error": "Authentication required"}, status=401)
     investigator, department = server_case_identity(actor)
+    profile = UserProfile.objects.select_related("user").filter(
+        user_id=actor.django_user_id,
+        organization_id=actor.organization_id,
+    ).first()
+    if profile is None or not profile.user.is_active:
+        return JsonResponse({"error": "Console access is not provisioned.", "code": "profile_not_provisioned"}, status=403)
     is_admin = actor.role == "Admin"
     operator = can(actor, "operations")
     modules = {
@@ -202,8 +217,16 @@ def auth_me(request):
                 "slug": actor.organization_slug,
             },
             "aal": actor.aal,
+            "account": {
+                "active": profile.user.is_active,
+                "mustChangePassword": profile.must_change_password,
+                "mfaRequired": settings.NETRA_MFA_POLICY == "all_required",
+                "mfaResetRequired": profile.mfa_reset_required,
+            },
+            "assuranceLevel": actor.aal,
+            "workspaces": workspace_contract(actor),
             "mfaPolicy": settings.NETRA_MFA_POLICY,
-            "mfaEnrollmentRequired": is_admin and actor.aal != "aal2",
+            "mfaEnrollmentRequired": settings.NETRA_MFA_POLICY == "all_required" and actor.aal != "aal2",
             "privilegedAdminReady": actor.role == "Admin" and actor.aal == "aal2",
             "capabilities": public_capabilities(),
             "deployment": {
@@ -215,6 +238,71 @@ def auth_me(request):
             },
         }
     )
+
+
+def _context_problem_response(problem: ConsoleContextProblem) -> JsonResponse:
+    return JsonResponse({"error": problem.message, "code": problem.code}, status=problem.status)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+def auth_context(request):
+    """Create, validate, switch, or revoke the caller's tab-scoped console context."""
+    actor = actor_from_request(request)
+    if not actor.authenticated:
+        return JsonResponse({"error": "Authentication required", "code": "authentication_required"}, status=401)
+    raw_context_id = request.headers.get("X-Netra-Context-ID", "")
+    try:
+        if request.method == "POST":
+            context = create_console_context(actor)
+            return JsonResponse({"context": context_payload(context)}, status=201)
+        if not raw_context_id:
+            raise ConsoleContextProblem("console_context_required", "Console context is required.", 401)
+        if request.method == "GET":
+            return JsonResponse({"context": context_payload(validate_console_context(actor, raw_context_id))})
+        if request.method == "PATCH":
+            workspace = str(_json_body(request).get("workspace") or "").strip().lower()
+            return JsonResponse({"context": context_payload(switch_console_workspace(actor, raw_context_id, workspace))})
+        revoke_console_context(actor, raw_context_id)
+        return JsonResponse({"status": "revoked"})
+    except ConsoleContextProblem as problem:
+        return _context_problem_response(problem)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def auth_password_complete(request):
+    """Clear a temporary-password requirement after Supabase changed it."""
+    actor = actor_from_request(request)
+    profile = UserProfile.objects.filter(
+        user_id=actor.django_user_id,
+        organization_id=actor.organization_id,
+        user__is_active=True,
+    ).first()
+    if not actor.authenticated or profile is None:
+        return JsonResponse({"error": "Authentication required", "code": "authentication_required"}, status=401)
+    profile.must_change_password = False
+    profile.save(update_fields=["must_change_password", "updated_at"])
+    return JsonResponse({"status": "password-complete"})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def auth_mfa_complete(request):
+    """Acknowledge MFA re-enrollment only from an AAL2 token."""
+    actor = actor_from_request(request)
+    if not actor.authenticated or actor.aal != "aal2":
+        return JsonResponse({"error": "Multi-factor authentication is required.", "code": "aal2_required"}, status=403)
+    profile = UserProfile.objects.filter(
+        user_id=actor.django_user_id,
+        organization_id=actor.organization_id,
+        user__is_active=True,
+    ).first()
+    if profile is None:
+        return JsonResponse({"error": "Console access is not provisioned.", "code": "profile_not_provisioned"}, status=403)
+    profile.mfa_reset_required = False
+    profile.save(update_fields=["mfa_reset_required", "updated_at"])
+    return JsonResponse({"status": "mfa-complete"})
 
 
 @csrf_exempt
@@ -319,6 +407,7 @@ def users(request):
                         "organization_id": actor.organization_id,
                         "role": role,
                         "display_name": str(payload.get("name") or email).strip(),
+                        "mfa_reset_required": True,
                     },
                 )
                 AccessLog.objects.create(

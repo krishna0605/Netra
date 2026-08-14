@@ -315,7 +315,7 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
 
         self.assertEqual(snapshot["organization"]["id"], str(self.organization.id))
         self.assertEqual(snapshot["organization"]["ownerUserId"], self.admin.id)
-        self.assertEqual(snapshot["organization"]["mfaPolicy"], "admin_required")
+        self.assertEqual(snapshot["organization"]["mfaPolicy"], "all_required")
 
     def test_activity_merges_the_streams_django_owns(self):
         case = Case.objects.create(

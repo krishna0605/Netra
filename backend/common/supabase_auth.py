@@ -24,6 +24,7 @@ class SupabaseUser:
     role: str
     aal: str = "aal1"
     factor_verified_at: datetime | None = None
+    session_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,7 @@ def verify_supabase_request_token(token: str) -> SupabaseVerification:
                 role="Viewer",
                 aal=verified.aal,
                 factor_verified_at=verified.factor_verified_at,
+                session_id=verified.session_id,
             ),
             verified_token=verified,
         )
@@ -123,8 +125,26 @@ def verify_supabase_request_token(token: str) -> SupabaseVerification:
     # to show, not for deciding whether a password may be reset. Absent means
     # the step-up gate refuses, which is the correct answer when the claim
     # cannot be trusted.
+    import base64
+
+    try:
+        segment = token.split(".")[1]
+        segment += "=" * (-len(segment) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(segment).decode("utf-8"))
+        session_id = claims.get("session_id", "") if isinstance(claims, dict) else ""
+    except (IndexError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        session_id = ""
+    if not isinstance(session_id, str) or len(session_id) > 128:
+        session_id = ""
     return SupabaseVerification(
-        user=SupabaseUser(id=subject, email=email, display_name=display_name[:200], role="Viewer", aal=_remote_aal(token))
+        user=SupabaseUser(
+            id=subject,
+            email=email,
+            display_name=display_name[:200],
+            role="Viewer",
+            aal=_remote_aal(token),
+            session_id=session_id,
+        )
     )
 
 
