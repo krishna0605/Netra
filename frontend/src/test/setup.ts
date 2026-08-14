@@ -1,5 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 
+// Production fails closed when its public Supabase configuration is absent.
+// Tests use inert values so modules that validate configuration at import time
+// exercise their behavior without depending on a developer or CI environment.
+import.meta.env.VITE_SUPABASE_URL ||= "https://test.supabase.co";
+import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||= "sb_publishable_test";
+import.meta.env.VITE_DEPLOYMENT_PROFILE ||= "local";
+
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({
