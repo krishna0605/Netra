@@ -66,10 +66,9 @@ def main() -> int:
         raise ValueError("Railway worker must use the PostgreSQL row-lock consumer")
 
     if vercel.get("buildCommand") != "node scripts/build-vercel-site.mjs":
-        raise ValueError("The Vercel project must build both browser workspaces atomically")
-    rewrites = {(row["source"], row["destination"]) for row in vercel.get("rewrites", [])}
-    if ("/workspace", "/workspace/index.html") not in rewrites:
-        raise ValueError("The combined Vercel artifact must mount administration at /workspace")
+        raise ValueError("The Vercel project must build the unified browser application")
+    if vercel.get("outputDirectory") != "frontend/dist":
+        raise ValueError("Vercel must publish only the unified frontend artifact")
     csp = next(
         header["value"]
         for group in vercel["headers"]
@@ -93,8 +92,12 @@ def main() -> int:
             raise ValueError(f"Retired deployment file must not exist: {retired_config}")
 
     required_assignments = {
-        "NETRA_AUTH_INVITATIONS_ENABLED": "0",
+        "NETRA_AUTH_INVITATIONS_ENABLED": "1",
+        "NETRA_AUTH_INVITE_REDIRECT_URL": f"{FRONTEND_ORIGIN}/login/invite",
         "NETRA_PASSWORD_RECOVERY_ENABLED": "0",
+        "NETRA_MFA_POLICY": "all_required",
+        "NETRA_CONSOLE_CONTEXT_REQUIRED": "1",
+        "NETRA_SUPABASE_JWT_MODE": "asymmetric-jwks",
         "NETRA_ENABLE_INTEGRATIONS": "0",
         "NETRA_ENABLE_STRUCTURED_IMPORTS": "0",
         "NETRA_STORAGE_DEEP_HEALTHCHECK": "0",
@@ -103,7 +106,6 @@ def main() -> int:
         "NETRA_ADMIN_ORIGINS": ADMIN_ORIGIN,
         "DJANGO_CSRF_TRUSTED_ORIGINS": FRONTEND_ORIGIN,
         "VITE_API_BASE_URL": f"{API_ORIGIN}/api",
-        "VITE_CONSOLE_URL": FRONTEND_ORIGIN,
     }
     for name, value in required_assignments.items():
         if not re.search(rf"^{re.escape(name)}={re.escape(value)}$", environment, re.MULTILINE):
@@ -114,6 +116,7 @@ def main() -> int:
         "SUPABASE_SERVICE_ROLE_KEY",
         "VITE_SUPABASE_ANON_KEY",
         "VITE_SUPABASE_REALTIME_ENABLED",
+        "VITE_CONSOLE_URL",
     ):
         if re.search(rf"^{retired}=", environment, re.MULTILINE):
             raise ValueError(f"Retired deployment variable is assigned: {retired}")

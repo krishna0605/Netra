@@ -83,10 +83,14 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 
 | Variable | Reviewed contract |
 |---|---|
-| `NETRA_MFA_POLICY` | `admin_required` |
-| `NETRA_AUTH_INVITATIONS_ENABLED` | `0`; the hackathon deployment has no approved custom SMTP domain |
+| `NETRA_MFA_POLICY` | `all_required`; no protected workspace accepts AAL1 |
+| `NETRA_CONSOLE_CONTEXT_REQUIRED` | `1`; protected browser APIs require a current server-bound context |
+| `NETRA_CONSOLE_CONTEXT_MAX_AGE_SECONDS` | `28800` |
+| `NETRA_INVESTIGATION_IDLE_SECONDS` | `1800` |
+| `NETRA_ADMINISTRATION_IDLE_SECONDS` | `900` |
+| `NETRA_AUTH_INVITATIONS_ENABLED` | `1`; account creation is administrator-invited only |
 | `NETRA_PASSWORD_RECOVERY_ENABLED` | `0`; password-recovery email is unavailable without approved custom SMTP |
-| `NETRA_AUTH_INVITE_REDIRECT_URL` | Empty while invitations are disabled |
+| `NETRA_AUTH_INVITE_REDIRECT_URL` | `https://netra-hackathon-console-20260714.vercel.app/login/invite` |
 | `NETRA_AUTH_ADMIN_TIMEOUT_SECONDS` | `5` |
 | `NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES` | `65536` |
 | `NETRA_AUTH_ADMIN_LIST_PAGE_SIZE` | Maximum `100` |
@@ -108,7 +112,7 @@ All parser variables are backend-only. None may use a `VITE_` prefix or enter Ve
 | `SUPABASE_URL` | Exact project API origin; also derives the issuer/JWKS origin |
 | `SUPABASE_PUBLISHABLE_KEY` | Publishable Auth key; never treated as a secret |
 | `SUPABASE_SECRET_KEY` | Backend-only modern secret key; never enters Vercel |
-| `NETRA_SUPABASE_JWT_MODE` | `remote` until hosted key verification; then `asymmetric-jwks` |
+| `NETRA_SUPABASE_JWT_MODE` | `asymmetric-jwks`; required for local session and factor timestamp verification |
 | `NETRA_SUPABASE_JWKS_CACHE_SECONDS` | `600` |
 | `NETRA_SUPABASE_JWKS_TIMEOUT_SECONDS` | `3` |
 | `NETRA_SUPABASE_JWKS_RESPONSE_MAX_BYTES` | `131072` |
@@ -133,14 +137,16 @@ startup, even if its value matches `SUPABASE_SECRET_KEY`.
 | `NETRA_SUPABASE_PROCESSING_MODE` | `NETRA_PROCESSING_MODE` |
 | `NETRA_SERVICE_KIND` | `NETRA_RUNTIME_ROLE` |
 
-The Auth Admin adapter uses the backend-only modern Supabase secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON. For this release, no Resend key or Supabase custom-SMTP credential is provisioned.
+The Auth Admin adapter uses the backend-only modern Supabase secret key. No second alias is created. Invitation redirect values come from backend configuration, never request JSON. An approved sender and custom SMTP configuration are required before invitation delivery is activated.
 
 ## Vercel browser applications
 
-One Vercel project builds both browser workspaces atomically. The investigator
-console is served at `/`; the administration workspace is served at the neutral
-`/workspace` path on the same origin. Its Supabase client keeps the privileged
-session in memory only, never localStorage or sessionStorage.
+One Vercel project builds one browser application atomically. `/` is the only
+application shell URL and `/login/*` is the only authentication route family.
+Investigation and Administration use in-memory routing inside `/`; internal
+screen and workspace names never enter browser history. One shared Supabase
+client persists the tab session in sessionStorage and the server independently
+validates its opaque console-context identifier on every protected request.
 
 Vercel receives only the public API URL, `VITE_SUPABASE_URL`,
 `VITE_SUPABASE_PUBLISHABLE_KEY`, and safe feature flags. Database URLs,

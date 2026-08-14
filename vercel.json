@@ -2,16 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "buildCommand": "node scripts/build-vercel-site.mjs",
-  "outputDirectory": "dist",
+  "outputDirectory": "frontend/dist",
   "rewrites": [
-    {
-      "source": "/workspace",
-      "destination": "/workspace/index.html"
-    },
-    {
-      "source": "/workspace/(.*)",
-      "destination": "/workspace/index.html"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

@@ -13,10 +13,15 @@
 # Authentication, tenancy, administration, crypto and custody
 /backend/common/supabase_auth.py @krishna0605
 /backend/common/jwt_verifier.py @krishna0605
+/backend/common/api_auth.py @krishna0605
 /backend/common/vault*.py @krishna0605
 /backend/common/custody.py @krishna0605
 /backend/apps/forensics/services/administration.py @krishna0605
+/backend/apps/forensics/services/console_context.py @krishna0605
 /backend/apps/forensics/migrations/ @krishna0605
+/frontend/src/features/auth/ @krishna0605
+/frontend/src/features/administration/ @krishna0605
+/frontend/src/lib/consoleContext.ts @krishna0605
 
 # Production contracts
 /.env.supabase.production.example @krishna0605
