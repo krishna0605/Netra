@@ -1,5 +1,12 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import config from "../../../vercel.json";
+
+const config = JSON.parse(readFileSync(resolve(process.cwd(), "..", "vercel.json"), "utf8")) as {
+  headers: Array<{ headers: Array<{ key: string; value: string }> }>;
+};
 
 const headers = Object.fromEntries(config.headers[0].headers.map((entry: { key: string; value: string }) => [entry.key, entry.value]));
 const csp = headers["Content-Security-Policy"];
