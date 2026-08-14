@@ -17,8 +17,10 @@ function read(key: string): string {
 const RETIRED: Record<string, string> = {
   VITE_SUPABASE_ANON_KEY: "VITE_SUPABASE_PUBLISHABLE_KEY",
   VITE_SUPABASE_REALTIME_ENABLED: "(removed entirely — do not reintroduce)",
-  SUPABASE_SERVICE_ROLE_KEY: "SUPABASE_SECRET_KEY, and it belongs on the server, never here",
-  VITE_SUPABASE_SECRET_KEY: "nothing — a secret key must never carry a VITE_ prefix",
+  // The scanner exception is narrow: these literals exist only so startup can
+  // reject the retired names. No value is read into an exported client config.
+  SUPABASE_SERVICE_ROLE_KEY: "SUPABASE_SECRET_KEY, and it belongs on the server, never here", // nosemgrep: netra-no-service-key-in-frontend
+  VITE_SUPABASE_SECRET_KEY: "nothing — a secret key must never carry a VITE_ prefix", // nosemgrep: netra-no-service-key-in-frontend
 };
 
 function collectProblems(): EnvProblem[] {
@@ -61,10 +63,8 @@ export const IS_LOCAL = DEPLOYMENT_PROFILE === "local";
 /**
  * Where the investigator console lives.
  *
- * In a deployment both consoles share one origin behind a path rewrite, so "/"
- * is correct. Locally they are two dev servers on different ports, and "/" is
- * this app — navigating there reloads the admin console, drops its
- * memory-only session, and lands the operator back on sign-in looking as
- * though the button did nothing.
+ * The consoles use separate origins in every environment so their browser
+ * storage remains isolated. Locally the investigator console uses its own dev
+ * server; production receives the exact investigator origin from Vercel.
  */
 export const CONSOLE_URL = read("VITE_CONSOLE_URL") || (IS_LOCAL ? "http://localhost:8080" : "/");
