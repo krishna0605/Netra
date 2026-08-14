@@ -13,6 +13,7 @@ from common.storage_cache_middleware import StorageCacheFailureMiddleware
 from common.vault import build_manifest_payload
 from apps.forensics.management.commands.export_supabase_data_manifest import Command as DataManifestCommand
 from apps.forensics.management.commands.export_supabase_schema_manifest import Command as SchemaManifestCommand
+from apps.forensics.management.commands.predeploy import Command as PredeployCommand
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -56,6 +57,17 @@ class PhaseFourOperationalGapTests(SimpleTestCase):
 
 
 class HostedActivationContractTests(SimpleTestCase):
+    def test_predeploy_checks_before_migrating(self):
+        command = PredeployCommand()
+
+        with patch("apps.forensics.management.commands.predeploy.call_command") as run:
+            command.handle()
+
+        self.assertEqual(run.call_args_list[0].args, ("check",))
+        self.assertTrue(run.call_args_list[0].kwargs["deploy"])
+        self.assertEqual(run.call_args_list[1].args, ("migrate",))
+        self.assertFalse(run.call_args_list[1].kwargs["interactive"])
+
     def test_schema_manifests_default_to_current_table_count(self):
         schema_options = SchemaManifestCommand().create_parser("manage.py", "export_supabase_schema_manifest").parse_args([])
         data_options = DataManifestCommand().create_parser("manage.py", "export_supabase_data_manifest").parse_args([])

@@ -10,8 +10,7 @@
   },
   "deploy": {
     "preDeployCommand": [
-      "python manage.py check --deploy",
-      "python manage.py migrate --noinput"
+      "python manage.py predeploy"
     ],
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,

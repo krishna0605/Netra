@@ -23,11 +23,8 @@ def main() -> int:
         "watchPatterns": ["backend/**", "railway.json"],
     }:
         raise ValueError("Railway API must build only from the reviewed API Docker contract")
-    if api["deploy"].get("preDeployCommand") != [
-        "python manage.py check --deploy",
-        "python manage.py migrate --noinput",
-    ]:
-        raise ValueError("Railway API pre-deploy must run check --deploy and migrate as explicit commands")
+    if api["deploy"].get("preDeployCommand") != ["python manage.py predeploy"]:
+        raise ValueError("Railway API pre-deploy must use the reviewed check-and-migrate command")
     if worker["build"].get("dockerfilePath") != "backend/Dockerfile.worker":
         raise ValueError("Railway worker must use the isolated worker image")
     # A startCommand overrides the image CMD and silently skips the fail-fast

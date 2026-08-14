@@ -277,7 +277,7 @@ The API and the worker are **separate deployments from separate Dockerfiles**. T
 | Objects | **Supabase Storage** | Private buckets | Never public; reached through the encrypted cache |
 | Cache | Railway volume | `/app/storage` | Encrypted, LRU, hard-capped |
 
-Deploys run `python manage.py check --deploy && python manage.py migrate --noinput` before traffic shifts, so a deployment that would fail a deployment check never becomes live.
+Deploys run `python manage.py predeploy` before traffic shifts. That reviewed command runs Django's deployment checks and then applies migrations in sequence, so either failure prevents the release from becoming live.
 
 The console ships a restrictive Content-Security-Policy with an explicit `connect-src` allowlist (its own origin, the Railway API, the Supabase project — nothing else), `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'none'`, and `form-action 'self'`. Only `VITE_*` values ever enter the public bundle; every backend secret lives in Railway or a Git-ignored local file.
 
