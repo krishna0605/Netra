@@ -32,8 +32,10 @@ from apps.forensics.services.admin_users import (
     account_payload,
     change_role,
     clear_authenticator,
+    end_all_sessions,
     end_sessions,
     provision_account,
+    revoke_one_session,
     replace_password,
     set_account_active,
 )
@@ -391,5 +393,34 @@ def admin_owner_transfer(request):
             reason=payload.get("reason", ""),
         )
         return JsonResponse({"organization": {"id": str(updated.id), "ownerUserId": updated.owner_id}})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def admin_session_detail(request, session_id: str):
+    def operation(actor, organization, payload):
+        revoke_one_session(
+            actor=actor,
+            organization=organization,
+            session_id=session_id,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"sessionId": session_id, "ended": True})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_sessions_revoke_all(request):
+    def operation(actor, organization, payload):
+        accounts = end_all_sessions(
+            actor=actor,
+            organization=organization,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"accounts": accounts})
 
     return _write(request, operation)

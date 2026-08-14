@@ -324,16 +324,25 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
 
         self.assertEqual(row["deniedLast24h"], 2)
 
-    def test_sessions_are_empty_rather_than_invented(self):
-        """Supabase does not expose a session list through the client SDK, and
-        the Auth Admin call that does arrives with the write path. An empty list
-        makes the console show its empty state, which is true. Plausible rows
-        would put fiction in front of someone deciding whether to revoke
-        a colleague's access."""
+    def test_sessions_say_why_they_are_empty(self):
+        """Sessions live in GoTrue's auth.sessions, which exists only on the
+        PostgreSQL deployment. On SQLite the console is told that rather than
+        shown an empty table, because "nobody is signed in" and "nobody can
+        tell" must not look the same."""
         snapshot = self._snapshot()
 
         self.assertEqual(snapshot["sessions"], [])
-        self.assertEqual(snapshot["sources"]["sessions"], "pending")
+        # The value depends on what the deployment can actually establish, and
+        # all three answers here are true ones: SQLite has no auth schema to
+        # read, PostgreSQL without Supabase cannot reach the table, and with no
+        # linked identities there is genuinely nothing to look up. What matters
+        # is that the console is told which — "nobody is signed in" and "nobody
+        # can tell" must never render the same. The reasons themselves are
+        # covered in test_live_sessions.
+        self.assertIn(
+            snapshot["sources"]["sessions"],
+            {"live", "unavailable_not_postgres", "unavailable_no_access"},
+        )
 
     def test_the_audit_chain_is_live_and_empty_until_something_is_recorded(self):
         """Empty because nothing has happened, not because nothing is wired.

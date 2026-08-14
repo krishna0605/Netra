@@ -85,6 +85,26 @@
     "capability": null,
     "deprecated": false,
     "rate_category": "mutation",
+    "route": "admin/v1/sessions/<str:session_id>",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_session_detail"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
+    "route": "admin/v1/sessions/revoke-all",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_sessions_revoke_all"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
     "route": "admin/v1/users",
     "scope": "organization",
     "view": "apps.forensics.api.admin_console.admin_users"

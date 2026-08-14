@@ -36,6 +36,7 @@ from apps.forensics.services.administration import (
 from common.admin_audit import record_admin_event
 from common.audit import Actor
 from common.session_revocation import revoke_sessions
+from common.supabase_sessions import end_session, end_sessions_for
 from common.supabase_admin import (
     SupabaseAdminConflict,
     SupabaseAdminError,
@@ -351,11 +352,29 @@ def set_account_active(
 
 
 def end_sessions(*, actor: Actor, organization: Organization, user_id: int, reason: str) -> UserProfile:
-    """Refuse every token the account currently holds, without changing it."""
+    """End every session this account holds, on both sides.
+
+    The denylist refuses the access tokens Netra already trusts; deleting the
+    GoTrue rows kills the refresh tokens behind them. Doing only the first
+    leaves the account able to mint new tokens; doing only the second leaves
+    the current one working until it expires.
+    """
     require_recent_factor(actor)
     profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
     reason = require_reason(reason)
+
+    # The GoTrue rows are the better half of this, but the denylist is the half
+    # Netra owns. If the identity provider cannot be reached the account is
+    # still refused here on the next request, which is the guarantee that
+    # matters most; failing the whole operation would leave a compromised
+    # session alive because a lookup timed out.
+    try:
+        identity = find_user_by_email(profile.user.email or profile.user.get_username())
+        if identity and identity.id:
+            end_sessions_for([identity.id])
+    except SupabaseAdminError:
+        pass
 
     with transaction.atomic():
         revoke_sessions(
@@ -374,6 +393,80 @@ def end_sessions(*, actor: Actor, organization: Organization, user_id: int, reas
             reason=reason,
         )
     return profile
+
+
+def revoke_one_session(*, actor: Actor, organization: Organization, session_id: str, reason: str) -> bool:
+    """End a single sign-in without touching the account's other sessions.
+
+    Deliberately not step-up gated. Ending one session is small, recoverable
+    and often urgent — an officer reports a laptop left open in a canteen — and
+    a prompt there buys nothing while costing the seconds that matter.
+    """
+    ensure_console_mutation_allowed(actor)
+    reason = require_reason(reason)
+
+    if not end_session(session_id):
+        raise AdministrationProblem("resource_not_found", "That session is no longer active.", 404)
+
+    record_admin_event(
+        organization=organization,
+        actor=actor,
+        action="session.ended",
+        target_type="Session",
+        target_id=session_id,
+        reason=reason,
+    )
+    return True
+
+
+def end_all_sessions(*, actor: Actor, organization: Organization, reason: str) -> int:
+    """End every session in the organization.
+
+    The break-glass action: a shared credential, a suspected compromise, an
+    officer who cannot say which device is theirs. Every account is denylisted
+    and every GoTrue session deleted, so nothing survives on either side.
+
+    The acting administrator is included. Exempting themselves would leave the
+    one session an attacker in this seat is already using, which is the session
+    the operation most needs to end.
+    """
+    require_recent_factor(actor)
+    ensure_console_mutation_allowed(actor)
+    reason = require_reason(reason)
+
+    profiles = list(
+        UserProfile.objects.select_related("user").filter(organization=organization, user__is_active=True)
+    )
+    identities = []
+    try:
+        for profile in profiles:
+            identity = find_user_by_email(profile.user.email or profile.user.get_username())
+            if identity and identity.id:
+                identities.append(identity.id)
+    except SupabaseAdminError:
+        # Same reasoning as end_sessions: the denylist alone still ends every
+        # session as far as Netra is concerned.
+        identities = []
+
+    with transaction.atomic():
+        for profile in profiles:
+            revoke_sessions(
+                user_id=profile.user_id,
+                organization=organization,
+                reason=reason,
+                revoked_by_label=actor.user,
+            )
+        deleted = end_sessions_for(identities)
+        record_admin_event(
+            organization=organization,
+            actor=actor,
+            action="session.all_revoked",
+            target_type="Organization",
+            target_id=organization.slug,
+            after={"accounts": len(profiles), "sessionsDeleted": deleted},
+            reason=reason,
+        )
+    return len(profiles)
 
 
 def change_role(

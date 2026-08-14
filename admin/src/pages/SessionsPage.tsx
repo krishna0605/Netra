@@ -153,7 +153,7 @@ export function SessionsPage() {
           "Nobody is locked out — each person signs back in with their existing password.",
         ]}
         confirmLabel="End all sessions"
-        onConfirm={(reason) => revokeAllSessions().then(() => void reason)}
+        onConfirm={(reason) => revokeAllSessions(reason)}
       />
     </>
   );

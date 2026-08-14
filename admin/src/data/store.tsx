@@ -35,7 +35,7 @@ type DirectoryValue = DirectorySnapshot & {
   resetAuthenticator: (userId: number, reason: string) => Promise<void>;
   revokeSession: (sessionId: string) => Promise<void>;
   revokeUserSessions: (userId: number) => Promise<void>;
-  revokeAllSessions: () => Promise<void>;
+  revokeAllSessions: (reason: string) => Promise<void>;
   grantPermission: (userId: number, key: PermissionKey, expiresAt: string | null, reason: string) => Promise<void>;
   removeGrant: (userId: number, key: PermissionKey, reason: string) => Promise<void>;
   createRole: (input: { name: string; description: string; baseSlug: string; reason: string }) => Promise<Role>;
@@ -150,9 +150,12 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
     [run],
   );
 
-  const revokeAllSessions = useCallback(async () => {
-    setSnapshot(await run(() => directoryApi.revokeAllSessions()));
-  }, [run]);
+  const revokeAllSessions = useCallback(
+    async (reason: string) => {
+      setSnapshot(await run(() => directoryApi.revokeAllSessions(reason)));
+    },
+    [run],
+  );
 
   const grantPermission = useCallback(
     async (userId: number, key: PermissionKey, expiresAt: string | null, reason: string) => {

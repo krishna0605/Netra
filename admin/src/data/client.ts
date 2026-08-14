@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "../lib/env";
 import { supabase } from "../lib/supabase";
-import { ACTIVITY, AUDIT, CAPABILITIES, CURRENT_OPERATOR, ORGANIZATION, PERMISSIONS, ROLES, SESSIONS, USERS } from "./mock";
+import { ACTIVITY, AUDIT, CAPABILITIES, ORGANIZATION, PERMISSIONS, ROLES, SESSIONS, USERS } from "./mock";
 import type {
   ActivityEvent,
   AdminUser,
@@ -81,32 +81,6 @@ if (typeof window !== "undefined") {
   };
 }
 
-async function settle<T>(value: T): Promise<T> {
-  const mode = simulation();
-  const delay = mode === "slow" ? 3000 : 220 + Math.random() * 260;
-  await new Promise((resolve) => setTimeout(resolve, delay));
-  if (mode === "error") {
-    throw new ApiFailure("upstream_unavailable", "The directory service did not respond.", 503);
-  }
-  return value;
-}
-
-/* ---------------------------------------------------------------------------
-   Persistence — stands in for the database
-   --------------------------------------------------------------------------- */
-
-const now = () => new Date().toISOString();
-
-function marker(input: string) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  const hex = hash.toString(16).padStart(8, "0");
-  return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
-}
-
 function seed(): DirectorySnapshot {
   return {
     users: USERS,
@@ -121,63 +95,19 @@ function seed(): DirectorySnapshot {
 }
 
 /**
- * State lives in memory for the lifetime of the tab, and nowhere else.
+ * The last copy of what the server returned.
  *
- * It used to persist to localStorage, which was reasonable while this module
- * stood in for a database. It is not reasonable now that a real one exists.
- * The admin console already goes out of its way to keep its Supabase session
- * out of localStorage — memory-only storage under a separate key — precisely
- * because the two consoles share an origin and therefore share that store.
- * Writing the full directory there anyway would have put every officer's
- * address, role and denial count into the same place, on what may be a shared
- * machine, surviving sign-out.
+ * Not a store — every operation posts and re-reads, so nothing is decided
+ * here. It exists because two things need the shape of the directory without a
+ * round trip: roleNameFor, which translates a slug the console works in into
+ * the role name the API speaks, and the tests.
+ *
+ * It stays in memory for the lifetime of the tab and nowhere else. It used to
+ * persist to localStorage, which put every officer's address, role and denial
+ * count on what may be a shared machine, surviving sign-out — and undid the
+ * memory-only session the console goes out of its way to keep.
  */
 let state: DirectorySnapshot = seed();
-
-function commit(next: DirectorySnapshot): DirectorySnapshot {
-  state = next;
-  return state;
-}
-
-/** Every administrator write lands in both records, as the server will do. */
-function record(
-  base: DirectorySnapshot,
-  entry: { action: string; targetType: string; targetId: string; reason: string; before: string; after: string },
-): DirectorySnapshot {
-  const at = now();
-  const previous = base.audit[0];
-  const chainIndex = (previous?.chainIndex ?? 200) + 1;
-
-  const auditEvent: AuditEvent = {
-    id: `e${chainIndex}`,
-    chainIndex,
-    at,
-    actor: CURRENT_OPERATOR.name,
-    action: entry.action,
-    targetType: entry.targetType,
-    targetId: entry.targetId,
-    reason: entry.reason,
-    before: entry.before,
-    after: entry.after,
-    previousHash: previous?.eventHash ?? marker("genesis"),
-    eventHash: marker(`${chainIndex}${entry.action}${entry.targetId}${at}`),
-  };
-
-  const activityEvent: ActivityEvent = {
-    id: `a-${chainIndex}`,
-    at,
-    actor: CURRENT_OPERATOR.name,
-    actorEmail: CURRENT_OPERATOR.email,
-    role: CURRENT_OPERATOR.role,
-    action: entry.action,
-    target: `${entry.targetType} · ${entry.targetId}`,
-    result: "allowed",
-    source: "AdminAudit",
-    chainIndex,
-  };
-
-  return { ...base, audit: [auditEvent, ...base.audit], activity: [activityEvent, ...base.activity] };
-}
 
 /* ---------------------------------------------------------------------------
    The surface
@@ -459,10 +389,13 @@ export const directoryApi = {
     return this.read();
   },
 
-  async revokeSession(sessionId: string) {
-    const next = { ...state, sessions: state.sessions.filter((session) => session.id !== sessionId) };
-    await settle(null);
-    return commit(next);
+  async revokeSession(sessionId: string, reason = "Session ended by an administrator.") {
+    await authorizedRequest(`/admin/v1/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    return this.read();
   },
 
   async revokeUserSessions(userId: number, reason = "Sessions ended by an administrator.") {
@@ -474,18 +407,13 @@ export const directoryApi = {
     return this.read();
   },
 
-  async revokeAllSessions() {
-    const next = record({ ...state, sessions: [] }, {
-      action: "session.revoked_organization",
-      targetType: "Organization",
-      targetId: "netra",
-      reason: "Every session across the organization was ended.",
-      before: `${state.sessions.length} active`,
-      after: "0 active",
+  async revokeAllSessions(reason: string) {
+    await authorizedRequest("/admin/v1/sessions/revoke-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async grantPermission(userId: number, key: PermissionKey, expiresAt: string | null, reason: string) {

@@ -39,6 +39,8 @@ urlpatterns = [
     path("admin/v1/users/<int:user_id>/grants", admin_console_views.admin_user_grants),
     path("admin/v1/roles", admin_console_views.admin_roles),
     path("admin/v1/roles/<slug:slug>/permissions/<str:key>", admin_console_views.admin_role_permission),
+    path("admin/v1/sessions/<str:session_id>", admin_console_views.admin_session_detail),
+    path("admin/v1/sessions/revoke-all", admin_console_views.admin_sessions_revoke_all),
     path("admin/v1/organization", admin_console_views.admin_organization),
     path("admin/v1/organization/owner-transfer", admin_console_views.admin_owner_transfer),
     path("cases", case_views.cases),

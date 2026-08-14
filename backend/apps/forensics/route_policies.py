@@ -59,11 +59,12 @@ _MUTATION_SUFFIXES = (
     "/factors",
     "/role",
     "/sessions/revoke",
+    "/revoke-all",
 )
 # POST-only collections. The classifier sees a path and not a method, so a
 # route that only ever creates something has to say so here or it is rated as
 # though it were a listing.
-_MUTATION_ROUTES = frozenset({"admin/v1/users"})
+_MUTATION_ROUTES = frozenset({"admin/v1/users", "admin/v1/sessions/<str:session_id>"})
 _DEPRECATED_PREFIXES = (
     "dashboard/",
     "alerts",

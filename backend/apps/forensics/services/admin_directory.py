@@ -44,6 +44,7 @@ from common.audit import ROLE_PERMISSIONS
 from common.permissions import effective_permissions
 from common.capabilities import capability_registry
 from common.supabase_admin import SupabaseAdminError, list_users
+from common.supabase_sessions import list_sessions, session_payload
 
 
 # The catalogue is server-owned so that a screen cannot drift from what the
@@ -560,16 +561,35 @@ def activity_rows(organization: Organization, limit: int = ACTIVITY_LIMIT) -> li
     return merged[:limit]
 
 
+def session_rows(organization: Organization, users: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    """Live sessions, joined back to the people they belong to.
+
+    Read straight from GoTrue's own table rather than through the Auth Admin
+    REST API, which has no endpoint for this. See common/supabase_sessions.py
+    for why that is legitimate and where it stops.
+    """
+    by_supabase_id = {row["supabaseId"]: row for row in users if row.get("supabaseId")}
+    sessions, status = list_sessions(list(by_supabase_id))
+    rows = []
+    for session in sessions:
+        owner = by_supabase_id.get(session.supabase_user_id)
+        if owner is None:
+            # A session belonging to somebody outside this organization. Not an
+            # error — one Supabase project can serve several — and not ours to
+            # show.
+            continue
+        rows.append(
+            session_payload(session, user_id=owner["id"], name=owner["name"], email=owner["email"])
+        )
+    return rows, status
+
+
 def directory_snapshot(organization: Organization) -> dict[str, Any]:
     users, identities_known = user_rows(organization)
+    sessions, sessions_status = session_rows(organization, users)
     return {
         "users": users,
-        # Supabase does not expose a session list through the client SDK, and
-        # the Auth Admin call that does arrives with the write path. Returning
-        # an empty list makes the console show its empty state, which is true;
-        # inventing plausible rows here would put fiction in front of an
-        # administrator deciding whether to revoke someone's access.
-        "sessions": [],
+        "sessions": sessions,
         "activity": activity_rows(organization),
         "audit": audit_rows(organization),
         "roles": role_rows(organization),
@@ -578,7 +598,7 @@ def directory_snapshot(organization: Organization) -> dict[str, Any]:
         "capabilities": capability_rows(),
         "sources": {
             "identityProvider": "supabase" if identities_known else "unavailable",
-            "sessions": "pending",
+            "sessions": sessions_status,
             "audit": "live",
         },
     }
