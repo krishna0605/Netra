@@ -78,12 +78,29 @@ from apps.forensics.api.legacy_support import (
 )
 
 
+def _worker_release_health() -> dict[str, object]:
+    """Expose only the bounded worker facts required for release convergence."""
+    try:
+        row = WorkerHeartbeat.objects.filter(worker_name="postgres-analysis").order_by("-last_seen_at").first()
+    except Exception:  # pragma: no cover - health must survive a database outage
+        return {"status": "unknown", "releaseId": "", "lastSeen": None}
+    if row is None:
+        return {"status": "offline", "releaseId": "", "lastSeen": None}
+    details = row.details_json if isinstance(row.details_json, dict) else {}
+    return {
+        "status": heartbeat_state(row.last_seen_at),
+        "releaseId": str(details.get("releaseId") or ""),
+        "lastSeen": row.last_seen_at.isoformat(),
+    }
+
+
 def health(_request):
     return JsonResponse(
         {
             "status": "ok",
             "service": "netra-backend",
             "releaseId": settings.NETRA_RELEASE_ID,
+            "worker": _worker_release_health(),
         }
     )
 

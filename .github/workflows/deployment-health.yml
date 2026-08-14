@@ -17,11 +17,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  railway-production-health:
-    name: railway-production-health
+  release-provenance:
+    name: release-provenance
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'production')
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production – netra-hackathon-console-20260714')
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
@@ -34,9 +35,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - name: Require the exact Railway release to become active
+      - name: Require GitHub, Vercel and Railway to converge
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python scripts/verify_railway_deployment.py
+          python scripts/verify_release_provenance.py
+          --github-repository "$GITHUB_REPOSITORY"
+          --frontend-origin https://netra-hackathon-console-20260714.vercel.app
           --api-origin https://netra-api-production.up.railway.app
           --expected-release "$EXPECTED_RELEASE"
           --timeout 600

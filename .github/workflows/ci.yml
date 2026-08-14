@@ -14,6 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  commit-provenance:
+    name: commit-provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Require signed Krishna-only commits
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/verify_commit_provenance.py
+          --before "${{ github.event.before }}"
+          --after "$GITHUB_SHA"
+          --github-repository "$GITHUB_REPOSITORY"
+
   backend-unit:
     name: backend-unit
     runs-on: ubuntu-24.04
@@ -223,16 +244,17 @@ jobs:
   ci-policy-gate:
     name: ci-policy-gate
     if: always()
-    needs: [backend-unit, backend-postgres, frontend-quality, admin-quality, browser-security, migration-and-supabase-lint]
+    needs: [commit-provenance, backend-unit, backend-postgres, frontend-quality, admin-quality, browser-security, migration-and-supabase-lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Require every quality job
         env:
+          COMMIT_PROVENANCE: ${{ needs.commit-provenance.result }}
           BACKEND_UNIT: ${{ needs.backend-unit.result }}
           BACKEND_POSTGRES: ${{ needs.backend-postgres.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
           ADMIN_QUALITY: ${{ needs.admin-quality.result }}
           BROWSER_SECURITY: ${{ needs.browser-security.result }}
           MIGRATION_LINT: ${{ needs.migration-and-supabase-lint.result }}
-        run: test "$BACKEND_UNIT$BACKEND_POSTGRES$FRONTEND_QUALITY$ADMIN_QUALITY$BROWSER_SECURITY$MIGRATION_LINT" = "successsuccesssuccesssuccesssuccesssuccess"
+        run: test "$COMMIT_PROVENANCE$BACKEND_UNIT$BACKEND_POSTGRES$FRONTEND_QUALITY$ADMIN_QUALITY$BROWSER_SECURITY$MIGRATION_LINT" = "successsuccesssuccesssuccesssuccesssuccesssuccess"

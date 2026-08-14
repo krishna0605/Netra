@@ -158,6 +158,7 @@ class Command(BaseCommand):
                 document = {
                     "status": "ok" if state.get("ok") else "degraded",
                     "service": "netra-worker",
+                    "releaseId": settings.NETRA_RELEASE_ID,
                     "storageCache": state.get("code", ""),
                 }
                 payload = json.dumps(document, sort_keys=True).encode("utf-8")

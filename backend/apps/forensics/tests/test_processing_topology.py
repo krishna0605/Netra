@@ -54,6 +54,21 @@ class ProcessingTopologyTests(TestCase):
             HTTP_X_NETRA_ROLE="Investigator",
         )
 
+    def test_public_health_reports_the_latest_worker_release(self):
+        heartbeat = WorkerHeartbeat.objects.create(
+            worker_name="postgres-analysis",
+            instance_id="release-check",
+            status="healthy",
+            last_seen_at=timezone.now(),
+            details_json=self._details(),
+        )
+
+        payload = self.client.get("/api/health").json()
+
+        self.assertEqual(payload["worker"]["status"], "healthy")
+        self.assertEqual(payload["worker"]["releaseId"], "local-dev")
+        self.assertEqual(payload["worker"]["lastSeen"], heartbeat.last_seen_at.isoformat())
+
     def test_missing_worker_capacity_rejects_before_storage_write(self):
         with patch("apps.forensics.api.evidence.save_uploaded_file") as save_uploaded:
             response = self._upload()

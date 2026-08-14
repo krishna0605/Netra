@@ -49,7 +49,12 @@ class ApiAccessControlTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"status": "ok", "service": "netra-backend", "releaseId": "local-dev"},
+            {
+                "status": "ok",
+                "service": "netra-backend",
+                "releaseId": "local-dev",
+                "worker": {"status": "offline", "releaseId": "", "lastSeen": None},
+            },
         )
         capabilities = self.client.get("/api/capabilities")
         self.assertEqual(capabilities.status_code, 200)
