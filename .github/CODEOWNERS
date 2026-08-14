@@ -7,6 +7,7 @@
 /backend/Dockerfile.worker @krishna0605
 /frontend/Dockerfile @krishna0605
 /frontend/vercel.json @krishna0605
+/admin/vercel.json @krishna0605
 /infra/ @krishna0605
 
 # Authentication, tenancy, administration, crypto and custody
@@ -21,3 +22,4 @@
 /.env.supabase.production.example @krishna0605
 /docs/PRODUCTION_ENVIRONMENT_CONTRACT.md @krishna0605
 /docs/CUTOVER_AND_ROLLBACK_CHECKLIST.md @krishna0605
+/docs/BREAK_GLASS_RUNBOOK.md @krishna0605

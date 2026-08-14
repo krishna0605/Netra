@@ -163,6 +163,10 @@ NETRA_AUTH_ADMIN_MAX_LIST_PAGES = max(1, min(50, int(os.getenv("NETRA_AUTH_ADMIN
 # Reported to the administration console so the retention window is stated
 # rather than assumed. Enforcing it is a scheduled-job concern, not a read one.
 NETRA_ACCESS_LOG_RETENTION_DAYS = max(1, min(3650, int(os.getenv("NETRA_ACCESS_LOG_RETENTION_DAYS", "365"))))
+NETRA_ACCESS_LOG_MAINTENANCE_SECONDS = max(
+    3600,
+    min(604800, int(os.getenv("NETRA_ACCESS_LOG_MAINTENANCE_SECONDS", "86400"))),
+)
 NETRA_SEARCH_PROVIDER = os.getenv("NETRA_SEARCH_PROVIDER", "postgres").lower()
 NETRA_DATABASE_MODE = os.getenv("NETRA_DATABASE_MODE", "docker-postgres")
 NETRA_KAFKA_BOOTSTRAP = os.getenv("NETRA_KAFKA_BOOTSTRAP", "localhost:9092")
@@ -361,7 +365,13 @@ NETRA_ADMIN_ORIGINS = [
 ]
 NETRA_PUBLIC_BASE_URL = os.getenv("NETRA_PUBLIC_BASE_URL", "http://localhost:8080")
 NETRA_REQUIRE_HTTPS = os.getenv("NETRA_REQUIRE_HTTPS", "0") == "1"
-NETRA_RELEASE_ID = os.getenv("NETRA_RELEASE_ID", "local-dev")
+# Railway supplies the immutable Git SHA for source deployments. An explicit
+# value remains available for non-Git releases and local release rehearsals.
+NETRA_RELEASE_ID = (
+    os.getenv("NETRA_RELEASE_ID")
+    or os.getenv("RAILWAY_GIT_COMMIT_SHA")
+    or "local-dev"
+).strip()
 NETRA_ALLOWED_STACK = [
     "Django/Gunicorn on Railway",
     "Supabase Postgres/Auth/Storage",

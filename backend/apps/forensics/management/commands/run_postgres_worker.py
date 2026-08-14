@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from apps.forensics.models import WorkerHeartbeat
 from apps.forensics.services.webhook_delivery import claim_next_delivery, process_delivery
+from common.access_log_retention import maintain_access_log_partitions
 from common.async_pipeline import process_claimed_job
 from common.postgres_jobs import claim_next_job, mark_job_failure, renew_job_lease
 from common.quarantine_cleanup import cleanup_worker_artifacts
@@ -42,10 +43,25 @@ class Command(BaseCommand):
         self._start_health_server()
         cleanup_worker_artifacts()
         last_cleanup = time.monotonic()
+        last_access_log_maintenance = 0.0
+        self.access_log_maintenance = {"status": "pending"}
         self.stdout.write(f"Starting durable NETRA worker {worker_id}")
         if not self.cache_state.get("ok"):
             self.stderr.write(f"Encrypted Storage cache is not usable [{self.cache_state.get('code')}]")
         while True:
+            if time.monotonic() - last_access_log_maintenance >= settings.NETRA_ACCESS_LOG_MAINTENANCE_SECONDS:
+                try:
+                    result = maintain_access_log_partitions()
+                    self.access_log_maintenance = {
+                        "status": result.status,
+                        "createdPartitions": result.created_partitions,
+                        "droppedPartitions": result.dropped_partitions,
+                        "deletedRows": result.deleted_rows,
+                    }
+                except Exception as exc:  # nosec B110
+                    self.access_log_maintenance = {"status": "failed", "error": type(exc).__name__}
+                    self.stderr.write(f"AccessLog maintenance failed [{type(exc).__name__}]")
+                last_access_log_maintenance = time.monotonic()
             if time.monotonic() - last_cleanup >= settings.NETRA_CLEANUP_INTERVAL_SECONDS:
                 cleanup_worker_artifacts()
                 self.cache_state = storage_cache.preflight()
@@ -106,6 +122,7 @@ class Command(BaseCommand):
                     "capabilities": self.capabilities,
                     "storageCacheOk": bool(self.cache_state.get("ok")),
                     "storageCacheCode": self.cache_state.get("code", ""),
+                    "accessLogMaintenance": self.access_log_maintenance,
                 },
             },
         )

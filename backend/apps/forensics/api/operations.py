@@ -79,7 +79,13 @@ from apps.forensics.api.legacy_support import (
 
 
 def health(_request):
-    return JsonResponse({"status": "ok", "service": "netra-backend"})
+    return JsonResponse(
+        {
+            "status": "ok",
+            "service": "netra-backend",
+            "releaseId": settings.NETRA_RELEASE_ID,
+        }
+    )
 
 
 def setup_status(_request):

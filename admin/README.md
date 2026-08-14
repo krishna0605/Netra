@@ -8,11 +8,11 @@ is designed to run on its own origin, because a shared origin means a shared
 `localStorage`, and a script-injection flaw anywhere in the investigator console
 would reach the admin session. See §2 of the implementation plan.
 
-> **Status: backend-connected Phase 4 implementation.** Authentication, the
+> **Status: production-wired Phase 5 implementation.** Authentication, the
 > directory, administrative writes, audit verification, live sessions, roles,
 > grants and ownership use `/api/admin/v1/*`. Browser tests stub that namespace
-> deliberately; production and real-Django end-to-end deployment remain later
-> phases.
+> deliberately; the separate Vercel project is validated against the same API
+> and Supabase project used by the investigator console.
 
 ## Running it
 

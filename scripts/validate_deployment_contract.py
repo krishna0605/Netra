@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 FRONTEND_ORIGIN = "https://netra-hackathon-console-20260714.vercel.app"
+ADMIN_ORIGIN = "https://netra-operations-workspace.vercel.app"
 API_ORIGIN = "https://netra-api-production.up.railway.app"
 SUPABASE_ORIGIN = "https://frjzewpyjgirorbguegm.supabase.co"
 
@@ -14,6 +15,7 @@ def main() -> int:
     api = json.loads(Path("railway.json").read_text(encoding="utf-8"))
     worker = json.loads(Path("railway.worker.json").read_text(encoding="utf-8"))
     vercel = json.loads(Path("frontend/vercel.json").read_text(encoding="utf-8"))
+    admin_vercel = json.loads(Path("admin/vercel.json").read_text(encoding="utf-8"))
     environment = Path(".env.supabase.production.example").read_text(encoding="utf-8")
 
     if api["build"] != {
@@ -40,19 +42,25 @@ def main() -> int:
     if "run_postgres_worker" not in worker_image:
         raise ValueError("Railway worker must use the PostgreSQL row-lock consumer")
 
-    if vercel.get("ignoreCommand") != "node scripts/vercel-ignore-build.mjs":
-        raise ValueError("Vercel must use the reviewed change-aware build filter")
-    csp = next(
-        header["value"]
-        for group in vercel["headers"]
-        for header in group["headers"]
-        if header["key"] == "Content-Security-Policy"
-    )
-    if "*" in csp or "wss:" in csp or "ws:" in csp:
-        raise ValueError("Vercel CSP must contain no wildcard or WebSocket source")
-    for origin in (API_ORIGIN, SUPABASE_ORIGIN):
-        if origin not in csp:
-            raise ValueError(f"Vercel CSP is missing exact origin {origin}")
+    for name, config in (("frontend", vercel), ("admin", admin_vercel)):
+        if config.get("ignoreCommand") != "node scripts/vercel-ignore-build.mjs":
+            raise ValueError(f"{name} Vercel project must use the reviewed change-aware build filter")
+        csp = next(
+            header["value"]
+            for group in config["headers"]
+            for header in group["headers"]
+            if header["key"] == "Content-Security-Policy"
+        )
+        if "*" in csp or "wss:" in csp or "ws:" in csp:
+            raise ValueError(f"{name} Vercel CSP must contain no wildcard or WebSocket source")
+        for origin in (API_ORIGIN, SUPABASE_ORIGIN):
+            if origin not in csp:
+                raise ValueError(f"{name} Vercel CSP is missing exact origin {origin}")
+
+    for name, expected_path in (("frontend", "frontend"), ("admin", "admin")):
+        ignore_script = Path(name, "scripts", "vercel-ignore-build.mjs").read_text(encoding="utf-8")
+        if "VERCEL_GIT_PREVIOUS_SHA" not in ignore_script or f'"{expected_path}"' not in ignore_script:
+            raise ValueError(f"{name} Vercel build filter does not compare the exact project path and Vercel SHA")
 
     required_assignments = {
         "NETRA_AUTH_INVITATIONS_ENABLED": "0",
@@ -61,9 +69,11 @@ def main() -> int:
         "NETRA_ENABLE_STRUCTURED_IMPORTS": "0",
         "NETRA_STORAGE_DEEP_HEALTHCHECK": "0",
         "NETRA_DIRECT_UPLOAD_ENABLED": "0",
-        "NETRA_FRONTEND_ORIGINS": FRONTEND_ORIGIN,
-        "DJANGO_CSRF_TRUSTED_ORIGINS": FRONTEND_ORIGIN,
+        "NETRA_FRONTEND_ORIGINS": f"{FRONTEND_ORIGIN},{ADMIN_ORIGIN}",
+        "NETRA_ADMIN_ORIGINS": ADMIN_ORIGIN,
+        "DJANGO_CSRF_TRUSTED_ORIGINS": f"{FRONTEND_ORIGIN},{ADMIN_ORIGIN}",
         "VITE_API_BASE_URL": f"{API_ORIGIN}/api",
+        "VITE_CONSOLE_URL": FRONTEND_ORIGIN,
     }
     for name, value in required_assignments.items():
         if not re.search(rf"^{re.escape(name)}={re.escape(value)}$", environment, re.MULTILINE):

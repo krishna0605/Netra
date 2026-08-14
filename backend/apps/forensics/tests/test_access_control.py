@@ -47,7 +47,10 @@ class ApiAccessControlTests(TestCase):
     def test_public_operational_responses_are_minimal_and_read_only(self):
         response = self.client.get("/api/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "service": "netra-backend"})
+        self.assertEqual(
+            response.json(),
+            {"status": "ok", "service": "netra-backend", "releaseId": "local-dev"},
+        )
         capabilities = self.client.get("/api/capabilities")
         self.assertEqual(capabilities.status_code, 200)
         self.assertIn("password_recovery", capabilities.json()["results"])

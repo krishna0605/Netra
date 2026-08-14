@@ -1,0 +1,43 @@
+name: deployment-health
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      expected_release:
+        description: Exact Git commit SHA expected from the production API
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-health-production
+  cancel-in-progress: true
+
+jobs:
+  railway-production-health:
+    name: railway-production-health
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'production')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      EXPECTED_RELEASE: ${{ github.event.deployment.sha || inputs.expected_release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ env.EXPECTED_RELEASE }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Require the exact Railway release to become active
+        run: >-
+          python scripts/verify_railway_deployment.py
+          --api-origin https://netra-api-production.up.railway.app
+          --expected-release "$EXPECTED_RELEASE"
+          --timeout 600
+          --interval 10

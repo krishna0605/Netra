@@ -16,8 +16,11 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         if "pull_request_target:" in text or "permissions: write-all" in text:
             raise ValueError(f"{path}: unsafe trigger or broad permissions")
-        if "release-candidate-*" not in text or "branches: [main]" not in text:
+        is_post_deploy = "deployment_status:" in text
+        if not is_post_deploy and ("release-candidate-*" not in text or "branches: [main]" not in text):
             raise ValueError(f"{path}: main and signed candidate-tag push gates are required")
+        if is_post_deploy and "workflow_dispatch:" not in text:
+            raise ValueError(f"{path}: post-deployment health must retain an owner-triggered verification path")
         uses = USES_LINE.findall(text)
         pinned = ACTION_PATTERN.findall(text)
         if len(uses) != len(pinned):

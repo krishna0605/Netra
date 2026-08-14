@@ -35,6 +35,24 @@ DIRECTORY = "/api/admin/v1/directory"
 SESSION = "/api/admin/v1/session"
 
 
+def backdate_access_logs(queryset, moment):
+    """Move access-log timestamps for a test.
+
+    AccessLog is append-only in PostgreSQL — a trigger refuses UPDATE and
+    DELETE outside a maintenance window — so a test that needs an older row has
+    to open that window explicitly rather than quietly discovering the guard.
+    """
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        queryset.update(created_at=moment)
+        return
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT set_config('netra.access_log_maintenance', 'on', true)")
+        queryset.update(created_at=moment)
+        cursor.execute("SELECT set_config('netra.access_log_maintenance', 'off', true)")
+
+
 class AdminConsoleTestBase(TestCase):
     def setUp(self):
         self.client = Client()
@@ -294,7 +312,7 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
                 action=f"permission:view-{index}",
                 result="allowed",
             )
-        AccessLog.objects.filter(action="permission:view-0").update(created_at=older)
+        backdate_access_logs(AccessLog.objects.filter(action="permission:view-0"), older)
 
         stamps = [row["at"] for row in self._snapshot()["activity"]]
 
@@ -318,7 +336,7 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
             action="permission:export",
             result="denied",
         )
-        AccessLog.objects.filter(pk=stale.pk).update(created_at=timezone.now() - timedelta(days=2))
+        backdate_access_logs(AccessLog.objects.filter(pk=stale.pk), timezone.now() - timedelta(days=2))
 
         row = next(entry for entry in self._snapshot()["users"] if entry["email"] == "inspector@netra.test")
 
