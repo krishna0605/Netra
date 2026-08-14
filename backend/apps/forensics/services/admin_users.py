@@ -118,7 +118,8 @@ def resolve_password(candidate: str | None) -> str:
     return candidate
 
 
-def _require_reason(reason: str) -> str:
+def require_reason(reason: str) -> str:
+    """Shared with admin_permissions: every administrative write carries one."""
     reason = (reason or "").strip()
     if not _MIN_REASON <= len(reason) <= _MAX_REASON:
         raise AdministrationProblem(
@@ -129,7 +130,7 @@ def _require_reason(reason: str) -> str:
     return reason
 
 
-def _target(actor: Actor, user_id: int) -> UserProfile:
+def resolve_target(actor: Actor, user_id: int) -> UserProfile:
     profile = (
         UserProfile.objects.select_related("user", "organization")
         .filter(user_id=user_id, organization_id=actor.organization_id)
@@ -183,7 +184,7 @@ def provision_account(
     """
     require_recent_factor(actor)
     ensure_console_mutation_allowed(actor)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     email = (email or "").strip().lower()
     if not email or "@" not in email or len(email) > 320:
@@ -234,9 +235,9 @@ def replace_password(
     for performing one.
     """
     require_recent_factor(actor)
-    profile = _target(actor, user_id)
+    profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     password = resolve_password(password)
     try:
@@ -272,9 +273,9 @@ def clear_authenticator(*, actor: Actor, organization: Organization, user_id: in
     The most-used operation in practice: an officer changes phone, or loses one.
     """
     require_recent_factor(actor)
-    profile = _target(actor, user_id)
+    profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     identity_id = _supabase_id(profile)
     try:
@@ -314,9 +315,9 @@ def set_account_active(
     records that must keep resolving to a person long after they have left.
     """
     require_recent_factor(actor)
-    profile = _target(actor, user_id)
+    profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     if not active and profile.role == UserProfile.Role.ADMIN:
         ensure_administrator_remains(organization, losing_user_id=profile.user_id)
@@ -352,9 +353,9 @@ def set_account_active(
 def end_sessions(*, actor: Actor, organization: Organization, user_id: int, reason: str) -> UserProfile:
     """Refuse every token the account currently holds, without changing it."""
     require_recent_factor(actor)
-    profile = _target(actor, user_id)
+    profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     with transaction.atomic():
         revoke_sessions(
@@ -379,9 +380,9 @@ def change_role(
     *, actor: Actor, organization: Organization, user_id: int, role: str, reason: str
 ) -> UserProfile:
     require_recent_factor(actor)
-    profile = _target(actor, user_id)
+    profile = resolve_target(actor, user_id)
     ensure_console_mutation_allowed(actor, profile)
-    reason = _require_reason(reason)
+    reason = require_reason(reason)
 
     if role not in ASSIGNABLE_ROLES:
         raise AdministrationProblem("invalid_role", "Select a role this console can assign.", 400)

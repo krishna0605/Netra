@@ -29,6 +29,10 @@ from django.contrib.auth import get_user_model
 from apps.forensics.models import (
     AccessLog,
     AdminAuditEvent,
+    Permission,
+    PermissionGrant,
+    Role,
+    RolePermission,
     CaseHistoryEvent,
     CustodyLedgerEvent,
     OperationalEvent,
@@ -37,6 +41,7 @@ from apps.forensics.models import (
 )
 from common.admin_audit import admin_event_dict
 from common.audit import ROLE_PERMISSIONS
+from common.permissions import effective_permissions
 from common.capabilities import capability_registry
 from common.supabase_admin import SupabaseAdminError, list_users
 
@@ -225,12 +230,77 @@ def _last_activity(organization: Organization) -> dict[int, str]:
     return {row["user_id"]: row["latest"].isoformat() for row in rows if row["latest"]}
 
 
+def resolve_owner_id(organization: Organization) -> int:
+    """Who owns this organization.
+
+    One function because two callers need the answer and they must not disagree
+    — the organization screen naming one person while the users table flags a
+    different one is the kind of contradiction nobody reports and everybody
+    distrusts.
+
+    The fallback covers organizations that predate the owner column: the
+    earliest administrator, who is the closest thing the data remembers to an
+    original owner.
+    """
+    if organization.owner_id:
+        return organization.owner_id
+    earliest = (
+        UserProfile.objects.filter(organization=organization, role=UserProfile.Role.ADMIN)
+        .order_by("created_at", "id")
+        .first()
+    )
+    return earliest.user_id if earliest else 0
+
+
+def _permission_rows(profile: UserProfile, grants: list) -> list[dict[str, Any]]:
+    """Effective permissions, each saying where it came from.
+
+    The source is what makes the screen useful. An administrator looking at an
+    account needs to tell which permissions arrive with the role from which
+    somebody decided by hand, because only the second kind carries a reason and
+    an expiry.
+    """
+    overrides = {grant.permission_id: grant for grant in grants}
+    rows = []
+    for key in sorted(effective_permissions(profile)):
+        grant = overrides.get(key)
+        granted = grant is not None and grant.mode == PermissionGrant.Mode.GRANT
+        rows.append(
+            {
+                "key": key,
+                "source": "granted" if granted else "role",
+                "expiresAt": grant.expires_at.isoformat() if granted and grant.expires_at else None,
+                "reason": grant.reason if granted else "",
+                "grantedBy": grant.granted_by_label if granted else "",
+            }
+        )
+    # Revocations are absent from the effective set by definition. Hiding them
+    # would leave an administrator wondering why somebody lacks what their role
+    # says they should have.
+    for key, grant in sorted(overrides.items()):
+        if grant.mode == PermissionGrant.Mode.REVOKE:
+            rows.append(
+                {
+                    "key": key,
+                    "source": "revoked",
+                    "expiresAt": grant.expires_at.isoformat() if grant.expires_at else None,
+                    "reason": grant.reason,
+                    "grantedBy": grant.granted_by_label,
+                }
+            )
+    return rows
+
+
 def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
     identities, identities_known = _supabase_identities()
+    owner_id = resolve_owner_id(organization)
+    grants_by_user: dict[int, list] = {}
+    for grant in PermissionGrant.objects.filter(organization=organization):
+        grants_by_user.setdefault(grant.user_id, []).append(grant)
     denied = _denied_counts(organization)
     last_activity = _last_activity(organization)
     profiles = (
-        UserProfile.objects.select_related("user", "organization")
+        UserProfile.objects.select_related("user", "organization", "role_ref")
         .filter(organization=organization)
         .order_by("user__username")
     )
@@ -239,14 +309,14 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
         user = profile.user
         email = (user.email or user.get_username() or "").strip().lower()
         identity = identities.get(email)
-        permissions = sorted(ROLE_PERMISSIONS.get(profile.role, set()))
+        permissions = _permission_rows(profile, grants_by_user.get(profile.user_id, []))
         rows.append(
             {
                 "id": user.id,
                 "email": email,
                 "name": profile.display_name or user.get_username(),
                 "roleSlug": role_slug(profile.role),
-                "isOwner": profile.role == UserProfile.Role.ADMIN,
+                "isOwner": owner_id == profile.user_id,
                 "status": _status(user, identity),
                 # Never guessed. When Supabase could not be consulted the
                 # console shows "unknown" and the overview excludes the account
@@ -259,10 +329,7 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
                 "lastActivityAt": last_activity.get(user.id),
                 "invitationState": _invitation_state(identity),
                 "deniedLast24h": denied.get(user.id, 0),
-                "permissions": [
-                    {"key": key, "source": "role", "expiresAt": None, "reason": "", "grantedBy": ""}
-                    for key in permissions
-                ],
+                "permissions": permissions,
                 # Case membership is per-case authorization rather than
                 # directory state; the console reads it from the case API.
                 "caseMemberships": [],
@@ -272,47 +339,75 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
 
 
 def role_rows(organization: Organization) -> list[dict[str, Any]]:
+    """Roles as the database holds them, including any the console created.
+
+    isSystem now means something. The seeded roles cannot be edited and a clone
+    of one can; before permissions were data every role lived in code, so the
+    flag was always true and told nobody anything.
+    """
     from django.db.models import Count
 
     counts = {
         row["role"]: row["total"]
         for row in UserProfile.objects.filter(organization=organization).values("role").annotate(total=Count("id"))
     }
-    return [
-        {
-            "slug": role_slug(role),
-            "name": role,
-            "description": _ROLE_DESCRIPTIONS.get(role, ""),
-            # Every role is currently defined in code, so none may be edited
-            # from the console. Phase 4 moves them into the database and this
-            # flag starts telling the two apart.
-            "isSystem": True,
-            "permissions": sorted(permissions),
-            "memberCount": counts.get(role, 0),
-        }
-        for role, permissions in ROLE_PERMISSIONS.items()
-    ]
+    by_ref = {
+        row["role_ref"]: row["total"]
+        for row in UserProfile.objects.filter(organization=organization, role_ref__isnull=False)
+        .values("role_ref")
+        .annotate(total=Count("id"))
+    }
+
+    rows = []
+    for role in Role.objects.filter(organization=organization).order_by("is_system", "name"):
+        keys = sorted(RolePermission.objects.filter(role=role).values_list("permission_id", flat=True))
+        rows.append(
+            {
+                "slug": role.slug,
+                "name": role.name,
+                "description": role.description,
+                "isSystem": role.is_system,
+                "permissions": keys,
+                # Profiles carry both pointers through the transition, so a
+                # member counts under either rather than vanishing from the
+                # tally because one has not been backfilled.
+                "memberCount": by_ref.get(role.id, 0) or counts.get(role.name, 0),
+            }
+        )
+    return rows
 
 
 def organization_row(organization: Organization) -> dict[str, Any]:
-    owner = (
-        UserProfile.objects.filter(organization=organization, role=UserProfile.Role.ADMIN)
-        .select_related("user")
-        .first()
-    )
+    owner_id = resolve_owner_id(organization)
     return {
         "id": str(organization.id),
         "name": organization.name,
         "slug": organization.slug,
-        # Ownership is currently inferred from the sole-Admin constraint. Phase
-        # 4 gives Organization its own owner column and this stops being a
-        # derived value.
-        "ownerUserId": owner.user_id if owner else 0,
+        "ownerUserId": owner_id or 0,
         "maxQueuedAnalyses": organization.max_queued_analyses,
         "accessLogRetentionDays": settings.NETRA_ACCESS_LOG_RETENTION_DAYS,
         "mfaPolicy": settings.NETRA_MFA_POLICY,
         "createdAt": organization.created_at.isoformat(),
     }
+
+
+def permission_catalogue_rows() -> list[dict[str, Any]]:
+    """The catalogue from the database, falling back to the constant.
+
+    The fallback covers a database migrated but not yet seeded. An empty
+    catalogue would leave the console unable to offer any permission at all.
+    """
+    rows = [
+        {
+            "key": row.key,
+            "label": row.label,
+            "description": row.description,
+            "category": row.category,
+            "risk": row.risk_level,
+        }
+        for row in Permission.objects.all()
+    ]
+    return rows or [dict(entry) for entry in PERMISSION_CATALOGUE]
 
 
 def capability_rows() -> list[dict[str, Any]]:
@@ -479,7 +574,7 @@ def directory_snapshot(organization: Organization) -> dict[str, Any]:
         "audit": audit_rows(organization),
         "roles": role_rows(organization),
         "organization": organization_row(organization),
-        "permissions": [dict(entry) for entry in PERMISSION_CATALOGUE],
+        "permissions": permission_catalogue_rows(),
         "capabilities": capability_rows(),
         "sources": {
             "identityProvider": "supabase" if identities_known else "unavailable",

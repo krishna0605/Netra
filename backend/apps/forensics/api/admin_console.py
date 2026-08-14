@@ -21,10 +21,12 @@ import json
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
 from apps.forensics.api.errors import api_error
-from apps.forensics.models import Organization, UserProfile
+from apps.forensics.models import Organization, PermissionGrant, UserProfile
 from apps.forensics.services.administration import AdministrationProblem, require_privileged_admin
 from apps.forensics.services.admin_users import (
     account_payload,
@@ -34,6 +36,14 @@ from apps.forensics.services.admin_users import (
     provision_account,
     replace_password,
     set_account_active,
+)
+from apps.forensics.services.admin_permissions import (
+    create_role,
+    grant_permission,
+    remove_grant,
+    set_role_permission,
+    transfer_ownership,
+    update_organization,
 )
 from apps.forensics.services.admin_directory import directory_snapshot, role_slug
 from common.admin_audit import verify_admin_chain
@@ -280,5 +290,106 @@ def admin_user_role(request, user_id: int):
             reason=payload.get("reason", ""),
         )
         return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)
+
+
+def _expiry(payload: dict):
+    raw = payload.get("expiresAt")
+    if not raw:
+        return None
+    parsed = parse_datetime(str(raw))
+    if parsed is None:
+        raise AdministrationProblem("invalid_expiry", "An expiry must be an ISO 8601 timestamp.", 400)
+    return parsed if timezone.is_aware(parsed) else timezone.make_aware(parsed)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "DELETE"])
+def admin_user_grants(request, user_id: int):
+    def operation(actor, organization, payload):
+        if request.method == "DELETE":
+            profile = remove_grant(
+                actor=actor,
+                organization=organization,
+                user_id=user_id,
+                key=payload.get("permission", ""),
+                reason=payload.get("reason", ""),
+            )
+        else:
+            profile = grant_permission(
+                actor=actor,
+                organization=organization,
+                user_id=user_id,
+                key=payload.get("permission", ""),
+                reason=payload.get("reason", ""),
+                expires_at=_expiry(payload),
+                mode=payload.get("mode", PermissionGrant.Mode.GRANT),
+            )
+        return JsonResponse({"user": account_payload(profile)})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_roles(request):
+    def operation(actor, organization, payload):
+        role = create_role(
+            actor=actor,
+            organization=organization,
+            name=payload.get("name", ""),
+            description=payload.get("description", ""),
+            base_slug=payload.get("baseSlug", ""),
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"role": {"slug": role.slug, "name": role.name}}, status=201)
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["PUT", "DELETE"])
+def admin_role_permission(request, slug: str, key: str):
+    def operation(actor, organization, payload):
+        role = set_role_permission(
+            actor=actor,
+            organization=organization,
+            slug=slug,
+            key=key,
+            held=request.method == "PUT",
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"role": {"slug": role.slug, "name": role.name}})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+def admin_organization(request):
+    def operation(actor, organization, payload):
+        updated = update_organization(
+            actor=actor,
+            organization=organization,
+            changes={k: v for k, v in payload.items() if k in {"name", "maxQueuedAnalyses"}},
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"organization": {"id": str(updated.id), "name": updated.name, "slug": updated.slug}})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_owner_transfer(request):
+    def operation(actor, organization, payload):
+        updated = transfer_ownership(
+            actor=actor,
+            organization=organization,
+            target_user_id=int(payload.get("targetUserId") or 0),
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"organization": {"id": str(updated.id), "ownerUserId": updated.owner_id}})
 
     return _write(request, operation)

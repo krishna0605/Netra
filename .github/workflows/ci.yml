@@ -90,6 +90,7 @@ jobs:
           apps.forensics.tests.test_admin_audit
           apps.forensics.tests.test_admin_write_path
           apps.forensics.tests.test_permission_resolution
+          apps.forensics.tests.test_admin_permissions_api
           apps.forensics.tests.test_user_provisioning
           apps.forensics.tests.test_jwt_verification
 
