@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { ACTIVITY, AUDIT, CAPABILITIES, ORGANIZATION, PERMISSIONS, ROLES, SESSIONS, USERS } from "../src/features/administration/data/mock";
 
 type Role = "Admin" | "Investigator";
 type Aal = "aal1" | "aal2";
@@ -63,9 +64,15 @@ function profile(role: Role, aal: Aal, enrollmentRequired: boolean) {
     department: "Netra Test Organization",
     role,
     aal,
-    mfaPolicy: "admin_required",
+    mfaPolicy: "all_required",
     mfaEnrollmentRequired: enrollmentRequired,
     privilegedAdminReady: role === "Admin" && aal === "aal2",
+    account: { active: true, mustChangePassword: false, mfaRequired: true, mfaResetRequired: false },
+    assuranceLevel: aal,
+    workspaces: {
+      investigation: { available: true, requiredAal: "aal2" },
+      administration: { available: role === "Admin", permission: "manage_users", requiredAal: "aal2", stepUpRequired: true },
+    },
     organization: { id: organizationId, name: "Netra", slug: "netra" },
     capabilities: { sse: { key: "sse", implemented: true, enabled: false, state: "disabled", reason: "Disabled in browser fixtures." } },
     deployment: {
@@ -115,6 +122,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 export async function installNetraFixture(page: Page, options: { role: Role; aal: Aal; verifiedFactor: boolean; enrollmentRequired?: boolean }) {
   const storedSession = session(options.aal, options.verifiedFactor);
   let authMeRequests = 0;
+  let activeWorkspace: "investigation" | "administration" = "investigation";
   await page.addInitScript((value) => {
     window.sessionStorage.setItem("sb-netra-auth-auth-token", JSON.stringify(value));
   }, storedSession);
@@ -152,6 +160,41 @@ export async function installNetraFixture(page: Page, options: { role: Role; aal
       await fulfillJson(route, profile(options.role, options.aal, options.enrollmentRequired ?? false));
       return;
     }
+    if (path === "/auth/context") {
+      const body = route.request().postDataJSON() as { workspace?: "investigation" | "administration" } | null;
+      if (body?.workspace) activeWorkspace = body.workspace;
+      await fulfillJson(route, {
+        context: {
+          contextId: "33333333-3333-4333-8333-333333333333",
+          activeWorkspace,
+          allowedWorkspaces: options.role === "Admin" ? ["investigation", "administration"] : ["investigation"],
+          assuranceLevel: "aal2",
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        },
+      }, route.request().method() === "POST" ? 201 : 200);
+      return;
+    }
+    if (path === "/auth/mfa-complete" || path === "/auth/password-complete") {
+      await fulfillJson(route, { status: "complete" });
+      return;
+    }
+    if (path === "/admin/v1/session") {
+      await fulfillJson(route, {
+        userId: 1, name: "Synthetic Officer", email: "officer@example.test", role: "Admin", roleSlug: "admin",
+        isOwner: true, aal: "aal2", permissions: ["manage_users", "view"],
+        organization: { id: ORGANIZATION.id, name: ORGANIZATION.name, slug: ORGANIZATION.slug },
+      });
+      return;
+    }
+    if (path === "/admin/v1/directory") {
+      await fulfillJson(route, {
+        users: USERS, sessions: SESSIONS, activity: ACTIVITY, audit: AUDIT, roles: ROLES,
+        organization: ORGANIZATION, permissions: PERMISSIONS, capabilities: CAPABILITIES,
+        sources: { identityProvider: "supabase", sessions: "live", audit: "live" },
+      });
+      return;
+    }
     if (path === "/cases") {
       await fulfillJson(route, { results: [caseRecord] });
       return;
@@ -180,5 +223,5 @@ export const fixtureRoutes = {
   evidence: "/app/v/1b438ac1-72e9-4413-a28d-cc87ea35ab54",
   reports: "/app/v/dca32a39-8348-4f14-b62a-fdba9987e234",
   settings: "/app/v/4c1bed57-4a3b-4c98-a7ee-778b5500eb91",
-  admin: "/app/admin/users",
+  admin: "/administration",
 };

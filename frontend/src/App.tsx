@@ -1,11 +1,13 @@
 import { lazy, Suspense } from "react";
+import { BrowserRouter } from "react-router-dom";
 
 import { CapabilityProvider } from "./lib/CapabilityProvider";
 
 const NetraConsole = lazy(() => import("./features/console/NetraConsole"));
 const AuthApplication = lazy(() => import("./features/auth/AuthApplication"));
+const PublicNotFoundPage = lazy(() => import("./public/PublicSite").then((module) => ({ default: module.PublicNotFoundPage })));
 
-const AUTH_ROUTE_PATTERN = /^\/(?:login|auth(?:\/|$))/;
+const AUTH_ROUTE_PATTERN = /^\/login(?:\/|$)/;
 
 function AppLoadingScreen() {
   return (
@@ -20,13 +22,14 @@ function AppLoadingScreen() {
 }
 
 export default function App() {
-  const RouteApplication = AUTH_ROUTE_PATTERN.test(window.location.pathname) ? AuthApplication : NetraConsole;
+  const pathname = window.location.pathname;
+  const RouteApplication = AUTH_ROUTE_PATTERN.test(pathname) ? AuthApplication : pathname === "/" ? NetraConsole : null;
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <CapabilityProvider>
         <Suspense fallback={<AppLoadingScreen />}>
-          <RouteApplication />
+          {RouteApplication ? <RouteApplication /> : <BrowserRouter><PublicNotFoundPage /></BrowserRouter>}
         </Suspense>
       </CapabilityProvider>
     </>

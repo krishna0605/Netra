@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { clearNetraSessionState, supabase, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { AuthContext, type NetraAuthState, type NetraProfile } from "./AuthContext";
 import { requiredMfaStep } from "./authPolicy";
+import { clearConsoleContext, clearLastConsoleWorkspace, createConsoleContext, revokeConsoleContext } from "../../lib/consoleContext";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const AUTH_RESOLUTION_TIMEOUT_MS = 10_000;
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mountedRef.current) setState({ status: "signed_out" });
       return false;
     }
-    if (event === "PASSWORD_RECOVERY" || window.location.pathname === "/auth/recovery" || window.location.pathname === "/auth/invite") {
+    if (event === "PASSWORD_RECOVERY" || window.location.pathname === "/login/recovery" || window.location.pathname === "/login/invite") {
       if (mountedRef.current) setState({ status: "recovery", session });
       return true;
     }
@@ -84,6 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return false;
         }
         const profile = payload as NetraProfile;
+        if (profile.account?.mustChangePassword) {
+          if (mountedRef.current && generation === resolutionGenerationRef.current) setState({ status: "recovery", session });
+          return true;
+        }
         const [assurance, factorsResult] = await withTimeout(Promise.all([
           supabase!.auth.mfa.getAuthenticatorAssuranceLevel(),
           supabase!.auth.mfa.listFactors(),
@@ -106,7 +111,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState({ status: "mfa_challenge_required", session, profile, factors });
           return true;
         }
-        if (profile.role === "Admin") {
+        if (profile.account?.mfaResetRequired) {
+          const completed = await fetch(`${API_BASE}/auth/mfa-complete`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}`, Accept: "application/json" },
+          });
+          if (!completed.ok) {
+            setState({ status: "profile_denied", code: "mfa_completion_failed" });
+            return false;
+          }
+        }
+        try {
+          await createConsoleContext(session.access_token);
+        } catch {
+          setState({ status: "profile_denied", code: "console_context_failed" });
+          return false;
+        }
+        if (profile.workspaces?.administration?.available === true) {
           setState({ status: "privileged", session, profile: { ...profile, aal: "aal2" }, aal: "aal2" });
           return true;
         }
@@ -162,8 +183,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [resolveSession]);
 
   const signOut = useCallback(async () => {
-    if (supabase) await supabase.auth.signOut({ scope: "global" });
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) await revokeConsoleContext(data.session.access_token).catch(() => clearConsoleContext());
+      await supabase.auth.signOut({ scope: "global" });
+    }
     clearNetraSessionState();
+    clearConsoleContext();
+    clearLastConsoleWorkspace();
     resolvedUserRef.current = null;
     resolutionRef.current = null;
     resolutionGenerationRef.current += 1;

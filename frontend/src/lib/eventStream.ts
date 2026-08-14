@@ -17,6 +17,7 @@ type EventStreamOptions = {
   onUnauthorized?: () => void;
   fetchImpl?: typeof fetch;
   random?: () => number;
+  getConsoleContextId?: () => string;
 };
 
 export function parseEventStreamFrame(frame: string) {
@@ -65,6 +66,7 @@ export async function runBoundedEventStream(options: EventStreamOptions) {
         headers: {
           Accept: "text/event-stream",
           Authorization: `Bearer ${token}`,
+          ...(options.getConsoleContextId?.() ? { "X-Netra-Context-ID": options.getConsoleContextId() } : {}),
           ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
         },
         cache: "no-store",

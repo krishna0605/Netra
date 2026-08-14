@@ -4,9 +4,9 @@ import { expect, test } from "@playwright/test";
 const reviewedRoutes = [
   ["/", /See the traffic/i],
   ["/login", /Enter the investigation console/i],
-  ["/auth/forgot-password", /Reset your password/i],
-  ["/auth/recovery", /Choose a new password/i],
-  ["/auth/invite", /Complete your account/i],
+  ["/login/forgot-password", /Reset your password/i],
+  ["/login/recovery", /Choose a new password/i],
+  ["/login/invite", /Complete your account/i],
 ] as const;
 
 for (const [path, heading] of reviewedRoutes) {
@@ -55,7 +55,7 @@ test("disabled password recovery makes no provider request", async ({ page }) =>
   page.on("request", (request) => {
     if (/\/auth\/v1\/recover/.test(request.url())) recoveryRequests.push(request.url());
   });
-  await page.goto("/auth/forgot-password");
+  await page.goto("/login/forgot-password");
   await expect(page.getByText(/Password recovery requires an approved custom SMTP domain/i)).toBeVisible();
   await expect(page.getByLabel("Email")).toHaveCount(0);
   expect(recoveryRequests).toEqual([]);
@@ -73,6 +73,6 @@ test("authentication routes never open WebSockets", async ({ page }) => {
     if (!/127\.0\.0\.1:4173/.test(socket.url())) applicationSockets.push(socket.url());
   });
   await page.goto("/login");
-  await page.goto("/auth/forgot-password");
+  await page.goto("/login/forgot-password");
   expect(applicationSockets).toEqual([]);
 });

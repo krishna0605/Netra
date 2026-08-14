@@ -5,23 +5,23 @@ import { AuthProvider } from "../auth/AuthProvider";
 import { caseWorkspaceRoute } from "./ConsoleCore";
 import { cn } from "../../lib/utils";
 import { useCapabilities } from "../../lib/useCapabilities";
-import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "../auth/AuthPages";
-import { Link, Navigate, NavLink, Route, BrowserRouter as Router, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, MemoryRouter as Router, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { MetadataRow } from "./reports/ReportPages";
 import { MfaPage } from "../auth/MfaPage";
 import { motion, MotionConfig } from "framer-motion";
 import { NetraProvider } from "./ConsoleProvider";
 import { PageFrame } from "./reports/ReportPages";
-import { PublicAboutPage, PublicContactPage, PublicHomePage, PublicNotFoundPage, PublicPrivacyPage, PublicTermsPage, PublicUpdatesPage } from "../../public/PublicSite";
+import { PublicHomePage } from "../../public/PublicSite";
 import { RouteErrorBoundary } from "../../components/RouteErrorBoundary";
 import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { toast, Toaster } from "sonner";
 import { type DeploymentModuleKey } from "./ConsoleCore";
-import { lazy, Suspense, type FormEvent, type ReactNode, useState } from "react";
+import { lazy, Suspense, type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { type Language } from "../../lib/types";
 import { useAuth } from "../auth/AuthContext";
 import { useNetra } from "./ConsoleCore";
 import { VIEW_REFS } from "./ConsoleCore";
+import { getLastConsoleWorkspace, rememberConsoleWorkspace, switchConsoleWorkspace } from "../../lib/consoleContext";
 
 const UploadPage = lazy(() => import("./evidence/EvidencePages").then((module) => ({ default: module.UploadPage })));
 const TrafficPages = {
@@ -49,7 +49,7 @@ const SensorsPage = lazy(() => import("./operations/OperationsPages").then((modu
 const SchedulesPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.SchedulesPage })));
 const RetentionPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.RetentionPage })));
 const SystemPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.SystemPage })));
-const AdminUsersPage = lazy(() => import("../admin/AdminUsersPage"));
+const AdministrationWorkspace = lazy(() => import("../administration/EmbeddedApp"));
 
 export function App() {
   return (
@@ -58,26 +58,14 @@ export function App() {
         <TooltipProvider>
           <NetraProvider>
             <div className="app-theme">
-              <Router>
+              <Router initialEntries={["/"]}>
             <Toaster position="top-right" />
             <Suspense fallback={<RouteLoadingScreen />}>
             <Routes>
-              <Route path="/" element={<PublicHomePage languageControl={<LanguageControl />} />} />
-              <Route path="/about" element={<PublicAboutPage languageControl={<LanguageControl />} />} />
-              <Route path="/updates" element={<PublicUpdatesPage languageControl={<LanguageControl />} />} />
-              <Route path="/changelog" element={<Navigate to="/updates" replace />} />
-              <Route path="/contact" element={<PublicContactPage languageControl={<LanguageControl />} />} />
-              <Route path="/privacy" element={<PublicPrivacyPage languageControl={<LanguageControl />} />} />
-              <Route path="/terms" element={<PublicTermsPage languageControl={<LanguageControl />} />} />
-              <Route path="/demo" element={<Navigate to="/login" replace state={{ from: appViewRoute("upload") }} />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/auth/recovery" element={<RecoveryPage />} />
-              <Route path="/auth/invite" element={<InvitationPage />} />
-              <Route path="/auth/mfa" element={<MfaPage />} />
-              <Route path="/app/login" element={<Navigate to="/login" replace />} />
+              <Route path="/" element={<RootEntry />} />
               <Route path="/app/*" element={<RequireAuth><AppShell /></RequireAuth>} />
-              <Route path="*" element={<PublicNotFoundPage languageControl={<LanguageControl />} />} />
+              <Route path="/administration/*" element={<RequireAuth><AdministrationEntry /></RequireAuth>} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </Suspense>
               </Router>
@@ -89,8 +77,110 @@ export function App() {
   );
 }
 
+function AdministrationEntry() {
+  const navigate = useNavigate();
+  const { state, signOut } = useAuth();
+  if (!("profile" in state) || !("session" in state) || !state.profile.workspaces?.administration?.available) {
+    return <Navigate to="/" replace />;
+  }
+  return (
+    <AdministrationWorkspace
+      profile={{
+        userId: state.session.user.id,
+        email: state.session.user.email ?? "",
+        displayName: state.profile.user,
+        role: state.profile.role,
+        organizationName: state.profile.organization.name,
+        isOwner: false,
+        isAdministrative: true,
+      }}
+      onExit={() => navigate("/", { replace: true })}
+      onSignOut={signOut}
+    />
+  );
+}
+
+function LeaveForLogin({ path }: { path: string }) {
+  useEffect(() => {
+    window.location.replace(path);
+  }, [path]);
+  return <RouteLoadingScreen />;
+}
+
+function RootEntry() {
+  const { state } = useAuth();
+
+  if (state.status === "initializing" || state.status === "resolving_profile") return <RouteLoadingScreen />;
+  if (state.status === "signed_out" || state.status === "profile_denied") {
+    return <PublicHomePage languageControl={<LanguageControl />} />;
+  }
+  if (state.status === "recovery") return <LeaveForLogin path="/login/recovery?required=1" />;
+  if (state.status === "mfa_enrollment_required" || state.status === "mfa_challenge_required") {
+    return <LeaveForLogin path="/login/mfa" />;
+  }
+  if (!("session" in state) || !("profile" in state)) return <RouteLoadingScreen />;
+  return <WorkspaceEntry state={state} />;
+}
+
+function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["state"], { session: unknown; profile: unknown }> }) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const restored = useRef(false);
+
+  const administration = state.profile.workspaces?.administration?.available === true;
+  const open = useCallback(async (workspace: "investigation" | "administration") => {
+    setBusy(true);
+    setError("");
+    try {
+      await switchConsoleWorkspace(state.session.access_token, workspace);
+      rememberConsoleWorkspace(workspace);
+      navigate(workspace === "administration" ? "/administration" : appViewRoute("upload"), { replace: true });
+    } catch {
+      setError("Netra could not open that workspace. Your access may have changed; sign in again.");
+    } finally {
+      setBusy(false);
+    }
+  }, [navigate, state.session.access_token]);
+
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const previous = getLastConsoleWorkspace();
+    if (!administration || previous === "investigation" || previous === "administration") {
+      const target = previous === "administration" && administration ? "administration" : "investigation";
+      void open(target);
+    }
+  }, [administration, open]);
+
+  if (!administration) {
+    return (
+      <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
+        <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+          <p className="text-sm text-muted">Your Investigation workspace is ready.</p>
+          {error ? <Alert>{error}</Alert> : null}
+          <Button className="mt-4 w-full" disabled>{busy ? "Opening…" : "Opening Investigation…"}</Button>
+        </section>
+      </main>
+    );
+  }
+  return (
+    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
+      <section className="auth-panel w-full max-w-3xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
+        <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Verified access</p>
+        <h1 className="mt-5 text-4xl font-normal text-strong">Choose a workspace.</h1>
+        <p className="mt-2 text-sm text-muted">Your available workspaces are resolved by the server from current permissions.</p>
+        {error ? <Alert>{error}</Alert> : null}
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <Button className="h-auto min-h-28 justify-start p-5 text-left" disabled={busy} onClick={() => void open("investigation")}>Investigation<br /><span className="text-xs font-normal">Cases, evidence, analysis and reports</span></Button>
+          <Button className="h-auto min-h-28 justify-start p-5 text-left" disabled={busy} onClick={() => void open("administration")}>Administration<br /><span className="text-xs font-normal">Users, roles, sessions and audit history</span></Button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const location = useLocation();
   const { state } = useAuth();
 
   if (state.status === "initializing" || state.status === "resolving_profile") {
@@ -106,12 +196,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (state.status === "signed_out" || state.status === "profile_denied") {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return <LeaveForLogin path="/login" />;
   }
   if (state.status === "mfa_enrollment_required" || state.status === "mfa_challenge_required") {
-    return <Navigate to="/auth/mfa" replace state={{ from: location.pathname }} />;
+    return <LeaveForLogin path="/login/mfa" />;
   }
-  if (state.status === "recovery") return <Navigate to="/auth/recovery" replace />;
+  if (state.status === "recovery") return <LeaveForLogin path="/login/recovery?required=1" />;
 
   return <>{children}</>;
 }
@@ -322,7 +412,6 @@ export function AppShell() {
               <Route path="settings" element={<Navigate to={appViewRoute("settings")} replace />} />
               <Route path="settings/technical-status" element={<Navigate to={appViewRoute("technicalStatus")} replace />} />
               <Route path="settings/security" element={<MfaPage allowAdditional />} />
-              <Route path="admin/users" element={<AdminUsersPage />} />
               <Route path="settings/sensors" element={<Navigate to={appViewRoute("sensors")} replace />} />
               <Route path="settings/schedules" element={<Navigate to={appViewRoute("schedules")} replace />} />
               <Route path="settings/integrations" element={<Navigate to={appViewRoute("integrations")} replace />} />

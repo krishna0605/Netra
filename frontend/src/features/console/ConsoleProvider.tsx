@@ -170,6 +170,7 @@ export function NetraProvider({ children }: { children: ReactNode }) {
     void runBoundedEventStream({
       url: `${API_BASE}/events/stream?caseRef=${encodeURIComponent(activeCaseRouteRef)}`,
       getAccessToken: () => session?.access_token ?? "",
+      getConsoleContextId: () => window.sessionStorage.getItem("netra-console-context-id") ?? "",
       signal: controller.signal,
       onInvalidate: scheduleRefresh,
       onUnauthorized: () => {

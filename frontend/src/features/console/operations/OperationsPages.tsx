@@ -47,7 +47,7 @@ export function SettingsPage() {
   const { deploymentAccess } = useNetra();
   const sections: { module: DeploymentModuleKey; title: string; description: string; href: string; icon: LucideIcon }[] = [
     { module: "system", title: "Technical Status", description: "Deployment health, workers, storage, database, ML artifact, and operational diagnostics.", href: appViewRoute("technicalStatus"), icon: Activity },
-    { module: "system", title: "User Administration", description: "AAL2-protected invitations, roles, account activation, MFA state, and Administrator transfer.", href: "/app/admin/users", icon: Fingerprint },
+    { module: "system", title: "User Administration", description: "AAL2-protected invitations, roles, account activation, MFA state, and Administrator transfer.", href: "/administration", icon: Fingerprint },
     { module: "system", title: "Account Security", description: "Enroll an additional authenticator and review the current MFA policy.", href: "/app/settings/security", icon: Fingerprint },
     { module: "sensors", title: "Sensors", description: "Enrollment, heartbeats, interfaces, groups, and bounded native-capture controls.", href: appViewRoute("sensors"), icon: Database },
     { module: "schedules", title: "Schedules", description: "One-time and recurring capture windows for enrolled external sensors.", href: appViewRoute("schedules"), icon: History },

@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+/* Fonts are self-hosted, copied from the investigator console so the two
+   surfaces render identically with no network dependency. */
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/ibm-plex-mono-latin.woff2") format("woff2");
+  font-weight: 100 700;
+  font-display: swap;
+  font-style: normal;
+}
+
+/* ---------------------------------------------------------------------------
+   Brand tokens — ported verbatim from frontend/src/index.css.
+   Do not diverge these values; the two consoles are one product.
+   --------------------------------------------------------------------------- */
+@theme {
+  --color-charcoal-page: #2e2e2e;
+  --color-charcoal-deep: #1d1d1d;
+  --color-charcoal-panel: #242424;
+  --color-charcoal-raised: #2b2b2b;
+  --color-cream-primary: #e9e0d1;
+  --color-cream-bright: #f0e8da;
+  --color-sand-muted: #ccbd9f;
+  --color-sand-surface: #d6ccba;
+  --color-signal: #fa6c34;
+  --color-signal-dark: #de5d35;
+
+  /* Softened from the investigator console's values. Admin screens are dense
+     with tables and panels; at the original weight every edge competed. */
+  --color-hairline: rgba(233, 224, 209, 0.1);
+  --color-hairline-strong: rgba(233, 224, 209, 0.2);
+
+  /* Dividers may be faint; the edge of something you can type into may not.
+     WCAG treats a control boundary as meaningful non-text content at 3:1,
+     and the hairlines above sit at 1.7:1. Measured, not estimated. */
+  --color-control-edge: rgba(233, 224, 209, 0.42);
+
+  /* Reserved status colours, desaturated so they read as state and never
+     compete with the accent. Always paired with a word, never colour alone. */
+  --color-state-ok: #7fb488;
+  --color-state-warn: #d9a851;
+  --color-state-crit: #e2705f;
+  --color-state-info: #85a9cc;
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* One radius scale, applied consistently. */
+  --radius-panel: 6px;
+  --radius-control: 4px;
+  --radius-chip: 3px;
+
+  /* Panels lift off the ground rather than being outlined boxes. */
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.16);
+  --shadow-raised: 0 8px 28px rgba(0, 0, 0, 0.44);
+}
+
+.administration-theme {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  color: var(--color-cream-primary);
+  background: var(--color-charcoal-deep);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.administration-theme,
+.administration-theme * {
+  box-sizing: border-box;
+}
+
+.administration-theme {
+  min-height: 100vh;
+  min-width: 320px;
+  color: var(--color-cream-primary);
+  background: var(--color-charcoal-deep);
+}
+
+.administration-theme a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.administration-theme button,
+.administration-theme input,
+.administration-theme textarea,
+.administration-theme select {
+  font: inherit;
+}
+
+.administration-theme ::selection {
+  color: #0d0d0d;
+  background: var(--color-signal);
+}
+
+.administration-theme :focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A single soft lift behind the top of the content, instead of a grid. Enough
+   to keep the page from reading as dead flat; not enough to notice. */
+.administration-theme {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 380px at 50% -8%, rgba(233, 224, 209, 0.035), transparent 72%),
+    var(--color-charcoal-deep);
+}
+
+.administration-theme h1,
+.administration-theme h2,
+.administration-theme h3,
+.administration-theme h4 {
+  letter-spacing: -0.02em;
+}
+
+/* Numeric columns must line up — every table here is scanned, not read, and
+   ragged digits defeat that. */
+.administration-theme table,
+.administration-theme time,
+.administration-theme code,
+.administration-theme .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.administration-theme ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.administration-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.administration-theme ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: var(--color-hairline-strong);
+}
+
+.administration-theme ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-sand-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .administration-theme *,
+  .administration-theme *::before,
+  .administration-theme *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -9,9 +9,15 @@ const profile = (role: string): NetraProfile => ({
   department: "Netra Test Organization",
   role,
   aal: "aal1",
-  mfaPolicy: "admin_required",
-  mfaEnrollmentRequired: role === "Admin",
+  mfaPolicy: "all_required",
+  mfaEnrollmentRequired: true,
   privilegedAdminReady: false,
+  account: { active: true, mustChangePassword: false, mfaRequired: true, mfaResetRequired: false },
+  assuranceLevel: "aal1",
+  workspaces: {
+    investigation: { available: true, requiredAal: "aal2" },
+    administration: { available: role === "Admin", permission: "manage_users", requiredAal: "aal2", stepUpRequired: true },
+  },
   organization: { id: "org", name: "Netra", slug: "netra" },
   capabilities: {},
   deployment: {
@@ -38,8 +44,8 @@ const factor: TotpFactor = {
 };
 
 describe("MFA policy", () => {
-  it("requires enrollment for an administrator without a verified factor", () => {
-    expect(requiredMfaStep(profile("Admin"), { currentLevel: "aal1", nextLevel: "aal1" }, [])).toBe("enroll");
+  it("requires enrollment for every user without a verified factor", () => {
+    expect(requiredMfaStep(profile("Investigator"), { currentLevel: "aal1", nextLevel: "aal1" }, [])).toBe("enroll");
   });
 
   it("requires a challenge whenever an enrolled session can reach aal2", () => {

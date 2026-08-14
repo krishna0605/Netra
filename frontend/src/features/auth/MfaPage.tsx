@@ -21,8 +21,11 @@ export function MfaPage({ allowAdditional = false }: { allowAdditional?: boolean
   const title = useMemo(() => enrollmentRequired ? "Set up an authenticator." : "Verify your authenticator.", [enrollmentRequired]);
 
   if (!supabase) return <Navigate to="/login" replace />;
+  if (state.status === "initializing" || state.status === "resolving_profile") {
+    return <main className="auth-shell min-h-screen" id="main-content" aria-busy="true" />;
+  }
   if (!allowAdditional && !["mfa_enrollment_required", "mfa_challenge_required"].includes(state.status)) {
-    return <Navigate to="/app" replace />;
+    return <Navigate to="/" replace />;
   }
 
   async function beginEnrollment() {
@@ -116,7 +119,7 @@ export function MfaPage({ allowAdditional = false }: { allowAdditional?: boolean
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-4 text-sm">
-          {allowAdditional ? <Link className="font-semibold text-accent underline" to="/app">Return to console</Link> : null}
+          {allowAdditional ? <Link className="font-semibold text-accent underline" to="/">Return to console</Link> : null}
           <button type="button" className="font-semibold text-accent underline" onClick={() => void signOut()}>Sign out</button>
         </div>
       </section>

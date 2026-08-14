@@ -382,9 +382,11 @@ export function apiWorkspace(routeRef: string, force = false): Promise<CaseWorks
 
 export function netraHeaders(extra?: HeadersInit): HeadersInit {
   const token = getCurrentAccessToken();
+  const contextId = window.sessionStorage.getItem("netra-console-context-id") ?? "";
   return {
     ...(extra ?? {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(contextId ? { "X-Netra-Context-ID": contextId } : {}),
   };
 }
 

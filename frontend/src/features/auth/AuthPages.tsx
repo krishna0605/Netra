@@ -46,7 +46,7 @@ export function ForgotPasswordPage() {
     setBusy(true);
     try {
       await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-        redirectTo: `${window.location.origin}/auth/recovery`,
+        redirectTo: `${window.location.origin}/login/recovery`,
       });
       setSubmitted(true);
     } catch {
@@ -90,7 +90,8 @@ export function ForgotPasswordPage() {
 function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
   const { available, loaded, reason } = useCapabilities();
   const capabilityKey = mode === "invite" ? "user_invitations" : "password_recovery";
-  const featureEnabled = available(capabilityKey);
+  const requiredChange = mode === "recovery" && new URLSearchParams(window.location.search).get("required") === "1";
+  const featureEnabled = requiredChange || available(capabilityKey);
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -99,7 +100,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const checks = useMemo(() => passwordChecks(password), [password]);
-  const acceptedLink = mode === "invite" || window.location.search.includes("code=") || window.location.hash.includes("type=recovery");
+  const acceptedLink = requiredChange || mode === "invite" || window.location.search.includes("code=") || window.location.hash.includes("type=recovery");
 
   useEffect(() => {
     if (!loaded || !featureEnabled || !supabase) return undefined;
@@ -136,6 +137,18 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
       setError("The password could not be updated. Request a new secure link.");
       return;
     }
+    const { data } = await supabase.auth.getSession();
+    if (data.session) {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? "/api"}/auth/password-complete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${data.session.access_token}`, Accept: "application/json" },
+      });
+      if (!response.ok) {
+        setBusy(false);
+        setError("The password changed, but Netra could not activate the console. Sign in again or contact an administrator.");
+        return;
+      }
+    }
     await supabase.auth.signOut({ scope: "global" });
     clearNetraSessionState();
     navigate("/login", { replace: true, state: { passwordUpdated: true } });
@@ -158,7 +171,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
       {featureEnabled && !checking && !sessionReady ? (
         <div className="mt-5 grid gap-4" role="alert">
           <Alert>This secure link is invalid, already used, or expired.</Alert>
-          <Link className="text-sm font-semibold text-accent underline" to={mode === "invite" ? "/login" : "/auth/forgot-password"}>
+          <Link className="text-sm font-semibold text-accent underline" to={mode === "invite" ? "/login" : "/login/forgot-password"}>
             {mode === "invite" ? "Return to sign in" : "Request a new recovery link"}
           </Link>
         </div>

@@ -9,9 +9,15 @@ export type NetraProfile = {
   department: string;
   role: string;
   aal: "aal1" | "aal2";
-  mfaPolicy: "admin_required" | "optional";
+  mfaPolicy: "all_required" | "admin_required" | "optional";
   mfaEnrollmentRequired: boolean;
   privilegedAdminReady: boolean;
+  account: { active: boolean; mustChangePassword: boolean; mfaRequired: boolean; mfaResetRequired: boolean };
+  assuranceLevel: "aal1" | "aal2";
+  workspaces: {
+    investigation: { available: boolean; requiredAal: "aal2" };
+    administration: { available: boolean; permission: "manage_users"; requiredAal: "aal2"; stepUpRequired: boolean };
+  };
   organization: { id: string; name: string; slug: string };
   capabilities: CapabilityMap;
   deployment: {

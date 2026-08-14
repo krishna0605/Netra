@@ -12,7 +12,7 @@ import { MfaPage } from "./MfaPage";
 
 
 function safeDestination(value: string | null) {
-  return value?.startsWith("/app") ? value : "/app/";
+  return value === "/" ? value : "/";
 }
 
 
@@ -59,7 +59,7 @@ function LoginPage() {
             <div className="grid gap-1"><label htmlFor="login-email" className="text-sm font-semibold">Email</label><Input id="login-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
             <div className="grid gap-1"><label htmlFor="login-password" className="text-sm font-semibold">Password</label><Input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
             <Button type="submit" disabled={busy || !email || !password} aria-busy={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-            {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link> : null}
+            {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/login/forgot-password">Forgot password?</Link> : null}
           </form>
         )}
       </section>
@@ -69,7 +69,7 @@ function LoginPage() {
 
 
 function LeaveAuthApplication() {
-  window.location.replace("/app/");
+  window.location.replace("/");
   return <main id="main-content" aria-busy="true"><p role="status">Opening the investigation console…</p></main>;
 }
 
@@ -81,11 +81,11 @@ export default function AuthApplication() {
         <Toaster position="top-right" />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/auth/recovery" element={<RecoveryPage />} />
-          <Route path="/auth/invite" element={<InvitationPage />} />
-          <Route path="/auth/mfa" element={<MfaPage />} />
-          <Route path="/app/*" element={<LeaveAuthApplication />} />
+          <Route path="/login/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/login/recovery" element={<RecoveryPage />} />
+          <Route path="/login/invite" element={<InvitationPage />} />
+          <Route path="/login/mfa" element={<MfaPage />} />
+          <Route path="/" element={<LeaveAuthApplication />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>

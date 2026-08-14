@@ -2,11 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const publicRoutes = [
   ["/", /See the traffic/i],
-  ["/about", /Build conclusions from evidence/i],
-  ["/updates", /Cyber risk,\s*seen clearly/i],
-  ["/contact", /Bring a network-evidence workflow/i],
-  ["/privacy", /^Privacy$/i],
-  ["/terms", /^Terms$/i],
+  ["/login", /Enter the investigation console/i],
 ] as const;
 
 for (const [path, heading] of publicRoutes) {
@@ -16,25 +12,20 @@ for (const [path, heading] of publicRoutes) {
   });
 }
 
-test("changelog redirects to updates", async ({ page }) => {
-  await page.goto("/changelog");
-  await expect(page).toHaveURL(/\/updates$/, { timeout: 15_000 });
-});
-
 test("unknown routes use the NETRA 404", async ({ page }) => {
   await page.goto("/missing-route");
   await expect(page.getByText("404 / ROUTE NOT FOUND")).toBeVisible();
 });
 
-test("protected operations redirect to sign in", async ({ page }) => {
+test("guessed protected operations return the generic 404", async ({ page }) => {
   await page.addInitScript(() => {
     window.sessionStorage.clear();
     window.localStorage.clear();
   });
   await page.route("https://netra-auth.test/**", (route) => route.abort());
   await page.goto("/app/upload");
-  await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: /Enter the investigation console/i })).toBeVisible();
+  await expect(page.getByText("404 / ROUTE NOT FOUND")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /investigation console/i })).toHaveCount(0);
 });
 
 test("public interactions remain keyboard accessible", async ({ page }) => {

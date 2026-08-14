@@ -110,7 +110,7 @@ function BrandLockup() {
 
 function PublicHeader({ languageControl }: PublicPageProps) {
   const [open, setOpen] = useState(false);
-  const links = [["Home", "/"], ["About", "/about"], ["Updates", "/updates"]] as const;
+  const links = [["Home", "/"]] as const;
   return (
     <header className="public-header">
       <Link to="/" className="brand-block" aria-label="NETRA home">
@@ -121,7 +121,7 @@ function PublicHeader({ languageControl }: PublicPageProps) {
       </nav>
       <div className="header-actions">
         {languageControl}
-        <Button asChild className="clip-button header-cta"><Link to="/login" state={{ from: "/app/" }}>Open console</Link></Button>
+        <Button asChild className="clip-button header-cta"><a href="/login">Open console</a></Button>
         <button className="mobile-menu-button" type="button" aria-label="Toggle navigation" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? <X /> : <Menu />}
         </button>
@@ -130,7 +130,6 @@ function PublicHeader({ languageControl }: PublicPageProps) {
         {open && (
           <motion.nav className="mobile-public-nav" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
             {links.map(([label, href]) => <NavLink key={href} to={href} onClick={() => setOpen(false)}>{label}</NavLink>)}
-            <Link to="/contact" onClick={() => setOpen(false)}>Contact</Link>
           </motion.nav>
         )}
       </AnimatePresence>
@@ -301,7 +300,7 @@ function PublicFooter() {
           <SectionLabel>Ready for evidence</SectionLabel>
           <h2>Trace the signal.<br />Build the case.</h2>
           <p>Connect evidence, preserve context, and move from packet-level facts to an investigator-readable report.</p>
-          <Button asChild className="clip-button cream-button"><Link to="/login" state={{ from: "/app/" }}><TextRoll>Start investigation</TextRoll></Link></Button>
+          <Button asChild className="clip-button cream-button"><a href="/login"><TextRoll>Start investigation</TextRoll></a></Button>
         </div>
         <div className="footer-links">
           <div className="footer-arcs" aria-hidden="true"><svg viewBox="0 0 550 150" preserveAspectRatio="none">{[40, 95, 150, 205, 260, 315, 370].map((start, index) => <path key={start} d={`M${start} 150 Q${start + 100 + index * 6} ${-32 - index * 4} ${520 - index * 7} 150`} />)}</svg></div>
@@ -342,7 +341,7 @@ export function PublicHomePage({ languageControl }: PublicPageProps) {
             <motion.div {...reveal(0)}><SectionLabel>Network evidence, structured for investigation</SectionLabel></motion.div>
             <motion.h1 {...reveal(.1)}>See the traffic.<br /><em>Build</em><br /><em>the case.</em></motion.h1>
             <motion.p {...reveal(.2)}>NETRA turns packet captures into timelines, protocol evidence, explainable threat signals, custody history, and multilingual forensic reports.</motion.p>
-            <motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button hero-button"><Link to="/login" state={{ from: "/app/" }}><TextRoll>Open investigation console</TextRoll></Link></Button></motion.div>
+            <motion.div {...reveal(.3)}><Button asChild className="clip-button cream-button hero-button"><a href="/login"><TextRoll>Open investigation console</TextRoll></a></Button></motion.div>
             <div className="layer-accordion">
               {[["Capture layer", "Register evidence, calculate identity, and preserve source context."], ["Analysis layer", "Decode protocols, reconstruct sessions, and compare behaviour."], ["Investigation layer", "Review alerts, anomalies, attack paths, notes, and custody."], ["Reporting layer", "Generate authenticated exports and multilingual case summaries."]].map(([title, body], index) => (
                 <button type="button" key={title} className={activeLayer === index ? "active" : ""} onClick={() => setActiveLayer(index)} aria-expanded={activeLayer === index}>
