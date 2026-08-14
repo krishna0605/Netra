@@ -10,6 +10,29 @@ ADMIN_ORIGIN = FRONTEND_ORIGIN
 API_ORIGIN = "https://netra-api-production.up.railway.app"
 SUPABASE_ORIGIN = "https://frjzewpyjgirorbguegm.supabase.co"
 
+# Keys that let a platform decide, on its own, not to build a commit. Netra's
+# release contract is exact-SHA parity: the same commit must reach Vercel, the
+# Railway API and the Railway worker, and a release is only successful when all
+# of them report it. A path filter breaks that silently — the platform reports
+# success while continuing to serve an older commit, which is precisely how
+# production came to serve 7eb0e91 while main was 8fd9419.
+SKIP_KEYS = frozenset({"watchPatterns", "ignoreCommand"})
+
+
+def skip_keys(document: object, path: str = "") -> list[str]:
+    """Every deployment-skipping key anywhere in a configuration document."""
+    found: list[str] = []
+    if isinstance(document, dict):
+        for key, value in document.items():
+            here = f"{path}.{key}" if path else key
+            if key in SKIP_KEYS:
+                found.append(here)
+            found.extend(skip_keys(value, here))
+    elif isinstance(document, list):
+        for index, value in enumerate(document):
+            found.extend(skip_keys(value, f"{path}[{index}]"))
+    return found
+
 
 def main() -> int:
     api = json.loads(Path("railway.json").read_text(encoding="utf-8"))
@@ -17,10 +40,13 @@ def main() -> int:
     vercel = json.loads(Path("vercel.json").read_text(encoding="utf-8"))
     environment = Path(".env.supabase.production.example").read_text(encoding="utf-8")
 
+    for name, document in (("railway.json", api), ("railway.worker.json", worker), ("vercel.json", vercel)):
+        for found in skip_keys(document):
+            raise ValueError(f"{name} must deploy every main commit; remove {found}")
+
     if api["build"] != {
         "builder": "DOCKERFILE",
         "dockerfilePath": "backend/Dockerfile",
-        "watchPatterns": ["backend/**", "railway.json"],
     }:
         raise ValueError("Railway API must build only from the reviewed API Docker contract")
     if api["deploy"].get("preDeployCommand") != ["python manage.py predeploy"]:
@@ -39,8 +65,6 @@ def main() -> int:
     if "run_postgres_worker" not in worker_image:
         raise ValueError("Railway worker must use the PostgreSQL row-lock consumer")
 
-    if vercel.get("ignoreCommand") != "node scripts/vercel-ignore-build.mjs":
-        raise ValueError("The Vercel project must use the reviewed change-aware build filter")
     if vercel.get("buildCommand") != "node scripts/build-vercel-site.mjs":
         raise ValueError("The Vercel project must build both browser workspaces atomically")
     rewrites = {(row["source"], row["destination"]) for row in vercel.get("rewrites", [])}
@@ -58,15 +82,15 @@ def main() -> int:
         if origin not in csp:
             raise ValueError(f"The Vercel CSP is missing exact origin {origin}")
 
-    for retired_config in (Path("frontend/vercel.json"), Path("admin/vercel.json")):
+    for retired_config in (
+        Path("frontend/vercel.json"),
+        Path("admin/vercel.json"),
+        # The change-aware build filter is retired, not disabled. Leaving the
+        # script in the tree invites a future commit to wire it back up.
+        Path("scripts/vercel-ignore-build.mjs"),
+    ):
         if retired_config.exists():
-            raise ValueError(f"Second-project Vercel config must not exist: {retired_config}")
-    ignore_script = Path("scripts/vercel-ignore-build.mjs").read_text(encoding="utf-8")
-    if "VERCEL_GIT_PREVIOUS_SHA" not in ignore_script:
-        raise ValueError("The Vercel build filter must compare exact Vercel SHAs")
-    for expected_path in ('"frontend"', '"admin"', '"vercel.json"'):
-        if expected_path not in ignore_script:
-            raise ValueError(f"The Vercel build filter does not watch {expected_path}")
+            raise ValueError(f"Retired deployment file must not exist: {retired_config}")
 
     required_assignments = {
         "NETRA_AUTH_INVITATIONS_ENABLED": "0",
@@ -94,7 +118,7 @@ def main() -> int:
         if re.search(rf"^{retired}=", environment, re.MULTILINE):
             raise ValueError(f"Retired deployment variable is assigned: {retired}")
 
-    print("Validated the main-only Railway, Vercel, Supabase, and disabled-email deployment contract.")
+    print("Validated the exact-SHA Railway, Vercel, Supabase, and disabled-email deployment contract.")
     return 0
 
 
