@@ -18,6 +18,21 @@ class Organization(TimeStampedModel):
     name = models.CharField(max_length=120)
     slug = models.SlugField(max_length=80, unique=True)
     max_queued_analyses = models.PositiveIntegerField(default=5, validators=[MinValueValidator(1)])
+    # Ownership, separated from the Admin role. Several people may administer
+    # an organization; exactly one owns it, and that is transferred rather than
+    # granted. Keeping them the same word is what made a station head
+    # unrecoverable before administrators became plural.
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        related_name="netra_owned_organizations",
+        on_delete=models.SET_NULL,
+    )
+    # Bumped on any role or grant change. The permission resolver caches on it,
+    # so invalidation is automatic: there is no purge step to forget and no
+    # window where a revoked permission is still being honoured from a cache.
+    permissions_version = models.PositiveBigIntegerField(default=1)
 
     def __str__(self) -> str:
         return self.name
@@ -106,6 +121,13 @@ class UserProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="netra_profile", on_delete=models.CASCADE)
     organization = models.ForeignKey(Organization, related_name="user_profiles", on_delete=models.PROTECT)
     role = models.CharField(max_length=32, choices=Role.choices, default=Role.VIEWER)
+    # The database-backed role. Added alongside the CharField rather than
+    # replacing it: both are written for now, so a rollback to the previous
+    # release still finds the column it reads. The CharField goes in a later
+    # release, once nothing depends on it.
+    role_ref = models.ForeignKey(
+        "Role", null=True, blank=True, related_name="profiles", on_delete=models.SET_NULL
+    )
     display_name = models.CharField(max_length=160, blank=True)
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")
 
@@ -1013,3 +1035,106 @@ class SessionRevocation(TimeStampedModel):
 
     class Meta:
         indexes = [models.Index(fields=["organization", "revoked_at"], name="netra_revocation_org_idx")]
+
+
+class Permission(models.Model):
+    """The catalogue of things a role or a grant can confer.
+
+    Keyed by the same strings the checker has always used, so a permission is
+    one concept across the database, the API and the console rather than three
+    lists that drift.
+    """
+
+    key = models.CharField(max_length=64, primary_key=True)
+    label = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=32)
+    risk_level = models.CharField(max_length=16, default="standard")
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "key"]
+
+    def __str__(self) -> str:
+        return self.key
+
+
+class Role(TimeStampedModel):
+    """A named set of permissions, owned by one organization.
+
+    Scoped per organization rather than globally: a station may need a role its
+    neighbour does not, and a role edited in one place must not silently change
+    what an officer somewhere else can do.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    organization = models.ForeignKey(Organization, related_name="roles", on_delete=models.CASCADE)
+    slug = models.SlugField(max_length=64)
+    name = models.CharField(max_length=80)
+    description = models.TextField(blank=True)
+    permissions = models.ManyToManyField(Permission, through="RolePermission", related_name="roles")
+    # System roles mirror what the code enforced before permissions became
+    # data. They may be cloned but not edited, so an organization cannot lock
+    # itself out by removing manage_users from the only role that has it.
+    is_system = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [models.Index(fields=["organization", "slug"], name="netra_role_org_slug_idx")]
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "slug"], name="netra_role_org_slug_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.organization.slug})"
+
+
+class RolePermission(models.Model):
+    role = models.ForeignKey(Role, related_name="role_permissions", on_delete=models.CASCADE)
+    permission = models.ForeignKey(Permission, related_name="role_links", on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["role", "permission"], name="netra_role_permission_unique"),
+        ]
+
+
+class PermissionGrant(TimeStampedModel):
+    """An exception to what someone's role gives them, in either direction.
+
+    Grants and revocations share one table because they are the same idea and
+    the same lifecycle: an explicit, reasoned, optionally temporary override of
+    the role. Splitting them into two tables makes "what does this person
+    actually hold" a union of two queries that can disagree.
+    """
+
+    class Mode(models.TextChoices):
+        GRANT = "grant", "Grant"
+        REVOKE = "revoke", "Revoke"
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    organization = models.ForeignKey(Organization, related_name="permission_grants", on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="netra_permission_grants", on_delete=models.CASCADE)
+    permission = models.ForeignKey(Permission, related_name="grants", on_delete=models.PROTECT)
+    mode = models.CharField(max_length=8, choices=Mode.choices, default=Mode.GRANT)
+    reason = models.TextField()
+    # Null means indefinite. A grant that expires is the safer default for
+    # anything high-risk, which is why the console asks.
+    expires_at = models.DateTimeField(null=True, blank=True)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, related_name="netra_grants_issued", on_delete=models.SET_NULL
+    )
+    granted_by_label = models.CharField(max_length=160, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "user"], name="netra_grant_org_user_idx"),
+            models.Index(fields=["expires_at"], name="netra_grant_expiry_idx"),
+        ]
+        constraints = [
+            # One decision per person per permission. Holding both a grant and
+            # a revocation for the same key is a question with no answer.
+            models.UniqueConstraint(fields=["user", "permission"], name="netra_grant_user_permission_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.mode}:{self.permission_id} for {self.user_id}"

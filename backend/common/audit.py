@@ -36,6 +36,10 @@ class Actor:
     organization_id: UUID | None = None
     organization_slug: str = ""
     aal: str = "aal1"
+    # Resolved once per request from the database. None means "not resolved" —
+    # a header actor, trusted-LAN mode, or an identity with no local profile —
+    # which is different from "resolved to nothing" and must not be read as it.
+    permissions: frozenset[str] | None = None
     # When this session last proved possession of a second factor. Distinct
     # from aal, which says only that a factor was used at some point in the
     # session. Destructive operations gate on this; see common/step_up.py.
@@ -93,6 +97,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
         external_id=getattr(supabase_user, "id", ""),
         organization_id=profile.organization_id,
         organization_slug=profile.organization.slug,
+        permissions=_resolved_permissions(user.id, profile.organization_id),
         aal=getattr(supabase_user, "aal", "aal1"),
         factor_verified_at=getattr(supabase_user, "factor_verified_at", None),
     )
@@ -167,6 +172,7 @@ def actor_from_request(request) -> Actor:
                 email=user.email or user.get_username(),
                 organization_id=profile.organization_id,
                 organization_slug=profile.organization.slug,
+                permissions=_resolved_permissions(user.id, profile.organization_id),
                 aal=str(validated.get("aal", "aal1")),
                 # The local provider carries the same claim shape, so the
                 # step-up gate behaves identically under both. Without this a
@@ -190,7 +196,28 @@ def actor_from_request(request) -> Actor:
 
 
 def can(actor: Actor, permission: str) -> bool:
+    """Whether this actor holds a permission.
+
+    Same signature it has always had, so none of the call sites across the
+    platform moved, and still a set membership test rather than a query. What
+    changed is where the set comes from: resolved once per request from the
+    database, where a role can be edited and an individual can hold an
+    exception, instead of a dict only a deployment could change.
+
+    Actors with no local profile — header actors in development, trusted-LAN
+    mode, an identity with no UserProfile — keep the code table. They have no
+    row to resolve against, and treating that as an empty set would refuse
+    every request rather than admit the situation.
+    """
+    if actor.permissions is not None:
+        return permission in actor.permissions
     return permission in ROLE_PERMISSIONS.get(actor.role, set())
+
+
+def _resolved_permissions(user_id: int, organization_id) -> frozenset[str]:
+    from common.permissions import permissions_for
+
+    return frozenset(permissions_for(user_id, organization_id))
 
 
 def visible_cases_for_actor(actor: Actor):
