@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.forensics.models import AccessLog, OperationalEvent, Organization, UserProfile
-from common.audit import Actor
+from common.audit import Actor, can
 from common.step_up import is_fresh
 
 
@@ -18,7 +18,7 @@ class AdministrationProblem(Exception):
 
 
 def require_privileged_admin(actor: Actor, organization_id=None) -> None:
-    if not actor.authenticated or actor.role != UserProfile.Role.ADMIN:
+    if not actor.authenticated or not can(actor, "manage_users"):
         raise AdministrationProblem("permission_denied", "Administrator permission is required.")
     if not actor.organization_id or (organization_id and str(actor.organization_id) != str(organization_id)):
         raise AdministrationProblem("resource_not_found", "The requested resource was not found.", 404)
@@ -27,7 +27,6 @@ def require_privileged_admin(actor: Actor, organization_id=None) -> None:
     profile = UserProfile.objects.select_related("user").filter(
         user_id=actor.django_user_id,
         organization_id=actor.organization_id,
-        role=UserProfile.Role.ADMIN,
         user__is_active=True,
     ).first()
     if profile is None:

@@ -316,7 +316,7 @@ def user_rows(organization: Organization) -> tuple[list[dict[str, Any]], bool]:
                 "id": user.id,
                 "email": email,
                 "name": profile.display_name or user.get_username(),
-                "roleSlug": role_slug(profile.role),
+                "roleSlug": profile.role_ref.slug if profile.role_ref_id else role_slug(profile.role),
                 "isOwner": owner_id == profile.user_id,
                 "status": _status(user, identity),
                 # Never guessed. When Supabase could not be consulted the

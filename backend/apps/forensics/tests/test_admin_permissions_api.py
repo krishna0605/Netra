@@ -298,6 +298,55 @@ class RoleTests(PermissionApiBase):
 
         self.assertIn("report", effective_permissions(self._profile(self.officer)))
 
+    def test_assigning_a_custom_role_updates_display_and_enforcement_together(self):
+        self._send(
+            "post",
+            "/api/admin/v1/roles",
+            {"name": "Records Desk", "description": "", "baseSlug": "viewer", "reason": REASON},
+        )
+
+        response = self._send(
+            "patch",
+            f"/api/admin/v1/users/{self.officer.id}/role",
+            {"role": "records_desk", "reason": REASON},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        profile = self._profile(self.officer)
+        self.assertEqual(profile.role_ref.slug, "records_desk")
+        self.assertEqual(profile.role, UserProfile.Role.VIEWER)
+        self.assertEqual(effective_permissions(profile), {"view"})
+        directory = self.client.get("/api/admin/v1/directory", **self._headers(self.head)).json()
+        row = next(item for item in directory["users"] if item["id"] == self.officer.id)
+        self.assertEqual(row["roleSlug"], "records_desk")
+
+    def test_changing_a_seeded_role_dual_writes_the_transition_fields(self):
+        response = self._send(
+            "patch",
+            f"/api/admin/v1/users/{self.officer.id}/role",
+            {"role": "viewer", "reason": REASON},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        profile = self._profile(self.officer)
+        self.assertEqual(profile.role, UserProfile.Role.VIEWER)
+        self.assertEqual(profile.role_ref.slug, "viewer")
+        self.assertEqual(effective_permissions(profile), {"view"})
+
+    def test_revoking_manage_users_removes_access_to_the_admin_namespace(self):
+        PermissionGrant.objects.create(
+            organization=self.organization,
+            user=self.deputy,
+            permission_id="manage_users",
+            mode=PermissionGrant.Mode.REVOKE,
+            reason=REASON,
+        )
+
+        response = self.client.get("/api/admin/v1/directory", **self._headers(self.deputy))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._code(response), "permission_denied")
+
 
 @SECURE_SETTINGS
 class OrganizationTests(PermissionApiBase):

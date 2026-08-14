@@ -12,7 +12,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, OperationalEvent, UserProfile
+from apps.forensics.models import AccessLog, Case, CaseHistoryEvent, OperationalEvent, PermissionGrant, UserProfile
 from apps.forensics.services.admin_directory import PERMISSION_CATALOGUE
 from common.audit import ROLE_PERMISSIONS
 from common.tenancy import netra_organization
@@ -379,6 +379,22 @@ class AdminSessionTests(AdminConsoleTestBase):
 
         for forbidden in ("Bearer", "secret", "service_role", "password"):
             self.assertNotIn(forbidden, body)
+
+    def test_session_reports_real_ownership_and_effective_permissions(self):
+        self.organization.owner = self.admin
+        self.organization.save(update_fields=["owner"])
+        PermissionGrant.objects.create(
+            organization=self.organization,
+            user=self.admin,
+            permission_id="export",
+            mode=PermissionGrant.Mode.REVOKE,
+            reason="Export removed for this test.",
+        )
+
+        body = self.client.get(SESSION, **self._headers(self.admin)).json()
+
+        self.assertTrue(body["isOwner"])
+        self.assertNotIn("export", body["permissions"])
 
 
 @SECURE_SETTINGS

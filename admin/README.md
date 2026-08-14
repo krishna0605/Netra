@@ -8,9 +8,11 @@ is designed to run on its own origin, because a shared origin means a shared
 `localStorage`, and a script-injection flaw anywhere in the investigator console
 would reach the admin session. See §2 of the implementation plan.
 
-> **Status: UI design preview.** Every screen runs on mock data. No backend is
-> attached — the `/api/admin/v1/*` namespace is phase 1 of the implementation
-> plan and does not exist yet.
+> **Status: backend-connected Phase 4 implementation.** Authentication, the
+> directory, administrative writes, audit verification, live sessions, roles,
+> grants and ownership use `/api/admin/v1/*`. Browser tests stub that namespace
+> deliberately; production and real-Django end-to-end deployment remain later
+> phases.
 
 ## Running it
 

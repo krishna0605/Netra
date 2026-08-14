@@ -98,9 +98,8 @@ function seed(): DirectorySnapshot {
  * The last copy of what the server returned.
  *
  * Not a store — every operation posts and re-reads, so nothing is decided
- * here. It exists because two things need the shape of the directory without a
- * round trip: roleNameFor, which translates a slug the console works in into
- * the role name the API speaks, and the tests.
+ * here. It lets the tests inspect the last server snapshot without introducing
+ * a second source of truth.
  *
  * It stays in memory for the lifetime of the tab and nowhere else. It used to
  * persist to localStorage, which put every officer's address, role and denial
@@ -141,16 +140,6 @@ type ServerAccount = {
   department: string;
   status: string;
 };
-
-/** Slugs are what the console works in; the API speaks role names. */
-function roleNameFor(slug: RoleSlug): string {
-  const known = state.roles.find((role) => role.slug === slug);
-  if (known) return known.name;
-  return String(slug)
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
 
 /**
  * Test seam. The module holds one state, as a server would, so tests that
@@ -331,7 +320,7 @@ export const directoryApi = {
       body: JSON.stringify({
         email: input.email.trim().toLowerCase(),
         name: input.name.trim(),
-        role: roleNameFor(input.roleSlug),
+        role: input.roleSlug,
         department: input.department.trim(),
         password: input.password,
         reason: input.reason,
@@ -351,7 +340,7 @@ export const directoryApi = {
     await authorizedRequest(`/admin/v1/users/${userId}/role`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: roleNameFor(roleSlug), reason }),
+      body: JSON.stringify({ role: roleSlug, reason }),
     });
     return this.read();
   },

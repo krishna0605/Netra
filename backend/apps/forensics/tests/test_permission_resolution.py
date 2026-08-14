@@ -150,6 +150,13 @@ class ResolutionTests(TestCase):
 
         self.assertIn("export", permissions_for(self.analyst.id, self.organization.id))
 
+    def test_version_bump_invalidates_the_cross_request_cache(self):
+        self.assertNotIn("export", permissions_for(self.analyst.id, self.organization.id))
+        self._grant("export")
+        bump_permissions_version(self.organization)
+
+        self.assertIn("export", permissions_for(self.analyst.id, self.organization.id))
+
 
 class CeilingTests(TestCase):
     """Nobody may confer what they do not hold.
@@ -216,10 +223,7 @@ class CeilingTests(TestCase):
 
 class VersionTests(TestCase):
     def test_a_permission_change_bumps_the_organization_version(self):
-        """Nothing reads it yet — permissions resolve per request rather than
-        from a cache. It is maintained because it is the correct signal for any
-        future consumer, and a version that is only sometimes accurate is worse
-        than none."""
+        """The version makes old cross-request cache entries unreachable."""
         organization = netra_organization()
         before = organization.permissions_version
 

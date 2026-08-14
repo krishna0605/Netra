@@ -313,6 +313,22 @@ class AdminWritePathTests(AdminWriteTestBase):
 
     @patch("apps.forensics.services.admin_users.set_ban", return_value=IDENTITY)
     @patch("apps.forensics.services.admin_users.find_user_by_email", return_value=IDENTITY)
+    def test_owner_must_be_transferred_before_deactivation(self, found, ban):
+        self.organization.owner = self.deputy
+        self.organization.save(update_fields=["owner"])
+
+        response = self._post(
+            f"{USERS}/{self.deputy.id}/status",
+            {"active": False, "reason": "Posted to another district."},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self._code(response), "owner_transfer_required")
+        found.assert_not_called()
+        ban.assert_not_called()
+
+    @patch("apps.forensics.services.admin_users.set_ban", return_value=IDENTITY)
+    @patch("apps.forensics.services.admin_users.find_user_by_email", return_value=IDENTITY)
     def test_an_organization_cannot_be_left_without_an_administrator(self, _found, ban):
         """The invariant, approached the only way the API allows.
 
@@ -368,6 +384,19 @@ class AdminWritePathTests(AdminWriteTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UserProfile.objects.get(user=self.officer).role, UserProfile.Role.ADMIN)
+
+    def test_owner_must_be_transferred_before_demotion(self):
+        self.organization.owner = self.deputy
+        self.organization.save(update_fields=["owner"])
+
+        response = self._patch(
+            f"{USERS}/{self.deputy.id}/role",
+            {"role": "viewer", "reason": "Posted to another district."},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self._code(response), "owner_transfer_required")
+        self.assertEqual(UserProfile.objects.get(user=self.deputy).role, UserProfile.Role.ADMIN)
 
     # ── Isolation ──────────────────────────────────────────────────────────
 

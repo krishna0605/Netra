@@ -84,17 +84,23 @@ def admin_session(request):
     organization = Organization.objects.filter(pk=actor.organization_id).first()
     if organization is None:
         return api_error(request, "resource_not_found", "The requested resource was not found.", status=404)
+    profile = UserProfile.objects.select_related("role_ref").filter(
+        user_id=actor.django_user_id,
+        organization=organization,
+    ).first()
+    if profile is None:
+        return api_error(request, "permission_denied", "Administrator permission is required.", status=403)
+    resolved_role = profile.role_ref.name if profile.role_ref_id else profile.role
+    resolved_slug = profile.role_ref.slug if profile.role_ref_id else role_slug(profile.role)
     log_access(actor, "admin_console.session", resource_type="AdminConsole", result="allowed")
     return JsonResponse(
         {
             "userId": actor.django_user_id,
             "name": actor.user,
             "email": actor.email,
-            "role": actor.role,
-            "roleSlug": role_slug(actor.role),
-            # Ownership is inferred from the sole-Admin constraint until
-            # Organization grows its own owner column.
-            "isOwner": actor.role == UserProfile.Role.ADMIN,
+            "role": resolved_role,
+            "roleSlug": resolved_slug,
+            "isOwner": organization.owner_id == actor.django_user_id,
             "aal": actor.aal,
             # Advisory only. The console reads this to decide whether to prompt
             # before showing a destructive dialog; the server re-checks it when
@@ -105,7 +111,9 @@ def admin_session(request):
                 "verifiedAt": actor.factor_verified_at.isoformat() if actor.factor_verified_at else None,
                 "maxAgeSeconds": settings.NETRA_STEP_UP_MAX_AGE_SECONDS,
             },
-            "permissions": sorted(ROLE_PERMISSIONS.get(actor.role, set())),
+            "permissions": sorted(
+                actor.permissions if actor.permissions is not None else ROLE_PERMISSIONS.get(actor.role, set())
+            ),
             "organization": {
                 "id": str(organization.id),
                 "name": organization.name,

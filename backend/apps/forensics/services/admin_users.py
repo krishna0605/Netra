@@ -26,7 +26,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from apps.forensics.models import Organization, UserProfile
+from apps.forensics.models import Organization, Role, RolePermission, UserProfile
 from apps.forensics.services.administration import (
     AdministrationProblem,
     ensure_administrator_remains,
@@ -34,7 +34,8 @@ from apps.forensics.services.administration import (
     require_recent_factor,
 )
 from common.admin_audit import record_admin_event
-from common.audit import Actor
+from common.audit import ROLE_PERMISSIONS, Actor
+from common.permissions import ceiling_for
 from common.session_revocation import revoke_sessions
 from common.supabase_sessions import end_session, end_sessions_for
 from common.supabase_admin import (
@@ -64,6 +65,44 @@ ASSIGNABLE_ROLES = {
     UserProfile.Role.VIEWER,
     UserProfile.Role.ADMIN,
 }
+
+
+def resolve_role_assignment(organization: Organization, value: str) -> tuple[Role | None, str]:
+    """Resolve either a role slug or its display name to the database role.
+
+    During the dual-write transition, standard roles retain their legacy value
+    while custom roles fall back to Viewer in that column. Authorization reads
+    role_ref first, so a rollback is fail-closed instead of granting a custom
+    role more authority than the old release understands.
+    """
+    requested = (value or "").strip()
+    role_ref = Role.objects.filter(organization=organization, slug=requested).first()
+    if role_ref is None:
+        role_ref = Role.objects.filter(organization=organization, name__iexact=requested).first()
+
+    if role_ref is not None:
+        legacy_role = role_ref.name if role_ref.name in ASSIGNABLE_ROLES else UserProfile.Role.VIEWER
+        return role_ref, legacy_role
+    if requested in ASSIGNABLE_ROLES:
+        # Compatibility for organizations created before their system-role rows
+        # are provisioned. The resolver safely falls back to the code catalogue.
+        return None, requested
+    raise AdministrationProblem("invalid_role", "Select a role this console can assign.", 400)
+
+
+def ensure_role_within_ceiling(actor: Actor, role_ref: Role | None, legacy_role: str) -> None:
+    requested = (
+        set(RolePermission.objects.filter(role=role_ref).values_list("permission_id", flat=True))
+        if role_ref is not None
+        else set(ROLE_PERMISSIONS.get(legacy_role, set()))
+    )
+    beyond = requested - ceiling_for(actor)
+    if beyond:
+        raise AdministrationProblem(
+            "beyond_your_permissions",
+            f"You cannot assign a role containing permissions you do not hold: {', '.join(sorted(beyond))}.",
+            403,
+        )
 
 
 @dataclass(frozen=True)
@@ -190,8 +229,8 @@ def provision_account(
     email = (email or "").strip().lower()
     if not email or "@" not in email or len(email) > 320:
         raise AdministrationProblem("invalid_email", "A valid official email address is required.", 400)
-    if role not in ASSIGNABLE_ROLES:
-        raise AdministrationProblem("invalid_role", "Select a role this console can assign.", 400)
+    role_ref, legacy_role = resolve_role_assignment(organization, role)
+    ensure_role_within_ceiling(actor, role_ref, legacy_role)
 
     User = get_user_model()
     if User.objects.filter(username__iexact=email).exists():
@@ -210,7 +249,8 @@ def provision_account(
         profile = UserProfile.objects.create(
             user=user,
             organization=organization,
-            role=role,
+            role=legacy_role,
+            role_ref=role_ref,
             display_name=(name or "").strip()[:160],
             department=(department or "").strip()[:160] or "Gujarat Cyber Crime Cell",
         )
@@ -220,7 +260,11 @@ def provision_account(
             action="user.created",
             target_type="User",
             target_id=email,
-            after={"role": role, "department": profile.department, "supabaseId": identity.id},
+            after={
+                "role": role_ref.name if role_ref else legacy_role,
+                "department": profile.department,
+                "supabaseId": identity.id,
+            },
             reason=reason,
         )
     return AccountChange(profile=profile, password=password)
@@ -321,6 +365,12 @@ def set_account_active(
     reason = require_reason(reason)
 
     if not active and profile.role == UserProfile.Role.ADMIN:
+        if organization.owner_id == profile.user_id:
+            raise AdministrationProblem(
+                "owner_transfer_required",
+                "Transfer organization ownership before deactivating this account.",
+                409,
+            )
         ensure_administrator_remains(organization, losing_user_id=profile.user_id)
 
     try:
@@ -477,18 +527,25 @@ def change_role(
     ensure_console_mutation_allowed(actor, profile)
     reason = require_reason(reason)
 
-    if role not in ASSIGNABLE_ROLES:
-        raise AdministrationProblem("invalid_role", "Select a role this console can assign.", 400)
-
-    previous = profile.role
-    if previous == role:
+    role_ref, legacy_role = resolve_role_assignment(organization, role)
+    ensure_role_within_ceiling(actor, role_ref, legacy_role)
+    previous = profile.role_ref.name if profile.role_ref_id else profile.role
+    next_role = role_ref.name if role_ref else legacy_role
+    if profile.role_ref_id == (role_ref.id if role_ref else None) and profile.role == legacy_role:
         raise AdministrationProblem("no_change", "That account already holds this role.", 409)
-    if previous == UserProfile.Role.ADMIN:
+    if organization.owner_id == profile.user_id and legacy_role != UserProfile.Role.ADMIN:
+        raise AdministrationProblem(
+            "owner_transfer_required",
+            "Transfer organization ownership before changing this account's role.",
+            409,
+        )
+    if profile.role == UserProfile.Role.ADMIN:
         ensure_administrator_remains(organization, losing_user_id=profile.user_id)
 
     with transaction.atomic():
-        profile.role = role
-        profile.save(update_fields=["role", "updated_at"])
+        profile.role = legacy_role
+        profile.role_ref = role_ref
+        profile.save(update_fields=["role", "role_ref", "updated_at"])
         record_admin_event(
             organization=organization,
             actor=actor,
@@ -496,7 +553,7 @@ def change_role(
             target_type="User",
             target_id=profile.user.email or profile.user.get_username(),
             before={"role": previous},
-            after={"role": role},
+            after={"role": next_role},
             reason=reason,
         )
     return profile
@@ -507,7 +564,7 @@ def account_payload(profile: UserProfile) -> dict[str, Any]:
         "id": profile.user_id,
         "email": profile.user.email or profile.user.get_username(),
         "name": profile.display_name,
-        "roleSlug": profile.role.strip().lower().replace(" ", "_"),
+        "roleSlug": profile.role_ref.slug if profile.role_ref_id else profile.role.strip().lower().replace(" ", "_"),
         "department": profile.department,
         "status": "active" if profile.user.is_active else "deactivated",
     }

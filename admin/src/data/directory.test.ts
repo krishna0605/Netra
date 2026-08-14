@@ -109,8 +109,8 @@ describe("account writes", () => {
     expect(create.url).toContain("/admin/v1/users");
     expect(create.init.method).toBe("POST");
     const sent = JSON.parse(String(create.init.body));
-    // The API speaks role names; the console works in slugs.
-    expect(sent.role).toBe("Viewer");
+    // Slugs are stable even when an administrator renames a custom role.
+    expect(sent.role).toBe("viewer");
     expect(sent.email).toBe("new.person@gcc.gov.in");
     expect(sent.reason).toBe("Joined the unit this week.");
 
@@ -152,13 +152,13 @@ describe("account writes", () => {
     expect(JSON.stringify(snapshot)).not.toContain("ServerChose#9wQz");
   });
 
-  it("sends a role change as a PATCH with the role name", async () => {
+  it("sends a role change as a PATCH with the stable role slug", async () => {
     const calls = stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "analyst", department: "Cell", status: "active" } });
 
     await directoryApi.changeRole(41, "analyst", "Moved to the analysis desk.");
 
     expect(calls[0].init.method).toBe("PATCH");
-    expect(JSON.parse(String(calls[0].init.body)).role).toBe("Analyst");
+    expect(JSON.parse(String(calls[0].init.body)).role).toBe("analyst");
   });
 
   it("sends deactivation as an active flag the server understands", async () => {

@@ -15,21 +15,18 @@ of the platform's routes and used to be a dict lookup, so this resolves once
 per request — in actor_from_request, where the profile is already loaded — and
 can() goes back to a set membership test.
 
-There is deliberately no cross-request cache. One was written first, keyed on
-(organization, user, permissions_version), and it was wrong in a way worth
-recording: that triple does not identify a database state. Two different people
-can be user 42 in the same organization at version 1, and the cache cannot tell
-them apart. It surfaced as tests passing alone and failing together, which is
-the same shape as a stale answer being served to the wrong person in production.
-
-Resolving per request costs a few queries and removes the entire class of
-problem, including the one that matters most — an administrator demoted a
-moment ago is refused on their next request rather than when a cache expires.
+The cross-request cache is versioned by the organization and includes both the
+organization and profile creation timestamps as generations. Those matter in
+tests and in restore/recreate workflows, where identifiers can legitimately be
+reused after the old database state has gone away.
+Permission writes bump the version in the same transaction, making every old
+entry unreachable without a cache purge or a stale authorization window.
 """
 
 from __future__ import annotations
 
 from django.db.models import F, Q
+from django.core.cache import cache
 from django.utils import timezone
 
 from apps.forensics.models import Organization, PermissionGrant, Role, RolePermission, UserProfile
@@ -90,13 +87,28 @@ def bump_permissions_version(organization: Organization) -> None:
 
 
 def permissions_for(user_id: int, organization_id) -> set[str]:
-    """Resolve from the database. One call per request, from actor_from_request."""
+    """Resolve from the database, cached across requests by authorization state."""
     profile = (
-        UserProfile.objects.select_related("role_ref")
+        UserProfile.objects.select_related("role_ref", "organization")
         .filter(user_id=user_id, organization_id=organization_id)
         .first()
     )
-    return effective_permissions(profile) if profile else set()
+    if profile is None:
+        return set()
+    organization = profile.organization
+    organization_generation = int(organization.created_at.timestamp() * 1_000_000)
+    profile_generation = int(profile.created_at.timestamp() * 1_000_000)
+    role_generation = str(profile.role_ref_id or profile.role)
+    key = (
+        f"netra:permissions:{organization.pk}:{organization_generation}:"
+        f"{user_id}:{profile_generation}:{role_generation}:{organization.permissions_version}"
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        return set(cached)
+    resolved = effective_permissions(profile)
+    cache.set(key, tuple(sorted(resolved)), timeout=300)
+    return resolved
 
 
 def ceiling_for(actor) -> set[str]:
