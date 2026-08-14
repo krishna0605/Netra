@@ -16,7 +16,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [department, setDepartment] = useState(organization.name);
   const [roleSlug, setRoleSlug] = useState("viewer");
   const [password, setPassword] = useState(generatePassword);
-  const [requireChange, setRequireChange] = useState(true);
+  const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
 
   // After a successful create the dialog swaps to a handover panel. The password
@@ -29,7 +29,11 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const strongEnough = passwordStrength(password).score >= 3;
-  const canSubmit = name.trim().length >= 2 && emailValid && strongEnough && code.trim().length === 6 && !busy;
+  // The reason floor matches the server's, so the button is disabled rather
+  // than the write refused after the operator has filled everything in.
+  const reasonValid = reason.trim().length >= 10;
+  const canSubmit =
+    name.trim().length >= 2 && emailValid && strongEnough && reasonValid && code.trim().length === 6 && !busy;
 
   function reset() {
     setName("");
@@ -37,7 +41,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setDepartment(organization.name);
     setRoleSlug("viewer");
     setPassword(generatePassword());
-    setRequireChange(true);
+    setReason("");
     setCode("");
     setHandover(null);
     setCopied(false);
@@ -48,11 +52,19 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setBusy(true);
     setFailure("");
     try {
-      const created = await createUser({ name, email, department, roleSlug, mustChangePassword: requireChange });
+      const { created, password: applied } = await createUser({
+        name,
+        email,
+        department,
+        roleSlug,
+        password,
+        reason: reason.trim(),
+      });
       setHandover({
         name: created.name,
         email: created.email,
-        password,
+        // What the server applied, not what this dialog proposed.
+        password: applied,
         roleName: roles.find((role) => role.slug === roleSlug)?.name ?? roleSlug,
       });
     } catch (cause) {
@@ -207,20 +219,26 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 
                 <PasswordField value={password} onChange={setPassword} />
 
-                <label className="flex cursor-pointer items-start gap-2.5">
-                  <input
-                    type="checkbox"
-                    checked={requireChange}
-                    onChange={(event) => setRequireChange(event.target.checked)}
-                    className="mt-0.5 size-4 shrink-0 accent-[var(--color-signal)]"
+                {/* The checkbox that stood here offered "require a new password
+                    at first sign-in". Nothing enforces it — Supabase owns the
+                    sign-in and has no such flag — so it promised a control that
+                    did not exist. It returns when something enforces it. */}
+                <div>
+                  <label className="block text-[13px] font-medium text-sand" htmlFor="new-reason">
+                    Reason
+                  </label>
+                  <Input
+                    id="new-reason"
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    placeholder="Why this account is being created"
+                    className="mt-2"
+                    autoComplete="off"
                   />
-                  <span className="text-[13px] text-sand-muted">
-                    Require a new password at first sign-in
-                    <span className="mt-0.5 block text-xs text-sand-muted/70">
-                      Recommended. You will have seen this password, so it should not stay in use.
-                    </span>
-                  </span>
-                </label>
+                  <p className="mt-1.5 text-xs text-sand-muted/70">
+                    Sealed into the audit trail. It is what answers &ldquo;why&rdquo; when someone reads this back in a year.
+                  </p>
+                </div>
 
                 <div className="rounded-panel border border-signal/40 bg-signal/8 px-5 py-4">
                   <label className="block text-[13px] font-medium text-signal" htmlFor="new-code">

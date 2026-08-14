@@ -71,8 +71,51 @@ class AccountChange:
     password: str = ""
 
 
+_MIN_PASSWORD, _MAX_PASSWORD = 12, 128
+
+
 def generate_password() -> str:
     return "".join(secrets.choice(_ALPHABET) for _ in range(_PASSWORD_LENGTH))
+
+
+def resolve_password(candidate: str | None) -> str:
+    """Use the administrator's password if they typed one, else generate.
+
+    The console offers a generated password and lets it be replaced, because an
+    administrator sometimes needs to set a specific credential. Strength is
+    therefore checked here rather than only in the browser: a rule enforced in
+    JavaScript is a rule that holds until someone posts to the endpoint
+    directly, which is precisely when it matters.
+
+    Length carries most of the weight. Character-class rules produce
+    "Password1!" and stop there, so the floor is high enough that a short
+    password fails whatever classes it mixes, and three of four classes is
+    asked for on top rather than instead.
+    """
+    candidate = (candidate or "").strip()
+    if not candidate:
+        return generate_password()
+    if not _MIN_PASSWORD <= len(candidate) <= _MAX_PASSWORD:
+        raise AdministrationProblem(
+            "weak_password",
+            f"A password between {_MIN_PASSWORD} and {_MAX_PASSWORD} characters is required.",
+            400,
+        )
+    classes = sum(
+        (
+            any(c.islower() for c in candidate),
+            any(c.isupper() for c in candidate),
+            any(c.isdigit() for c in candidate),
+            any(not c.isalnum() for c in candidate),
+        )
+    )
+    if classes < 3:
+        raise AdministrationProblem(
+            "weak_password",
+            "Use at least three of: lowercase, uppercase, digits, symbols.",
+            400,
+        )
+    return candidate
 
 
 def _require_reason(reason: str) -> str:
@@ -130,6 +173,7 @@ def provision_account(
     role: str,
     department: str,
     reason: str,
+    password: str | None = None,
 ) -> AccountChange:
     """Create an account with a password the administrator hands over.
 
@@ -151,7 +195,7 @@ def provision_account(
     if User.objects.filter(username__iexact=email).exists():
         raise AdministrationProblem("email_in_use", "An account with that address already exists.", 409)
 
-    password = generate_password()
+    password = resolve_password(password)
     try:
         identity = create_user(email, password)
     except SupabaseAdminError as problem:
@@ -180,7 +224,9 @@ def provision_account(
     return AccountChange(profile=profile, password=password)
 
 
-def replace_password(*, actor: Actor, organization: Organization, user_id: int, reason: str) -> AccountChange:
+def replace_password(
+    *, actor: Actor, organization: Organization, user_id: int, reason: str, password: str | None = None
+) -> AccountChange:
     """Set a new password and end every session the account already holds.
 
     The revocation is not optional. A password reset that leaves an existing
@@ -192,7 +238,7 @@ def replace_password(*, actor: Actor, organization: Organization, user_id: int, 
     ensure_console_mutation_allowed(actor, profile)
     reason = _require_reason(reason)
 
-    password = generate_password()
+    password = resolve_password(password)
     try:
         set_password(_supabase_id(profile), password)
     except SupabaseAdminError as problem:

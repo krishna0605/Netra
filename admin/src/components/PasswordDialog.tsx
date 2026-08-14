@@ -21,8 +21,6 @@ export function PasswordDialog({
   const [password, setPasswordValue] = useState(generatePassword);
   const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
-  const [requireChange, setRequireChange] = useState(true);
-  const [revokeSessions, setRevokeSessions] = useState(true);
   const [issued, setIssued] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -35,8 +33,6 @@ export function PasswordDialog({
     setPasswordValue(generatePassword());
     setReason("");
     setCode("");
-    setRequireChange(true);
-    setRevokeSessions(true);
     setIssued(null);
     setCopied(false);
     setFailure("");
@@ -46,8 +42,11 @@ export function PasswordDialog({
     setBusy(true);
     setFailure("");
     try {
-      await setPassword({ userId: user.id, reason: reason.trim(), requireChange, revokeSessions });
-      setIssued(password);
+      const applied = await setPassword({ userId: user.id, reason: reason.trim(), password });
+      // Hand over what the server applied, not what this dialog proposed. The
+      // server may have generated its own, and passing on the wrong one gives
+      // an officer a credential that does not work.
+      setIssued(applied);
     } catch (cause) {
       setFailure(cause instanceof Error ? cause.message : "The password could not be replaced.");
     } finally {
@@ -108,8 +107,7 @@ export function PasswordDialog({
                   </dl>
                 </Panel>
                 <ul className="flex flex-col gap-1.5 text-[13px] text-sand-muted">
-                  {revokeSessions ? <li>· Every existing session has been ended.</li> : null}
-                  {requireChange ? <li>· A new password will be required at their next sign-in.</li> : null}
+                  <li>· Every existing session has been ended.</li>
                   <li>· Recorded in the audit trail with your reason.</li>
                 </ul>
               </div>
@@ -132,31 +130,14 @@ export function PasswordDialog({
               <div className="flex flex-col gap-4 overflow-y-auto px-6 py-5">
                 <PasswordField value={password} onChange={setPasswordValue} label="New password" />
 
-                <div className="flex flex-col gap-2.5">
-                  <label className="flex cursor-pointer items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={requireChange}
-                      onChange={(event) => setRequireChange(event.target.checked)}
-                      className="mt-0.5 size-4 shrink-0 accent-[var(--color-signal)]"
-                    />
-                    <span className="text-[13px] text-sand-muted">Require a new password at their next sign-in</span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={revokeSessions}
-                      onChange={(event) => setRevokeSessions(event.target.checked)}
-                      className="mt-0.5 size-4 shrink-0 accent-[var(--color-signal)]"
-                    />
-                    <span className="text-[13px] text-sand-muted">
-                      End every session they have open
-                      <span className="mt-0.5 block text-xs text-sand-muted/70">
-                        Leave this on. A password change that leaves an old session signed in has not actually locked anyone out.
-                      </span>
-                    </span>
-                  </label>
-                </div>
+                {/* Two checkboxes stood here. "Require a new password at their
+                    next sign-in" promised something nothing enforces, and
+                    ending sessions was offered as a choice when the server now
+                    always does it — a reset that leaves an old session signed
+                    in has locked nobody out, which is the whole point of one. */}
+                <p className="rounded-panel border border-[color:var(--color-control-edge)] bg-cream-primary/4 px-4 py-3 text-[13px] leading-relaxed text-sand-muted/70">
+                  Every session this account has open will end. They will need the new password to sign in again.
+                </p>
 
                 <div>
                   <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="password-reason">

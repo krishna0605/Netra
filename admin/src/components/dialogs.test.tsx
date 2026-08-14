@@ -1,11 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirectoryProvider } from "../data/store";
 import { GrantPermissionDialog } from "./GrantPermissionDialog";
 import { PasswordDialog } from "./PasswordDialog";
-import { resetDirectory } from "../data/client";
+import { currentDirectory, resetDirectory } from "../data/client";
+import { supabase } from "../lib/supabase";
 import { USERS } from "../data/mock";
 
 /**
@@ -28,6 +29,32 @@ function typeInto(element: HTMLElement, value: string) {
 beforeEach(() => {
   resetDirectory();
   vi.clearAllMocks();
+
+  // The dialogs reach the network now. Stubbed here so these stay tests of the
+  // dialogs rather than of the transport, which has its own.
+  vi.spyOn(supabase.auth, "getSession").mockResolvedValue({
+    data: { session: { access_token: "test-token" } },
+    error: null,
+  } as unknown as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      String(url).endsWith("/admin/v1/directory")
+        ? new Response(JSON.stringify(currentDirectory()), { status: 200 })
+        : new Response(
+            JSON.stringify({
+              user: { id: 41, email: "a.patel@gcc.gov.in", name: "A. Patel", roleSlug: "viewer", department: "Cell", status: "active" },
+              password: "ServerChose#9wQz",
+            }),
+            { status: 200 },
+          ),
+    ),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("ConfirmDialog", () => {
@@ -167,19 +194,25 @@ describe("PasswordDialog", () => {
   it("shows the password once after it is set, and says what else happened", async () => {
     withProvider(<PasswordDialog user={user} open onOpenChange={() => {}} />);
 
-    const generated = (screen.getByLabelText("New password") as HTMLInputElement).value;
     typeInto(screen.getByLabelText("Reason"), "Credential reported as shared.");
     typeInto(screen.getByLabelText("Confirm with your authenticator"), "774120");
     fireEvent.click(screen.getByRole("button", { name: "Set password" }));
 
     await waitFor(() => expect(screen.getByText("Password replaced")).toBeInTheDocument());
-    expect(screen.getByText(generated)).toBeInTheDocument();
+    // What the server applied, not what the dialog proposed. The server may
+    // have generated its own, and handing over the wrong one gives an officer
+    // a credential that does not work.
+    expect(screen.getByText("ServerChose#9wQz")).toBeInTheDocument();
     expect(screen.getByText(/Every existing session has been ended/)).toBeInTheDocument();
   });
 
-  it("defaults to ending every session, because a reset that leaves one alive is not a reset", () => {
+  it("states that sessions end rather than offering it as a choice", () => {
+    // It used to be a checkbox. The server now always revokes, so a control
+    // implying otherwise would describe behaviour that does not exist.
     withProvider(<PasswordDialog user={user} open onOpenChange={() => {}} />);
-    expect(screen.getByLabelText(/End every session/)).toBeChecked();
+
+    expect(screen.queryByLabelText(/End every session/)).toBeNull();
+    expect(screen.getByText(/Every session this account has open will end/)).toBeInTheDocument();
   });
 });
 

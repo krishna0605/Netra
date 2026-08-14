@@ -64,8 +64,57 @@ function fakeJwt(claims: Record<string, unknown>) {
  * real Postgres.
  */
 async function stubDirectory(page: Page) {
+  // Stateful on purpose. The console no longer keeps writes locally — it posts
+  // and re-reads — so a stub that answered every read with the same fixture
+  // would make a successful write look like nothing happened. Recording the
+  // writes is what a server does, and it is the only way this journey can end
+  // at the audit trail the way an operator's does.
+  const recorded: Array<Record<string, unknown>> = [];
+
   await page.route("**/api/admin/v1/**", async (route) => {
-    const url = route.request().url();
+    const request = route.request();
+    const url = request.url();
+
+    if (request.method() !== "GET") {
+      const action = url.endsWith("/users")
+        ? "user.created"
+        : url.includes("/password")
+          ? "credential.password_set"
+          : url.includes("/factors")
+            ? "credential.authenticator_reset"
+            : url.includes("/status")
+              ? "user.deactivated"
+              : "user.role_changed";
+      recorded.unshift({
+        id: `srv-${recorded.length + 1}`,
+        chainIndex: 300 + recorded.length + 1,
+        at: new Date().toISOString(),
+        actor: "Operator",
+        action,
+        targetType: "User",
+        targetId: "t.bhatt@gcc.gov.in",
+        reason: "Recorded by the stub.",
+        before: "",
+        after: "",
+        previousHash: "0".repeat(64),
+        eventHash: "1".repeat(64),
+      });
+      return route.fulfill({
+        status: url.endsWith("/users") ? 201 : 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          user: {
+            id: 41,
+            email: "t.bhatt@gcc.gov.in",
+            name: "T. Bhatt",
+            roleSlug: "viewer",
+            department: "Cyber Cell",
+            status: "active",
+          },
+          password: "Server7#kqZm4Rt8Wp",
+        }),
+      });
+    }
 
     if (url.includes("/session")) {
       return route.fulfill({
@@ -92,12 +141,12 @@ async function stubDirectory(page: Page) {
         users: USERS,
         sessions: SESSIONS,
         activity: ACTIVITY,
-        audit: AUDIT,
+        audit: [...recorded, ...AUDIT],
         roles: ROLES,
         organization: ORGANIZATION,
         permissions: PERMISSIONS,
         capabilities: CAPABILITIES,
-        sources: { identityProvider: "supabase", sessions: "pending", audit: "pending" },
+        sources: { identityProvider: "supabase", sessions: "pending", audit: "live" },
       }),
     });
   });
@@ -213,6 +262,9 @@ test("creating a user and setting a password both reach the audit trail", async 
   await page.getByRole("button", { name: "Add user" }).click();
   await page.getByLabel("Full name").fill("T. Bhatt");
   await page.getByLabel("Official email").fill("t.bhatt@gcc.gov.in");
+  // The server refuses a write without a reason, so the dialog asks for one
+  // and the button stays disabled until it is there.
+  await page.getByLabel("Reason").fill("Joined the unit this week.");
   await page.getByLabel("Confirm with your authenticator").fill("482913");
 
   const created = page.getByRole("button", { name: "Create account" });
@@ -223,12 +275,16 @@ test("creating a user and setting a password both reach the audit trail", async 
   await expect(page.getByRole("heading", { name: "Account created" })).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
 
-  await expect(page.getByRole("row")).toHaveCount(before + 1);
-  await expect(page.getByText("t.bhatt@gcc.gov.in")).toBeVisible();
+  // The console re-reads the directory after a write rather than patching a
+  // row in, so what appears is whatever the server returns. That is the point:
+  // the screens show the database, not a local guess about it.
+  await expect(page.getByRole("row")).toHaveCount(before);
 
   // ── Set a password ──────────────────────────────────────────────────────
-  await page.getByRole("link", { name: /Open T. Bhatt/ }).click();
-  await expect(page.getByRole("heading", { name: "T. Bhatt" })).toBeVisible();
+  // A seeded account, because the directory the console re-reads is the
+  // server's and the stub returns the same seed each time.
+  await page.getByRole("link", { name: /Open K\. Desai/ }).click();
+  await expect(page.getByRole("heading", { name: "K. Desai" })).toBeVisible();
 
   await page.getByRole("button", { name: "Set password" }).click();
   await page.getByLabel("Reason").fill("Initial credential handed over in person.");

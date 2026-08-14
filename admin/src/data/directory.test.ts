@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { supabase } from "../lib/supabase";
-import { ApiFailure, directoryApi, currentDirectory, resetDirectory, verifyAuditChain } from "./client";
+import { directoryApi, currentDirectory, resetDirectory, verifyAuditChain } from "./client";
 import { generatePassword, passwordStrength } from "./store";
 
 beforeEach(() => {
@@ -59,117 +59,124 @@ describe("passwordStrength", () => {
   });
 });
 
-describe("changeRole", () => {
-  it("preserves explicit grants and revocations across a role change", async () => {
-    const before = await directoryApi.read();
-    const target = before.users.find((user) => user.permissions.some((p) => p.source !== "role"));
-    expect(target).toBeDefined();
+/*
+ * A test stood here asserting that explicit grants and revocations survive a
+ * role change. It exercised local logic that has now moved to the server, and
+ * the server does not have grants yet — PermissionGrant arrives with the
+ * permissions phase. Leaving it would have meant a test of a code path the
+ * console no longer runs; skipping it would have meant a reminder CI ignores.
+ *
+ * The property still matters: a temporary grant vanishing on a promotion is a
+ * quiet way to lose access that nobody thinks to look for. It belongs in the
+ * server's own tests, against the model that will hold it.
+ */
 
-    const overridesBefore = target!.permissions
-      .filter((permission) => permission.source !== "role")
-      .map((permission) => `${permission.source}:${permission.key}`)
-      .sort();
-    expect(overridesBefore.length).toBeGreaterThan(0);
+describe("account writes", () => {
+  /** Stub one write endpoint and the re-read that follows it. */
+  function stubWrite(body: unknown, status = 200) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    let first = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push({ url: String(url), init });
+        if (first && !String(url).endsWith("/admin/v1/directory")) {
+          first = false;
+          return new Response(JSON.stringify(body), { status });
+        }
+        return new Response(JSON.stringify(currentDirectory()), { status: 200 });
+      }),
+    );
+    return calls;
+  }
 
-    const after = await directoryApi.changeRole(target!.id, "investigator", "Promoted during a reshuffle.");
-    const updated = after.users.find((user) => user.id === target!.id)!;
+  it("sends the create to the server and re-reads rather than guessing", async () => {
+    const calls = stubWrite(
+      { user: { id: 41, email: "new.person@gcc.gov.in", name: "New Person", roleSlug: "viewer", department: "Cell", status: "active" }, password: "Xy7#kq2Zm4Rt8Wp5" },
+      201,
+    );
 
-    const overridesAfter = updated.permissions
-      .filter((permission) => permission.source !== "role")
-      .map((permission) => `${permission.source}:${permission.key}`)
-      .sort();
+    await directoryApi.createUser({
+      name: "New Person",
+      email: "New.Person@gcc.gov.in",
+      department: "Cell",
+      roleSlug: "viewer",
+      password: "Xy7#kq2Zm4Rt8Wp5",
+      reason: "Joined the unit this week.",
+    });
 
-    // A temporary grant silently vanishing on a promotion is a nasty way to
-    // lose access, and nobody would think to look for it.
-    expect(overridesAfter).toEqual(overridesBefore);
-    expect(updated.roleSlug).toBe("investigator");
+    const create = calls[0];
+    expect(create.url).toContain("/admin/v1/users");
+    expect(create.init.method).toBe("POST");
+    const sent = JSON.parse(String(create.init.body));
+    // The API speaks role names; the console works in slugs.
+    expect(sent.role).toBe("Viewer");
+    expect(sent.email).toBe("new.person@gcc.gov.in");
+    expect(sent.reason).toBe("Joined the unit this week.");
+
+    // The row the screens render comes from the server, not from a locally
+    // invented one — guessing is how a console shows a user the database
+    // does not have.
+    expect(calls[1].url).toContain("/admin/v1/directory");
   });
-});
 
-describe("createUser", () => {
-  it("refuses an address already in use", async () => {
-    const before = await directoryApi.read();
-    const existing = before.users[0].email;
+  it("surfaces a refusal instead of applying the change locally", async () => {
+    stubWrite({ error: { code: "email_in_use", message: "Already exists." } }, 409);
 
     await expect(
       directoryApi.createUser({
         name: "Duplicate",
-        email: existing.toUpperCase(),
+        email: "a.patel@gcc.gov.in",
         department: "Cell",
         roleSlug: "viewer",
-        mustChangePassword: true,
+        reason: "Should be refused by the server.",
       }),
-    ).rejects.toBeInstanceOf(ApiFailure);
+    ).rejects.toMatchObject({ code: "email_in_use", status: 409 });
   });
 
-  it("records the creation in the audit trail", async () => {
-    const { snapshot } = await directoryApi.createUser({
-      name: "New Person",
-      email: "new.person@gcc.gov.in",
-      department: "Cell",
-      roleSlug: "viewer",
-      mustChangePassword: true,
-    });
+  it("returns the password the server applied, not the one it was sent", async () => {
+    // The server may generate its own. Showing the operator what the dialog
+    // sent would hand over a credential that does not work.
+    stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "viewer", department: "Cell", status: "active" }, password: "ServerChose#9wQz" });
 
-    expect(snapshot.audit[0].action).toBe("user.created");
-    expect(snapshot.audit[0].targetId).toBe("new.person@gcc.gov.in");
-  });
-});
+    const result = await directoryApi.setPassword({ userId: 41, reason: "Credential reported as shared." });
 
-describe("audit chain", () => {
-  it("links each entry to the one before it", async () => {
-    await directoryApi.setStatus(63, "active", "Restored for the purposes of this test.");
-    const snapshot = await directoryApi.read();
-
-    for (let index = 0; index < snapshot.audit.length - 1; index += 1) {
-      const newer = snapshot.audit[index];
-      const older = snapshot.audit[index + 1];
-      expect(newer.previousHash).toBe(older.eventHash);
-      expect(newer.chainIndex).toBe(older.chainIndex + 1);
-    }
-  });
-});
-
-describe("setPassword", () => {
-  it("ends every session for that account when asked", async () => {
-    const before = await directoryApi.read();
-    const withSessions = before.sessions[0].userId;
-    expect(before.sessions.some((session) => session.userId === withSessions)).toBe(true);
-
-    const after = await directoryApi.setPassword({
-      userId: withSessions,
-      reason: "Credential reported as shared.",
-      requireChange: true,
-      revokeSessions: true,
-    });
-
-    // A password change that leaves an old session signed in has not locked
-    // anyone out, which is the entire point of doing it.
-    expect(after.sessions.some((session) => session.userId === withSessions)).toBe(false);
+    expect(result.password).toBe("ServerChose#9wQz");
   });
 
-  it("records that a password was set without recording what it was", async () => {
-    const snapshot = await directoryApi.setPassword({
-      userId: 41,
-      reason: "Routine replacement for this test.",
-      requireChange: true,
-      revokeSessions: false,
-    });
+  it("never keeps a password in directory state", async () => {
+    stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "viewer", department: "Cell", status: "active" }, password: "ServerChose#9wQz" });
 
-    // This used to read localStorage, which the console no longer writes to,
-    // so it was asserting that null does not contain a password and would have
-    // passed however badly the code behaved.
-    //
-    // The real guarantee is stronger than "not stored": the operation never
-    // receives the password. It travels from the dialog to the server and is
-    // shown once. Nothing here can leak it because nothing here has it.
-    const entry = snapshot.audit[0];
-    expect(entry.action).toBe("credential.password_set");
-    expect(entry.after).toContain("password replaced");
+    const { snapshot } = await directoryApi.setPassword({ userId: 41, reason: "Routine replacement." });
 
-    const serialised = JSON.stringify(snapshot);
-    expect(serialised).not.toMatch(/"password"\s*:/);
-    expect(window.localStorage.getItem("netra.directory.v1")).toBeNull();
+    expect(JSON.stringify(snapshot)).not.toContain("ServerChose#9wQz");
+  });
+
+  it("sends a role change as a PATCH with the role name", async () => {
+    const calls = stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "analyst", department: "Cell", status: "active" } });
+
+    await directoryApi.changeRole(41, "analyst", "Moved to the analysis desk.");
+
+    expect(calls[0].init.method).toBe("PATCH");
+    expect(JSON.parse(String(calls[0].init.body)).role).toBe("Analyst");
+  });
+
+  it("sends deactivation as an active flag the server understands", async () => {
+    const calls = stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "viewer", department: "Cell", status: "deactivated" } });
+
+    await directoryApi.setStatus(41, "deactivated", "Transferred out of the unit.");
+
+    expect(JSON.parse(String(calls[0].init.body)).active).toBe(false);
+  });
+
+  it("sends an authenticator reset as a DELETE carrying its reason", async () => {
+    const calls = stubWrite({ user: { id: 41, email: "x@gcc.gov.in", name: "X", roleSlug: "viewer", department: "Cell", status: "active" } });
+
+    await directoryApi.resetAuthenticator(41, "Officer changed phone this morning.");
+
+    expect(calls[0].url).toContain("/factors");
+    expect(calls[0].init.method).toBe("DELETE");
+    expect(JSON.parse(String(calls[0].init.body)).reason).toContain("changed phone");
   });
 });
 

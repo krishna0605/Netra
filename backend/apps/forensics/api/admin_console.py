@@ -194,6 +194,7 @@ def admin_users(request):
             role=payload.get("role", ""),
             department=payload.get("department", ""),
             reason=payload.get("reason", ""),
+            password=payload.get("password"),
         )
         # The only time this password is ever transmitted. It is not stored
         # here, not written to the audit entry, and cannot be retrieved again.
@@ -214,6 +215,7 @@ def admin_user_password(request, user_id: int):
             organization=organization,
             user_id=user_id,
             reason=payload.get("reason", ""),
+            password=payload.get("password"),
         )
         return JsonResponse({"user": account_payload(change.profile), "password": change.password})
 

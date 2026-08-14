@@ -28,9 +28,9 @@ type DirectoryValue = DirectorySnapshot & {
   error: string;
   refetch: () => Promise<void>;
 
-  createUser: (input: CreateUserInput) => Promise<AdminUser>;
+  createUser: (input: CreateUserInput) => Promise<{ created: AdminUser; password: string }>;
   changeRole: (userId: number, roleSlug: RoleSlug, reason: string) => Promise<void>;
-  setPassword: (input: SetPasswordInput) => Promise<void>;
+  setPassword: (input: SetPasswordInput) => Promise<string>;
   setStatus: (userId: number, status: UserStatus, reason: string) => Promise<void>;
   resetAuthenticator: (userId: number, reason: string) => Promise<void>;
   revokeSession: (sessionId: string) => Promise<void>;
@@ -93,9 +93,11 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   const createUser = useCallback(
     async (input: CreateUserInput) => {
-      const { snapshot: next, created } = await run(() => directoryApi.createUser(input));
+      const { snapshot: next, created, password } = await run(() => directoryApi.createUser(input));
       setSnapshot(next);
-      return created;
+      // The password comes back because the server decided it — it may have
+      // generated one rather than using what the dialog sent.
+      return { created, password };
     },
     [run],
   );
@@ -109,7 +111,12 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   const setPassword = useCallback(
     async (input: SetPasswordInput) => {
-      setSnapshot(await run(() => directoryApi.setPassword(input)));
+      const { snapshot: next, password } = await run(() => directoryApi.setPassword(input));
+      setSnapshot(next);
+      // Returned so the dialog can show it once for handover. The server
+      // decided the value — it may have generated one — so the dialog must
+      // display what came back rather than what it sent.
+      return password;
     },
     [run],
   );

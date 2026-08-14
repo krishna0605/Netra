@@ -195,15 +195,39 @@ export type CreateUserInput = {
   email: string;
   department: string;
   roleSlug: RoleSlug;
-  mustChangePassword: boolean;
+  /** Optional. Absent means the server generates one. Either way its strength
+   *  is checked server-side, because a rule enforced only in the browser holds
+   *  until somebody posts to the endpoint directly. */
+  password?: string;
+  reason: string;
 };
 
 export type SetPasswordInput = {
   userId: number;
   reason: string;
-  requireChange: boolean;
-  revokeSessions: boolean;
+  password?: string;
 };
+
+/** The account shape the write endpoints return. Narrower than AdminUser: a
+ *  write reports what it changed, and the full row comes from the re-read. */
+type ServerAccount = {
+  id: number;
+  email: string;
+  name: string;
+  roleSlug: string;
+  department: string;
+  status: string;
+};
+
+/** Slugs are what the console works in; the API speaks role names. */
+function roleNameFor(slug: RoleSlug): string {
+  const known = state.roles.find((role) => role.slug === slug);
+  if (known) return known.name;
+  return String(slug)
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 /**
  * Test seam. The module holds one state, as a server would, so tests that
@@ -369,149 +393,77 @@ export const directoryApi = {
     return snapshot;
   },
 
+  /**
+   * Create an account.
+   *
+   * The password travels to the server, is applied at the identity provider,
+   * and comes back once so the dialog can show it for handover. It is not kept
+   * anywhere on this side: not in the snapshot, not in the audit entry, and
+   * not retrievable afterwards.
+   */
   async createUser(input: CreateUserInput) {
-    const email = input.email.trim().toLowerCase();
-    if (state.users.some((user) => user.email.toLowerCase() === email)) {
-      await settle(null);
-      throw new ApiFailure("email_in_use", "An account with that address already exists.", 409);
-    }
-
-    const role = state.roles.find((entry) => entry.slug === input.roleSlug);
-    const created: AdminUser = {
-      id: Math.max(0, ...state.users.map((user) => user.id)) + 1,
-      email,
-      name: input.name.trim(),
-      roleSlug: input.roleSlug,
-      isOwner: false,
-      status: "active",
-      mfa: "unenrolled",
-      department: input.department.trim(),
-      supabaseId: crypto.randomUUID(),
-      joinedAt: now(),
-      lastSignInAt: null,
-      lastActivityAt: null,
-      invitationState: "none",
-      deniedLast24h: 0,
-      permissions: (role?.permissions ?? []).map((key) => ({
-        key,
-        source: "role" as const,
-        expiresAt: null,
-        reason: "",
-        grantedBy: "",
-      })),
-      caseMemberships: [],
-    };
-
-    const next = record({ ...state, users: [created, ...state.users] }, {
-      action: "user.created",
-      targetType: "Account",
-      targetId: created.email,
-      reason: `Account provisioned as ${role?.name ?? input.roleSlug}.`,
-      before: "—",
-      after: `${role?.name ?? input.roleSlug}${input.mustChangePassword ? ", password change required" : ""}`,
+    const response = await authorizedRequest<{ user: ServerAccount; password: string }>("/admin/v1/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: input.email.trim().toLowerCase(),
+        name: input.name.trim(),
+        role: roleNameFor(input.roleSlug),
+        department: input.department.trim(),
+        password: input.password,
+        reason: input.reason,
+      }),
     });
 
-    await settle(null);
-    commit(next);
-    return { snapshot: state, created };
+    // Re-read rather than patch the local copy. The server decides what the
+    // directory now contains — joined dates, identity state, the audit entry
+    // it just sealed — and guessing at that is how a console ends up showing
+    // a row the database does not have.
+    const snapshot = await this.read();
+    const created = snapshot.users.find((row) => row.id === response.user.id) ?? snapshot.users[0];
+    return { snapshot, created, password: response.password };
   },
 
   async changeRole(userId: number, roleSlug: RoleSlug, reason: string) {
-    const target = requireUser(state, userId);
-    if (target.roleSlug === roleSlug) return settle(state);
-
-    const previousRole = state.roles.find((entry) => entry.slug === target.roleSlug);
-    const nextRole = state.roles.find((entry) => entry.slug === roleSlug);
-
-    // Explicit grants and revocations survive a role change; only the
-    // role-derived set is swapped. A temporary grant silently vanishing on a
-    // promotion would be a nasty way to lose access.
-    const kept = target.permissions.filter((permission) => permission.source !== "role");
-    const fromRole: EffectivePermission[] = (nextRole?.permissions ?? [])
-      .filter((key) => !kept.some((permission) => permission.key === key))
-      .map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" }));
-
-    const users = state.users.map((user) =>
-      user.id === userId ? { ...user, roleSlug, permissions: [...fromRole, ...kept] } : user,
-    );
-
-    const next = record({ ...state, users }, {
-      action: "user.role_changed",
-      targetType: "Account",
-      targetId: target.email,
-      reason,
-      before: previousRole?.name ?? target.roleSlug,
-      after: nextRole?.name ?? roleSlug,
+    await authorizedRequest(`/admin/v1/users/${userId}/role`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: roleNameFor(roleSlug), reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
-  async setPassword({ userId, reason, requireChange, revokeSessions }: SetPasswordInput) {
-    const target = requireUser(state, userId);
-    const users = state.users.map((user) =>
-      user.id === userId ? { ...user, status: user.status === "locked_out" ? ("active" as const) : user.status } : user,
+  async setPassword({ userId, reason, password }: SetPasswordInput) {
+    const response = await authorizedRequest<{ user: ServerAccount; password: string }>(
+      `/admin/v1/users/${userId}/password`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, password }),
+      },
     );
-    const sessions = revokeSessions ? state.sessions.filter((session) => session.userId !== userId) : state.sessions;
-
-    const next = record({ ...state, users, sessions }, {
-      action: "credential.password_set",
-      targetType: "Account",
-      targetId: target.email,
-      reason,
-      before: "—",
-      after: [
-        "password replaced",
-        requireChange ? "change required at next sign-in" : null,
-        revokeSessions ? "all sessions revoked" : null,
-      ]
-        .filter(Boolean)
-        .join(", "),
-    });
-
-    await settle(null);
-    return commit(next);
+    // Sessions always end with the password. A reset that leaves an existing
+    // session signed in has locked nobody out, so the server does it
+    // unconditionally rather than offering it as a choice.
+    return { snapshot: await this.read(), password: response.password };
   },
 
   async setStatus(userId: number, status: UserStatus, reason: string) {
-    const target = requireUser(state, userId);
-    if (target.isOwner && status === "deactivated") {
-      await settle(null);
-      throw new ApiFailure("owner_protected", "The owner cannot be deactivated. Transfer ownership first.", 409);
-    }
-
-    const users = state.users.map((user) => (user.id === userId ? { ...user, status } : user));
-    const sessions = status === "deactivated" ? state.sessions.filter((session) => session.userId !== userId) : state.sessions;
-
-    const next = record({ ...state, users, sessions }, {
-      action: status === "deactivated" ? "user.deactivated" : "user.reactivated",
-      targetType: "Account",
-      targetId: target.email,
-      reason,
-      before: target.status,
-      after: status,
+    await authorizedRequest(`/admin/v1/users/${userId}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: status === "active", reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async resetAuthenticator(userId: number, reason: string) {
-    const target = requireUser(state, userId);
-    const users = state.users.map((user) => (user.id === userId ? { ...user, mfa: "unenrolled" as const } : user));
-
-    const next = record({ ...state, users }, {
-      action: "credential.authenticator_reset",
-      targetType: "Account",
-      targetId: target.email,
-      reason,
-      before: target.mfa,
-      after: "unenrolled, must re-enrol at next sign-in",
+    await authorizedRequest(`/admin/v1/users/${userId}/factors`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async revokeSession(sessionId: string) {
@@ -520,22 +472,13 @@ export const directoryApi = {
     return commit(next);
   },
 
-  async revokeUserSessions(userId: number) {
-    const target = requireUser(state, userId);
-    const sessions = state.sessions.filter((session) => session.userId !== userId);
-    const removed = state.sessions.length - sessions.length;
-
-    const next = record({ ...state, sessions }, {
-      action: "session.revoked_all",
-      targetType: "Account",
-      targetId: target.email,
-      reason: "Signed out of every device.",
-      before: `${removed} active`,
-      after: "0 active",
+  async revokeUserSessions(userId: number, reason = "Sessions ended by an administrator.") {
+    await authorizedRequest(`/admin/v1/users/${userId}/sessions/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async revokeAllSessions() {
