@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button, Input, NativeSelect } from "./ui/primitives";
 import { useDirectory } from "../data/store";
+import { useAuth } from "../features/auth/AuthContext";
 
 /**
  * Standard roles are immutable, so customising means cloning. Starting from an
@@ -20,15 +21,18 @@ export function CloneRoleDialog({
   onCreated?: (slug: string) => void;
 }) {
   const { roles, createRole } = useDirectory();
+  const { stepUp } = useAuth();
 
   const [baseSlug, setBaseSlug] = useState("analyst");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [reason, setReason] = useState("");
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
   const base = roles.find((role) => role.slug === baseSlug);
-  const canSubmit = name.trim().length >= 3 && !busy;
+  const canSubmit = name.trim().length >= 3 && reason.trim().length >= 10 && code.trim().length === 6 && !busy;
 
   function reset() {
     setBaseSlug("analyst");
@@ -47,7 +51,12 @@ export function CloneRoleDialog({
     setBusy(true);
     setFailure("");
     try {
-      const created = await createRole({ name, description, baseSlug });
+      const problem = await stepUp(code);
+      if (problem) {
+        setFailure(problem);
+        return;
+      }
+      const created = await createRole({ name, description, baseSlug, reason: reason.trim() });
       onCreated?.(created.slug);
       close(false);
     } catch (cause) {
@@ -112,6 +121,34 @@ export function CloneRoleDialog({
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Who is this role for?"
+                autoComplete="off"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[13px] text-sand-muted/80" htmlFor="clone-reason">
+                Reason
+              </label>
+              <Input
+                id="clone-reason"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Why does this role need to exist?"
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="rounded-panel border border-signal/40 bg-signal/8 px-5 py-4">
+              <label className="block text-[13px] font-medium text-signal" htmlFor="clone-code">
+                Confirm with your authenticator
+              </label>
+              <Input
+                id="clone-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                placeholder="000000"
+                className="mt-2.5 w-32 text-center font-mono tracking-[0.3em]"
                 autoComplete="off"
               />
             </div>

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AuthProvider } from "../features/auth/AuthProvider";
 import { DirectoryProvider } from "../data/store";
 import { GrantPermissionDialog } from "./GrantPermissionDialog";
 import { PasswordDialog } from "./PasswordDialog";
@@ -19,7 +20,15 @@ import { USERS } from "../data/mock";
 const user = USERS[2];
 
 function withProvider(node: React.ReactNode) {
-  return render(<DirectoryProvider>{node}</DirectoryProvider>);
+  // Both providers, because the dialogs now step up through the auth context
+  // before they write. A dialog rendered without it would throw, which is the
+  // correct behaviour — a confirmation that cannot re-prove the authenticator
+  // must not offer to do the thing.
+  return render(
+    <AuthProvider>
+      <DirectoryProvider>{node}</DirectoryProvider>
+    </AuthProvider>,
+  );
 }
 
 function typeInto(element: HTMLElement, value: string) {
@@ -32,6 +41,16 @@ beforeEach(() => {
 
   // The dialogs reach the network now. Stubbed here so these stay tests of the
   // dialogs rather than of the transport, which has its own.
+  // The authenticator is proved against Supabase before every write now.
+  vi.spyOn(supabase.auth.mfa, "listFactors").mockResolvedValue({
+    data: { totp: [{ id: "factor-1", status: "verified" }], all: [], phone: [] },
+    error: null,
+  } as unknown as Awaited<ReturnType<typeof supabase.auth.mfa.listFactors>>);
+  vi.spyOn(supabase.auth.mfa, "challengeAndVerify").mockResolvedValue({
+    data: {},
+    error: null,
+  } as unknown as Awaited<ReturnType<typeof supabase.auth.mfa.challengeAndVerify>>);
+  vi.spyOn(supabase.auth, "signOut").mockResolvedValue({ error: null } as never);
   vi.spyOn(supabase.auth, "getSession").mockResolvedValue({
     data: { session: { access_token: "test-token" } },
     error: null,
@@ -61,7 +80,7 @@ describe("ConfirmDialog", () => {
   const consequences = ["They are signed out immediately.", "Nothing is deleted."];
 
   it("keeps the action disabled until reason and code are both satisfied", () => {
-    render(
+    withProvider(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -83,7 +102,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("rejects a reason too short to be worth reading", () => {
-    render(
+    withProvider(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -100,7 +119,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("requires the exact confirmation phrase when one is demanded", () => {
-    render(
+    withProvider(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -125,7 +144,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("stays open and shows why when the action fails", async () => {
-    render(
+    withProvider(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -149,7 +168,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("accepts only digits in the authenticator field", () => {
-    render(
+    withProvider(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -219,10 +238,22 @@ describe("PasswordDialog", () => {
 describe("GrantPermissionDialog", () => {
   it("will not submit until a permission is chosen", () => {
     withProvider(<GrantPermissionDialog user={user} open onOpenChange={() => {}} />);
-    expect(screen.getByRole("button", { name: "Grant permission" })).toBeDisabled();
+    const submit = screen.getByRole("button", { name: "Grant permission" });
+    typeInto(screen.getByLabelText("Confirm with your authenticator"), "482913");
+    expect(submit).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /^Grant view/ }));
-    expect(screen.getByRole("button", { name: "Grant permission" })).toBeEnabled();
+    expect(submit).toBeEnabled();
+  });
+
+  it("will not submit without the authenticator, because the server will refuse it", () => {
+    // The code is proved against Supabase before the write. Leaving it out
+    // means the token carries no recent factor and the operation is refused
+    // for staleness — better to stop here than to fail after the fact.
+    withProvider(<GrantPermissionDialog user={user} open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Grant view/ }));
+
+    expect(screen.getByRole("button", { name: "Grant permission" })).toBeDisabled();
   });
 
   it("demands a written reason for a high-risk permission", () => {
@@ -234,6 +265,7 @@ describe("GrantPermissionDialog", () => {
     expect(submit).toBeDisabled();
 
     typeInto(screen.getByLabelText(/Reason/), "Needed for the sensor rollout this week.");
+    typeInto(screen.getByLabelText("Confirm with your authenticator"), "482913");
     expect(submit).toBeEnabled();
   });
 

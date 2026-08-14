@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button, Panel, PanelHeader, TableWrap, Tag } from "../components/ui/primitives";
 import { CloneRoleDialog } from "../components/CloneRoleDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageBody, PageHeader, RiskBadge } from "../components/common";
 import { SkeletonTable } from "../components/states";
 import { cn } from "../lib/utils";
@@ -19,11 +20,16 @@ export function RolesPage() {
   const systemCount = roles.filter((role) => role.isSystem).length;
   const customCount = roles.length - systemCount;
 
-  async function toggle(slug: string, key: PermissionKey, held: boolean) {
+  // Editing a role changes what everybody holding it can do, so it asks for
+  // the same reason and authenticator as any other consequential change
+  // rather than being a toggle that takes effect silently.
+  const [editing, setEditing] = useState<{ slug: string; key: PermissionKey; held: boolean } | null>(null);
+
+  async function toggle(slug: string, key: PermissionKey, held: boolean, reason: string) {
     const cellId = `${slug}:${key}`;
     setPending(cellId);
     try {
-      await setRolePermission(slug, key, !held);
+      await setRolePermission(slug, key, !held, reason);
     } catch (cause) {
       toast.error("Not changed", { description: cause instanceof Error ? cause.message : "Try again." });
     } finally {
@@ -130,7 +136,7 @@ export function RolesPage() {
                             <button
                               type="button"
                               disabled={role.isSystem || busy}
-                              onClick={() => void toggle(role.slug, permission.key, held)}
+                              onClick={() => setEditing({ slug: role.slug, key: permission.key, held })}
                               title={
                                 role.isSystem
                                   ? `${role.name} is a standard role and cannot be edited. Clone it to customise.`
@@ -206,6 +212,25 @@ export function RolesPage() {
           </Panel>
         </div>
       </PageBody>
+
+      {editing ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => !next && setEditing(null)}
+          title={editing.held ? "Remove a permission from this role" : "Add a permission to this role"}
+          subject={`${editing.key} · ${editing.slug}`}
+          consequences={[
+            "Everyone holding this role is affected immediately.",
+            "Sealed into the audit trail with your reason.",
+          ]}
+          confirmLabel={editing.held ? "Remove permission" : "Add permission"}
+          tone={editing.held ? "danger" : "caution"}
+          onConfirm={async (reason) => {
+            await toggle(editing.slug, editing.key, editing.held, reason);
+            setEditing(null);
+          }}
+        />
+      ) : null}
 
       <CloneRoleDialog
         open={cloneOpen}

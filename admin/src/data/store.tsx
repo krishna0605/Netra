@@ -37,11 +37,12 @@ type DirectoryValue = DirectorySnapshot & {
   revokeUserSessions: (userId: number) => Promise<void>;
   revokeAllSessions: () => Promise<void>;
   grantPermission: (userId: number, key: PermissionKey, expiresAt: string | null, reason: string) => Promise<void>;
-  removeGrant: (userId: number, key: PermissionKey) => Promise<void>;
-  createRole: (input: { name: string; description: string; baseSlug: string }) => Promise<Role>;
-  setRolePermission: (slug: string, key: PermissionKey, held: boolean) => Promise<void>;
+  removeGrant: (userId: number, key: PermissionKey, reason: string) => Promise<void>;
+  createRole: (input: { name: string; description: string; baseSlug: string; reason: string }) => Promise<Role>;
+  setRolePermission: (slug: string, key: PermissionKey, held: boolean, reason: string) => Promise<void>;
   updateOrganization: (
-    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>,
+    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses">>,
+    reason: string,
   ) => Promise<void>;
   transferOwnership: (targetUserId: number, reason: string) => Promise<void>;
 };
@@ -161,14 +162,14 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   );
 
   const removeGrant = useCallback(
-    async (userId: number, key: PermissionKey) => {
-      setSnapshot(await run(() => directoryApi.removeGrant(userId, key)));
+    async (userId: number, key: PermissionKey, reason: string) => {
+      setSnapshot(await run(() => directoryApi.removeGrant(userId, key, reason)));
     },
     [run],
   );
 
   const createRole = useCallback(
-    async (input: { name: string; description: string; baseSlug: string }) => {
+    async (input: { name: string; description: string; baseSlug: string; reason: string }) => {
       const { snapshot: next, created } = await run(() => directoryApi.createRole(input));
       setSnapshot(next);
       return created;
@@ -177,15 +178,15 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   );
 
   const setRolePermission = useCallback(
-    async (slug: string, key: PermissionKey, held: boolean) => {
-      setSnapshot(await run(() => directoryApi.setRolePermission(slug, key, held)));
+    async (slug: string, key: PermissionKey, held: boolean, reason: string) => {
+      setSnapshot(await run(() => directoryApi.setRolePermission(slug, key, held, reason)));
     },
     [run],
   );
 
   const updateOrganization = useCallback(
-    async (changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>) => {
-      setSnapshot(await run(() => directoryApi.updateOrganization(changes)));
+    async (changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses">>, reason: string) => {
+      setSnapshot(await run(() => directoryApi.updateOrganization(changes, reason)));
     },
     [run],
   );

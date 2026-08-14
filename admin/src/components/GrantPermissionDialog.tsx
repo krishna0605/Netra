@@ -7,6 +7,7 @@ import { RiskBadge } from "./common";
 import { cn } from "../lib/utils";
 import { useDirectory } from "../data/store";
 import type { AdminUser, PermissionKey } from "../data/types";
+import { useAuth } from "../features/auth/AuthContext";
 
 /** Common windows, plus an explicit no-expiry that has to be chosen. */
 const WINDOWS = [
@@ -26,6 +27,7 @@ export function GrantPermissionDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { grantPermission, permissions } = useDirectory();
+  const { stepUp } = useAuth();
 
   const available = useMemo(
     () => permissions.filter((permission) => !user.permissions.some((held) => held.key === permission.key && held.source === "granted")),
@@ -35,6 +37,7 @@ export function GrantPermissionDialog({
   const [key, setKey] = useState<PermissionKey | "">("");
   const [days, setDays] = useState(30);
   const [reason, setReason] = useState("");
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
@@ -45,7 +48,7 @@ export function GrantPermissionDialog({
   // with one, and most people write it if the field is there.
   const reasonRequired = permission?.risk === "high";
   const reasonOk = !reasonRequired || reason.trim().length >= 10;
-  const canSubmit = Boolean(key) && reasonOk && !busy;
+  const canSubmit = Boolean(key) && reasonOk && code.trim().length === 6 && !busy;
 
   function reset() {
     setKey("");
@@ -66,6 +69,11 @@ export function GrantPermissionDialog({
     setFailure("");
     try {
       const expiresAt = days > 0 ? new Date(Date.now() + days * 864e5).toISOString() : null;
+      const problem = await stepUp(code);
+      if (problem) {
+        setFailure(problem);
+        return;
+      }
       await grantPermission(user.id, key, expiresAt, reason.trim() || `Granted ${key} to ${user.name}.`);
       close(false);
     } catch (cause) {
@@ -158,6 +166,22 @@ export function GrantPermissionDialog({
                   {permission?.key} is high-risk, so a written reason is required.
                 </p>
               ) : null}
+            </div>
+
+
+            <div className="rounded-panel border border-signal/40 bg-signal/8 px-5 py-4">
+              <label className="block text-[13px] font-medium text-signal" htmlFor="grant-code">
+                Confirm with your authenticator
+              </label>
+              <Input
+                id="grant-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                placeholder="000000"
+                className="mt-2.5 w-32 text-center font-mono tracking-[0.3em]"
+                autoComplete="off"
+              />
             </div>
 
             {failure ? (

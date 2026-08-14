@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
 import { Avatar, Button, Field, Input, Panel, PanelHeader, Status, Tag } from "../components/ui/primitives";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OwnerTransferDialog } from "../components/OwnerTransferDialog";
 import { PageBody, PageHeader } from "../components/common";
 import { SkeletonList } from "../components/states";
@@ -45,10 +46,12 @@ export function OrganizationPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  async function save() {
+  const [confirming, setConfirming] = useState(false);
+
+  async function save(reason: string) {
     setSaving(true);
     try {
-      await updateOrganization(form);
+      await updateOrganization(form, reason);
       toast.success("Settings saved");
     } catch (cause) {
       toast.error("Not saved", { description: cause instanceof Error ? cause.message : "Try again." });
@@ -133,7 +136,7 @@ export function OrganizationPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={() => void save()}>
+                <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={() => setConfirming(true)}>
                   {saving ? "Saving…" : "Save changes"}
                 </Button>
                 {dirty ? (
@@ -195,6 +198,23 @@ export function OrganizationPage() {
           </Panel>
         </div>
       </PageBody>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Change organization settings"
+        subject={organization.name}
+        consequences={[
+          "Applies to every case and officer in this organization.",
+          "Sealed into the audit trail with your reason.",
+        ]}
+        confirmLabel="Save changes"
+        tone="caution"
+        onConfirm={async (reason) => {
+          await save(reason);
+          setConfirming(false);
+        }}
+      />
 
       <OwnerTransferDialog open={transferOpen} onOpenChange={setTransferOpen} />
     </>

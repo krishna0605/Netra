@@ -5,7 +5,6 @@ import type {
   ActivityEvent,
   AdminUser,
   AuditEvent,
-  EffectivePermission,
   CapabilityFlag,
   OrganizationSettings,
   Permission,
@@ -178,12 +177,6 @@ function record(
   };
 
   return { ...base, audit: [auditEvent, ...base.audit], activity: [activityEvent, ...base.activity] };
-}
-
-function requireUser(snapshot: DirectorySnapshot, userId: number): AdminUser {
-  const user = snapshot.users.find((entry) => entry.id === userId);
-  if (!user) throw new ApiFailure("resource_not_found", "That account no longer exists.", 404);
-  return user;
 }
 
 /* ---------------------------------------------------------------------------
@@ -496,169 +489,65 @@ export const directoryApi = {
   },
 
   async grantPermission(userId: number, key: PermissionKey, expiresAt: string | null, reason: string) {
-    const target = requireUser(state, userId);
-    const permissions: EffectivePermission[] = [
-      ...target.permissions.filter((permission) => permission.key !== key),
-      { key, source: "granted", expiresAt, reason, grantedBy: CURRENT_OPERATOR.name },
-    ];
-    const users = state.users.map((user) => (user.id === userId ? { ...user, permissions } : user));
-
-    const next = record({ ...state, users }, {
-      action: "permission.granted",
-      targetType: "Account",
-      targetId: target.email,
-      reason,
-      before: "—",
-      after: `+${key}${expiresAt ? ` until ${new Date(expiresAt).toLocaleDateString("en-IN")}` : ", no expiry"}`,
+    await authorizedRequest(`/admin/v1/users/${userId}/grants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ permission: key, expiresAt, reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
-  async createRole(input: { name: string; description: string; baseSlug: string }) {
-    const slug = input.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    if (!slug) throw new ApiFailure("invalid_role_name", "Give the role a name.", 400);
-    if (state.roles.some((role) => role.slug === slug)) {
-      await settle(null);
-      throw new ApiFailure("role_exists", "A role with that name already exists.", 409);
-    }
-
-    const base = state.roles.find((role) => role.slug === input.baseSlug);
-    const created: Role = {
-      slug,
-      name: input.name.trim(),
-      description: input.description.trim() || `Cloned from ${base?.name ?? "an existing role"}.`,
-      isSystem: false,
-      permissions: [...(base?.permissions ?? [])],
-      memberCount: 0,
-    };
-
-    const next = record({ ...state, roles: [...state.roles, created] }, {
-      action: "role.created",
-      targetType: "Role",
-      targetId: slug,
-      reason: `Cloned from ${base?.name ?? "an existing role"}.`,
-      before: "—",
-      after: `${created.permissions.length} permissions`,
+  async createRole(input: { name: string; description: string; baseSlug: string; reason: string }) {
+    const { role } = await authorizedRequest<{ role: { slug: string; name: string } }>("/admin/v1/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
     });
 
-    await settle(null);
-    commit(next);
-    return { snapshot: state, created };
+    const snapshot = await this.read();
+    const created = snapshot.roles.find((entry) => entry.slug === role.slug) ?? snapshot.roles[0];
+    return { snapshot, created };
   },
 
-  async setRolePermission(slug: string, key: PermissionKey, held: boolean) {
-    const role = state.roles.find((entry) => entry.slug === slug);
-    if (!role) throw new ApiFailure("resource_not_found", "That role no longer exists.", 404);
-    if (role.isSystem) {
-      await settle(null);
-      throw new ApiFailure("system_role_locked", "Standard roles cannot be edited. Clone one to customise it.", 409);
-    }
-
-    const permissions = held
-      ? [...new Set([...role.permissions, key])]
-      : role.permissions.filter((entry) => entry !== key);
-    const roles = state.roles.map((entry) => (entry.slug === slug ? { ...entry, permissions } : entry));
-
-    const next = record({ ...state, roles }, {
-      action: held ? "role.permission_added" : "role.permission_removed",
-      targetType: "Role",
-      targetId: slug,
-      reason: `${held ? "Added" : "Removed"} ${key} on ${role.name}.`,
-      before: held ? "—" : key,
-      after: held ? key : "—",
+  async setRolePermission(slug: string, key: PermissionKey, held: boolean, reason: string) {
+    // Adding and removing are different verbs on the same resource, which is
+    // how the server tells "grant this" from "take this away" — only the
+    // first is checked against what the administrator themselves holds.
+    await authorizedRequest(`/admin/v1/roles/${slug}/permissions/${key}`, {
+      method: held ? "PUT" : "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async updateOrganization(
-    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses" | "accessLogRetentionDays">>,
+    changes: Partial<Pick<OrganizationSettings, "name" | "maxQueuedAnalyses">>,
+    reason: string,
   ) {
-    const before = state.organization;
-    const organization = { ...before, ...changes };
-
-    const described = Object.entries(changes)
-      .filter(([key, value]) => before[key as keyof OrganizationSettings] !== value)
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(", ");
-
-    if (!described) return settle(state);
-
-    const next = record({ ...state, organization }, {
-      action: "organization.updated",
-      targetType: "Organization",
-      targetId: before.slug,
-      reason: "Organization settings changed by an administrator.",
-      before: Object.keys(changes)
-        .map((key) => `${key}=${String(before[key as keyof OrganizationSettings])}`)
-        .join(", "),
-      after: described,
+    await authorizedRequest("/admin/v1/organization", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...changes, reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 
   async transferOwnership(targetUserId: number, reason: string) {
-    const target = requireUser(state, targetUserId);
-    const current = state.users.find((user) => user.isOwner);
-
-    if (target.isOwner) {
-      await settle(null);
-      throw new ApiFailure("already_owner", "That account already owns this organization.", 409);
-    }
-    if (target.status !== "active") {
-      await settle(null);
-      throw new ApiFailure("inactive_target", "Ownership can only pass to an active account.", 409);
-    }
-
-    // Demote and promote together. A moment with no owner, or with two, is a
-    // state nothing downstream should ever have to interpret.
-    const users = state.users.map((user) => ({
-      ...user,
-      isOwner: user.id === targetUserId,
-      roleSlug:
-        user.id === targetUserId ? "admin" : user.id === current?.id ? "investigator" : user.roleSlug,
-    }));
-
-    const next = record(
-      { ...state, users, organization: { ...state.organization, ownerUserId: targetUserId } },
-      {
-        action: "organization.owner_transferred",
-        targetType: "Organization",
-        targetId: state.organization.slug,
-        reason,
-        before: current?.email ?? "—",
-        after: target.email,
-      },
-    );
-
-    await settle(null);
-    return commit(next);
+    await authorizedRequest("/admin/v1/organization/owner-transfer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId, reason }),
+    });
+    return this.read();
   },
 
-  async removeGrant(userId: number, key: PermissionKey) {
-    const target = requireUser(state, userId);
-    const role = state.roles.find((entry) => entry.slug === target.roleSlug);
-    const permissions = target.permissions.filter((permission) => permission.key !== key);
-    if (role?.permissions.includes(key)) {
-      permissions.push({ key, source: "role", expiresAt: null, reason: "", grantedBy: "" });
-    }
-    const users = state.users.map((user) => (user.id === userId ? { ...user, permissions } : user));
-
-    const next = record({ ...state, users }, {
-      action: "permission.grant_removed",
-      targetType: "Account",
-      targetId: target.email,
-      reason: "Temporary permission withdrawn.",
-      before: `+${key}`,
-      after: role?.permissions.includes(key) ? `${key} from role` : "—",
+  async removeGrant(userId: number, key: PermissionKey, reason: string) {
+    await authorizedRequest(`/admin/v1/users/${userId}/grants`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ permission: key, reason }),
     });
-
-    await settle(null);
-    return commit(next);
+    return this.read();
   },
 };

@@ -5,11 +5,13 @@ import { useState } from "react";
 import { Button, Input, NativeSelect, Panel, Tag } from "./ui/primitives";
 import { PasswordField } from "./PasswordField";
 import { generatePassword, passwordStrength, useDirectory } from "../data/store";
+import { useAuth } from "../features/auth/AuthContext";
 
 type Handover = { name: string; email: string; password: string; roleName: string };
 
 export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { createUser, roles, organization } = useDirectory();
+  const { stepUp } = useAuth();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -52,6 +54,11 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setBusy(true);
     setFailure("");
     try {
+      const problem = await stepUp(code);
+      if (problem) {
+        setFailure(problem);
+        return;
+      }
       const { created, password: applied } = await createUser({
         name,
         email,

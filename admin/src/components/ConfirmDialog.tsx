@@ -3,6 +3,7 @@ import { AlertTriangle, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { Button, Input } from "./ui/primitives";
+import { useAuth } from "../features/auth/AuthContext";
 import { cn } from "../lib/utils";
 
 /**
@@ -43,6 +44,7 @@ export function ConfirmDialog({
   typeToConfirm?: string;
   onConfirm: (reason: string) => Promise<void>;
 }) {
+  const { stepUp } = useAuth();
   const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
   const [typed, setTyped] = useState("");
@@ -71,6 +73,19 @@ export function ConfirmDialog({
     setBusy(true);
     setFailure("");
     try {
+      // The code is proved against Supabase before the write, not merely
+      // counted to six. That mints a token with a current amr claim, which is
+      // what the server reads to decide whether the authenticator was used
+      // recently enough. Without this step the prompt was decoration and the
+      // operation would be refused for staleness anyway.
+      if (requireCode) {
+        const problem = await stepUp(code);
+        if (problem) {
+          setFailure(problem);
+          setBusy(false);
+          return;
+        }
+      }
       await onConfirm(reason.trim());
       close(false);
     } catch (cause) {

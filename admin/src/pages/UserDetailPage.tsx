@@ -26,6 +26,7 @@ import { GrantPermissionDialog } from "../components/GrantPermissionDialog";
 import { PasswordDialog } from "../components/PasswordDialog";
 import { dateTimeLabel, initials, relativeLabel, timeLabel } from "../lib/utils";
 import type { PermissionSource } from "../data/types";
+import type { PermissionKey } from "../data/types";
 
 const SOURCE: Record<PermissionSource, { label: string; tone: "neutral" | "accent" | "crit" }> = {
   role: { label: "From role", tone: "neutral" },
@@ -54,6 +55,9 @@ export function UserDetailPage() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [grantOpen, setGrantOpen] = useState(false);
   const [confirming, setConfirming] = useState<"authenticator" | "deactivate" | null>(null);
+  // Withdrawing an override changes what somebody can do, so it asks for a
+  // reason and the authenticator like every other permission change.
+  const [withdrawing, setWithdrawing] = useState<PermissionKey | null>(null);
 
   const user = users.find((entry) => String(entry.id) === userId);
 
@@ -226,13 +230,7 @@ export function UserDetailPage() {
                           {permission.source === "granted" ? (
                             <button
                               type="button"
-                              onClick={() =>
-                                apply(
-                                  removeGrant(user.id, permission.key),
-                                  "Grant withdrawn",
-                                  `${permission.key} removed from ${user.name}.`,
-                                )
-                              }
+                              onClick={() => setWithdrawing(permission.key)}
                               className="grid size-6 place-items-center rounded-control text-sand-muted/70 hover:text-state-crit"
                               aria-label={`Withdraw ${permission.key}`}
                             >
@@ -445,6 +443,25 @@ export function UserDetailPage() {
         confirmLabel="Deactivate"
         onConfirm={(reason) => setStatus(user.id, "deactivated", reason)}
       />
+
+      {withdrawing ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => !next && setWithdrawing(null)}
+          title="Withdraw a permission"
+          subject={`${withdrawing} · ${user.name}`}
+          consequences={[
+            "Their role decides again, which may leave them without this permission.",
+            "It takes effect on their next request, not at their next sign-in.",
+            "Sealed into the audit trail with your reason.",
+          ]}
+          confirmLabel="Withdraw"
+          onConfirm={async (reason) => {
+            await removeGrant(user.id, withdrawing, reason);
+            setWithdrawing(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

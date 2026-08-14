@@ -23,7 +23,19 @@ import {
 
 const SUPABASE = "**/auth/v1/**";
 
-const USER = { id: "e2e-user-0001", email: "operator@gcc.gov.in", aud: "authenticated", role: "authenticated" };
+// The enrolled factor lives on the user object, not behind a /factors route:
+// supabase-js resolves listFactors() from the current user rather than the
+// network, so an operator with no factors here cannot step up and the console
+// correctly refuses its own writes.
+const USER = {
+  id: "e2e-user-0001",
+  email: "operator@gcc.gov.in",
+  aud: "authenticated",
+  role: "authenticated",
+  factors: [
+    { id: "e2e-factor", status: "verified", factor_type: "totp", friendly_name: "Authenticator" },
+  ],
+};
 
 /**
  * A structurally valid, unsigned JWT.
@@ -46,8 +58,8 @@ function fakeJwt(claims: Record<string, unknown>) {
       role: "authenticated",
       iat: now,
       exp: now + 3600,
-      aal: "aal1",
-      amr: [{ method: "password", timestamp: now }],
+      aal: "aal2",
+      amr: [{ method: "password", timestamp: now }, { method: "totp", timestamp: now }],
       ...claims,
     }),
     "e2e-signature-not-verified-client-side",
@@ -172,10 +184,42 @@ async function stubAuth(page: Page) {
       });
     }
 
-    // No enrolled factors, so the verify screen is skipped and the journey
-    // goes straight to the chooser.
+    // A verified authenticator, which is what step-up re-proves against before
+    // every write. Returning none here made the console refuse its own writes,
+    // which is the server's rule working rather than a bug.
+    if (url.includes("/verify")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: fakeJwt({}),
+          refresh_token: "e2e-refresh-token",
+          token_type: "bearer",
+          expires_in: 3600,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          user: USER,
+        }),
+      });
+    }
+
+    if (url.includes("/challenge")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "e2e-challenge", expires_at: Math.floor(Date.now() / 1000) + 300 }),
+      });
+    }
+
     if (url.includes("/factors")) {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          totp: [{ id: "e2e-factor", status: "verified", friendly_name: "Authenticator" }],
+          phone: [],
+          all: [{ id: "e2e-factor", status: "verified", factor_type: "totp" }],
+        }),
+      });
     }
 
     if (url.includes("/user")) {
@@ -447,4 +491,38 @@ test("an intact audit chain reports as verified only after it is checked", async
   await expect(page.getByText("Not verified")).toBeVisible();
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page.getByText("Verified", { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
+test("a rejected authenticator code stops the write before it is sent", async ({ page }) => {
+  await stubAuth(page);
+  // The code is proved against Supabase first. A wrong one must stop the
+  // operation here rather than let it travel and be refused for staleness,
+  // which would report the wrong reason to the operator.
+  await page.route("**/auth/v1/factors/*/verify", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "invalid_code", error_description: "Invalid TOTP code entered" }),
+    }),
+  );
+
+  let wrote = false;
+  await page.route("**/api/admin/v1/users/*/status", (route) => {
+    wrote = true;
+    return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  await signIn(page);
+  await enterAdministration(page);
+  await page.getByRole("link", { name: "Users" }).click();
+  await expect(page.getByText("a.patel@gcc.gov.in")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("link", { name: /Open A\. Mehta/ }).click();
+
+  await page.getByRole("button", { name: "Deactivate" }).first().click();
+  await page.getByLabel("Reason").fill("Transferred out of the unit.");
+  await page.getByLabel("Confirm with your authenticator").fill("000000");
+  await page.getByRole("button", { name: "Deactivate" }).last().click();
+
+  await expect(page.getByText(/not accepted|Codes expire/i).first()).toBeVisible({ timeout: 15_000 });
+  expect(wrote).toBe(false);
 });

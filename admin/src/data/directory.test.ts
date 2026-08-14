@@ -180,52 +180,111 @@ describe("account writes", () => {
   });
 });
 
-describe("roles", () => {
-  it("refuses to edit a standard role at the boundary, not only in the interface", async () => {
-    await expect(directoryApi.setRolePermission("analyst", "export", true)).rejects.toMatchObject({
-      code: "system_role_locked",
-    });
+describe("role, grant and organization writes", () => {
+  /**
+   * These assert the request, not the outcome. Roles, grants and ownership
+   * are the server's decisions now — whether a standard role may be edited,
+   * whether a grant exceeds what the administrator holds, whether ownership
+   * may move — and they are proved against a real database in the server's own
+   * suite. Repeating them here against a stub would only assert that the stub
+   * agrees with itself.
+   */
+  function stubWrite(body: unknown = {}, status = 200) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    let first = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push({ url: String(url), init });
+        if (first && !String(url).endsWith("/admin/v1/directory")) {
+          first = false;
+          return new Response(JSON.stringify(body), { status });
+        }
+        return new Response(JSON.stringify(currentDirectory()), { status: 200 });
+      }),
+    );
+    return calls;
+  }
+
+  it("adds a role permission with PUT and removes it with DELETE", async () => {
+    // The verb is what lets the server tell "grant this" from "take this
+    // away" — only the first is checked against what the administrator holds.
+    const added = stubWrite();
+    await directoryApi.setRolePermission("records_desk", "export", true, "Needed for disclosure packs.");
+    expect(added[0].init.method).toBe("PUT");
+    expect(added[0].url).toContain("/roles/records_desk/permissions/export");
+
+    vi.unstubAllGlobals();
+    const removed = stubWrite();
+    await directoryApi.setRolePermission("records_desk", "export", false, "No longer required.");
+    expect(removed[0].init.method).toBe("DELETE");
   });
 
-  it("clones a role with the base role's permissions", async () => {
-    const { created } = await directoryApi.createRole({
+  it("surfaces the server refusing to edit a standard role", async () => {
+    stubWrite({ error: { code: "system_role_locked", message: "Copy it instead." } }, 409);
+
+    await expect(
+      directoryApi.setRolePermission("analyst", "export", true, "Should be refused by the server."),
+    ).rejects.toMatchObject({ code: "system_role_locked" });
+  });
+
+  it("sends a clone with the role it was based on", async () => {
+    const calls = stubWrite({ role: { slug: "records_desk", name: "Records Desk" } }, 201);
+
+    await directoryApi.createRole({
       name: "Records Desk",
       description: "",
       baseSlug: "analyst",
+      reason: "The desk needs its own role.",
     });
 
-    const snapshot = await directoryApi.read();
-    const base = snapshot.roles.find((role) => role.slug === "analyst")!;
-
-    expect(created.isSystem).toBe(false);
-    expect([...created.permissions].sort()).toEqual([...base.permissions].sort());
+    expect(JSON.parse(String(calls[0].init.body)).baseSlug).toBe("analyst");
+    expect(calls[1].url).toContain("/admin/v1/directory");
   });
 
-  it("allows editing a cloned role", async () => {
-    await directoryApi.createRole({ name: "Editable Role", description: "", baseSlug: "viewer" });
-    const after = await directoryApi.setRolePermission("editable_role", "export", true);
-    const role = after.roles.find((entry) => entry.slug === "editable_role")!;
-    expect(role.permissions).toContain("export");
-  });
-});
+  it("sends a grant with its expiry", async () => {
+    const calls = stubWrite();
 
-describe("transferOwnership", () => {
-  it("leaves exactly one owner", async () => {
-    const before = await directoryApi.read();
-    const candidate = before.users.find((user) => !user.isOwner && user.status === "active")!;
+    await directoryApi.grantPermission(41, "export", "2099-01-01T00:00:00Z", "Needed for one disclosure.");
 
-    const after = await directoryApi.transferOwnership(candidate.id, "Handing over at the end of a posting.");
-
-    expect(after.users.filter((user) => user.isOwner)).toHaveLength(1);
-    expect(after.users.find((user) => user.isOwner)!.id).toBe(candidate.id);
+    const sent = JSON.parse(String(calls[0].init.body));
+    expect(sent.permission).toBe("export");
+    expect(sent.expiresAt).toBe("2099-01-01T00:00:00Z");
   });
 
-  it("refuses an inactive recipient", async () => {
-    const before = await directoryApi.read();
-    const inactive = before.users.find((user) => user.status === "deactivated")!;
+  it("surfaces a grant the server refuses as beyond your own permissions", async () => {
+    stubWrite({ error: { code: "beyond_your_permissions", message: "You cannot grant what you do not hold." } }, 403);
 
-    await expect(directoryApi.transferOwnership(inactive.id, "Should not be permitted.")).rejects.toMatchObject({
-      code: "inactive_target",
+    await expect(directoryApi.grantPermission(41, "export", null, "Should be refused.")).rejects.toMatchObject({
+      code: "beyond_your_permissions",
+    });
+  });
+
+  it("withdraws an override with DELETE and a reason", async () => {
+    const calls = stubWrite();
+
+    await directoryApi.removeGrant(41, "export", "The case is closed.");
+
+    expect(calls[0].init.method).toBe("DELETE");
+    expect(JSON.parse(String(calls[0].init.body)).reason).toBe("The case is closed.");
+  });
+
+  it("sends organization changes as a PATCH carrying its reason", async () => {
+    const calls = stubWrite();
+
+    await directoryApi.updateOrganization({ maxQueuedAnalyses: 8 }, "Capacity raised after the upgrade.");
+
+    expect(calls[0].init.method).toBe("PATCH");
+    const sent = JSON.parse(String(calls[0].init.body));
+    expect(sent.maxQueuedAnalyses).toBe(8);
+    expect(sent.reason).toContain("Capacity");
+  });
+
+  it("surfaces the server refusing an ownership transfer", async () => {
+    stubWrite({ error: { code: "owner_only", message: "Only the current owner can transfer ownership." } }, 403);
+
+    await expect(directoryApi.transferOwnership(41, "Attempting to seize ownership.")).rejects.toMatchObject({
+      code: "owner_only",
     });
   });
 });

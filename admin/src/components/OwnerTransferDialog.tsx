@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Avatar, Button, Input } from "./ui/primitives";
 import { cn, initials } from "../lib/utils";
 import { useDirectory } from "../data/store";
+import { useAuth } from "../features/auth/AuthContext";
 
 /**
  * The most consequential action in the console: it demotes the person doing it.
@@ -16,6 +17,7 @@ import { useDirectory } from "../data/store";
  */
 export function OwnerTransferDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { users, organization, transferOwnership } = useDirectory();
+  const { stepUp } = useAuth();
 
   const [query, setQuery] = useState("");
   const [targetId, setTargetId] = useState<number | null>(null);
@@ -58,6 +60,11 @@ export function OwnerTransferDialog({ open, onOpenChange }: { open: boolean; onO
     setBusy(true);
     setFailure("");
     try {
+      const problem = await stepUp(code);
+      if (problem) {
+        setFailure(problem);
+        return;
+      }
       await transferOwnership(targetId, reason.trim());
       close(false);
     } catch (cause) {

@@ -6,6 +6,7 @@ import { Button, Input, Panel } from "./ui/primitives";
 import { PasswordField } from "./PasswordField";
 import { generatePassword, passwordStrength, useDirectory } from "../data/store";
 import type { AdminUser } from "../data/types";
+import { useAuth } from "../features/auth/AuthContext";
 
 export function PasswordDialog({
   user,
@@ -17,6 +18,7 @@ export function PasswordDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { setPassword } = useDirectory();
+  const { stepUp } = useAuth();
 
   const [password, setPasswordValue] = useState(generatePassword);
   const [reason, setReason] = useState("");
@@ -42,6 +44,11 @@ export function PasswordDialog({
     setBusy(true);
     setFailure("");
     try {
+      const problem = await stepUp(code);
+      if (problem) {
+        setFailure(problem);
+        return;
+      }
       const applied = await setPassword({ userId: user.id, reason: reason.trim(), password });
       // Hand over what the server applied, not what this dialog proposed. The
       // server may have generated its own, and passing on the wrong one gives

@@ -161,6 +161,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [settleAfterFactor],
   );
 
+
+  /**
+   * Re-prove possession of the authenticator, mid-session.
+   *
+   * This is what makes the code prompts on destructive dialogs mean something.
+   * They used to check that six digits had been typed and send them nowhere,
+   * so the server — which reads freshness from the token's amr claim — saw
+   * nothing change and refused the operation once the session was more than a
+   * few minutes old.
+   *
+   * challengeAndVerify mints a new token with a current amr timestamp, so the
+   * request that follows carries proof rather than a claim.
+   *
+   * Returns "" on success, or a sentence to show the operator.
+   */
+  const stepUp = useCallback(async (code: string): Promise<string> => {
+    try {
+      const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+      const totp = factors?.totp?.find((factor) => factor.status === "verified") ?? factors?.totp?.[0];
+      if (listError || !totp) {
+        return "No authenticator is enrolled on this account.";
+      }
+
+      const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({
+        factorId: totp.id,
+        code: code.trim(),
+      });
+      if (verifyError) {
+        const status = Number((verifyError as { status?: number }).status ?? 0);
+        return status === 0 || status >= 402
+          ? describeFailure(verifyError)
+          : "That code was not accepted. Codes expire after 30 seconds.";
+      }
+
+      setVerifiedAt(new Date().toISOString());
+      return "";
+    } catch {
+      return "Verification is unavailable. Check your connection and try again.";
+    }
+  }, []);
+
   const verifyCode = useCallback(
     async (code: string) => {
       setBusy(true);
@@ -247,13 +288,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       busy,
       signIn,
       verifyCode,
+      stepUp,
       chooseAdministration,
       returnToChooser,
       signOut,
       clearError,
       isStepUpFresh,
     }),
-    [stage, profile, verifiedAt, error, busy, signIn, verifyCode, chooseAdministration, returnToChooser, signOut, clearError, isStepUpFresh],
+    [stage, profile, verifiedAt, error, busy, signIn, verifyCode, stepUp, chooseAdministration, returnToChooser, signOut, clearError, isStepUpFresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

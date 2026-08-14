@@ -20,6 +20,9 @@ export type AdminProfile = {
   isAdministrative: boolean;
 };
 
+/** Why a step-up did not happen. "" means it did. */
+export type StepUpResult = "" | string;
+
 export type AuthValue = {
   stage: AuthStage;
   profile: AdminProfile | null;
@@ -30,6 +33,9 @@ export type AuthValue = {
 
   signIn: (email: string, password: string) => Promise<void>;
   verifyCode: (code: string) => Promise<void>;
+  /** Re-prove the authenticator mid-session so a destructive write carries
+   *  proof rather than a claim. Returns "" on success, else a sentence. */
+  stepUp: (code: string) => Promise<StepUpResult>;
   chooseAdministration: () => void;
   returnToChooser: () => void;
   signOut: () => Promise<void>;
