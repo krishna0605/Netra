@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 import re
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -204,7 +205,8 @@ class ApiAccessControlTests(TestCase):
         NETRA_ENABLE_CAPTURE_SCHEDULES=False,
         NETRA_ENABLE_RETENTION_OPERATIONS=False,
     )
-    def test_hackathon_profile_gates_operations_but_keeps_admin_diagnostics(self):
+    @patch("apps.forensics.api.capture.backpressure_allows_new_capture", return_value=(True, {}))
+    def test_hackathon_profile_gates_operations_but_keeps_admin_diagnostics(self, _capacity):
         _admin, headers = self._user("profile-admin@example.test", "Admin")
         identity = self.client.get("/api/auth/me", **headers)
         self.assertEqual(identity.status_code, 200)

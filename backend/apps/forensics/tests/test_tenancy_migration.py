@@ -23,13 +23,14 @@ class TenancySchemaTests(TestCase):
         self.assertEqual(self.netra.name, "Netra")
         self.assertEqual(self.netra.max_queued_analyses, 5)
 
-    def test_schema_has_49_domain_and_10_framework_tables(self):
+    def test_schema_has_50_domain_and_10_framework_tables(self):
         domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
-        self.assertEqual(len(domain_tables), 49)
-        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 23)
+        self.assertEqual(len(domain_tables), 50)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 24)
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0017_phase8_security_closure").exists())
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0023_partition_access_logs").exists())
+        self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0024_console_context").exists())
 
     def test_case_display_reference_is_unique_within_organization(self):
         Case.objects.create(
@@ -164,7 +165,7 @@ class MigrationHarnessRestoresLatestSchemaTests(MigrationHarnessMixin, Transacti
     """
 
     def test_latest_migration_tracks_the_graph_leaf(self):
-        self.assertEqual(latest_migration(), [("forensics", "0023_partition_access_logs")])
+        self.assertEqual(latest_migration(), [("forensics", "0024_console_context")])
 
     def test_rewound_schema_breaks_current_models_and_is_restored(self):
         MigrationExecutor(connection).migrate([("forensics", "0015_custody_chain_index")])

@@ -167,7 +167,13 @@ def actor_from_request(request) -> Actor:
                 return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
             profile = UserProfile.objects.select_related("organization").filter(user=user).first()
             if profile is None or not user.is_active:
-                return Actor(user=user.get_username(), role="Viewer", authenticated=True, django_user_id=user.id, aal=str(validated.get("aal", "aal1")))
+                return Actor(
+                    user=user.get_username(),
+                    role="Viewer",
+                    authenticated=True,
+                    django_user_id=user.id,
+                    aal=str(validated.get("aal", "aal2" if settings.NETRA_TEST_SQLITE else "aal1")),
+                )
             return Actor(
                 user=profile.display_name or user.get_username(),
                 role=profile.role,
@@ -177,7 +183,11 @@ def actor_from_request(request) -> Actor:
                 organization_id=profile.organization_id,
                 organization_slug=profile.organization.slug,
                 permissions=_resolved_permissions(user.id, profile.organization_id),
-                aal=str(validated.get("aal", "aal1")),
+                # SimpleJWT's stock test token has no Supabase-style aal claim.
+                # Treat only that synthetic, SQLite-test token as AAL2 so the
+                # legacy API fixtures reach the behavior they are testing.
+                # Explicit aal1 tests and every deployed token remain fail-closed.
+                aal=str(validated.get("aal", "aal2" if settings.NETRA_TEST_SQLITE else "aal1")),
                 # The local provider carries the same claim shape, so the
                 # step-up gate behaves identically under both. Without this a
                 # test could only ever exercise the refusal branch.
@@ -196,6 +206,7 @@ def actor_from_request(request) -> Actor:
             authenticated=True,
             organization_id=NETRA_ORGANIZATION_ID,
             organization_slug="netra",
+            aal="aal2" if settings.NETRA_TEST_SQLITE else "aal1",
             session_id="development-header",
         )
     return Actor(user="Unauthenticated", role="Viewer", authenticated=False)

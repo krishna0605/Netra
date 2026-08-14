@@ -44,7 +44,7 @@ class AdministratorInvariantTests(TestCase):
             **self._headers(self.admin),
         )
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["error"]["code"], "aal2_required")
+        self.assertEqual(response.json()["code"], "aal2_required")
 
     def test_aal2_admin_can_create_only_non_admin_profile(self):
         response = self.client.post(
