@@ -63,6 +63,7 @@ test("a dual-access investigator can return to the chooser without signing out",
   await openInvestigation(page);
   await page.getByRole("button", { name: "Switch workspace" }).click();
   await expect(page.getByRole("heading", { name: "Choose a workspace" })).toBeVisible();
+  await expect(page.getByText("Opening workspace", { exact: true })).toHaveCount(0);
 });
 
 test("a refused Administration switch falls back to Investigation", async ({ page }) => {

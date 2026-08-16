@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
+import { PageTransition } from "../../components/PageTransition";
 import { Alert, Button, Input } from "../../components/ui/primitives";
 import { useCapabilities } from "../../lib/useCapabilities";
 import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
@@ -82,7 +83,7 @@ function LoginPage() {
 
 function LeaveAuthApplication() {
   window.location.replace("/");
-  return <main id="main-content" aria-busy="true"><p role="status">Opening the investigation console…</p></main>;
+  return <PageTransition label="Loading your secure access" />;
 }
 
 

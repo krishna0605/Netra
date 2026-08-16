@@ -1,5 +1,6 @@
 import { Activity, AlertTriangle, ArrowLeftRight, Database, FileSearch, FileText, FolderSearch, KeyRound, Languages, LogOut, type LucideIcon, Menu, PanelLeftClose, PanelLeftOpen, Search, Settings as SettingsIcon, ShieldCheck, Upload } from "lucide-react";
 import { Alert, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sheet, SheetContent, SheetTitle, TooltipProvider } from "../../components/ui/primitives";
+import { InlineTransition, PageTransition } from "../../components/PageTransition";
 import { appViewRoute } from "./ConsoleCore";
 import { AuthProvider } from "../auth/AuthProvider";
 import { caseWorkspaceRoute } from "./ConsoleCore";
@@ -22,7 +23,9 @@ import { useNetra } from "./ConsoleCore";
 import { VIEW_REFS } from "./ConsoleCore";
 import { clearLastConsoleWorkspace, getLastConsoleWorkspace, rememberConsoleWorkspace, switchConsoleWorkspace } from "../../lib/consoleContext";
 
-const UploadPage = lazy(() => import("./evidence/EvidencePages").then((module) => ({ default: module.UploadPage })));
+const loadEvidencePages = () => import("./evidence/EvidencePages");
+const loadAdministrationWorkspace = () => import("../administration/EmbeddedApp");
+const UploadPage = lazy(() => loadEvidencePages().then((module) => ({ default: module.UploadPage })));
 const TrafficPages = {
   Dashboard: lazy(() => import("./analysis/TrafficPages").then((module) => ({ default: module.DashboardPage }))),
   Packets: lazy(() => import("./analysis/TrafficPages").then((module) => ({ default: module.PacketExplorerPage }))),
@@ -48,7 +51,7 @@ const SensorsPage = lazy(() => import("./operations/OperationsPages").then((modu
 const SchedulesPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.SchedulesPage })));
 const RetentionPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.RetentionPage })));
 const SystemPage = lazy(() => import("./operations/OperationsPages").then((module) => ({ default: module.SystemPage })));
-const AdministrationWorkspace = lazy(() => import("../administration/EmbeddedApp"));
+const AdministrationWorkspace = lazy(loadAdministrationWorkspace);
 
 export function App() {
   return (
@@ -126,22 +129,28 @@ function RootEntry() {
 
 function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["state"], { session: unknown; profile: unknown }> }) {
   const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState<"investigation" | "administration" | null>(null);
   const [error, setError] = useState("");
   const restored = useRef(false);
 
   const administration = state.profile.workspaces?.administration?.available === true;
   const open = useCallback(async (workspace: "investigation" | "administration") => {
-    setBusy(true);
+    setOpening(workspace);
     setError("");
     try {
-      await switchConsoleWorkspace(state.session.access_token, workspace);
+      await Promise.all([
+        switchConsoleWorkspace(state.session.access_token, workspace),
+        workspace === "administration" ? loadAdministrationWorkspace() : loadEvidencePages(),
+      ]);
       rememberConsoleWorkspace(workspace);
       navigate(workspace === "administration" ? "/administration" : appViewRoute("upload"), { replace: true });
     } catch {
       if (workspace === "administration") {
         try {
-          await switchConsoleWorkspace(state.session.access_token, "investigation");
+          await Promise.all([
+            switchConsoleWorkspace(state.session.access_token, "investigation"),
+            loadEvidencePages(),
+          ]);
           rememberConsoleWorkspace("investigation");
           toast.warning("Administration is not available for this account. Investigation was opened instead.");
           navigate(appViewRoute("upload"), { replace: true });
@@ -152,7 +161,7 @@ function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["
       }
       setError("Netra could not open that workspace. Your access may have changed; sign in again.");
     } finally {
-      setBusy(false);
+      setOpening(null);
     }
   }, [navigate, state.session.access_token]);
 
@@ -167,15 +176,8 @@ function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["
   }, [administration, open]);
 
   if (!administration) {
-    return (
-      <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
-        <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
-          <p className="text-sm text-muted">Your Investigation workspace is ready.</p>
-          {error ? <Alert>{error}</Alert> : null}
-          <Button className="mt-4 w-full" disabled>{busy ? "Opening…" : "Opening Investigation…"}</Button>
-        </section>
-      </main>
-    );
+    if (error) return <AuthLayout title="Investigation is unavailable" subtitle={error}><Button className="mt-5 w-full" onClick={() => void open("investigation")}>Try again</Button></AuthLayout>;
+    return <PageTransition label="Loading Investigation" />;
   }
   return (
     <AuthLayout title="Choose a workspace" subtitle="You have access to more than one." width="wide">
@@ -189,19 +191,20 @@ function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["
         </div>
         {error ? <Alert>{error}</Alert> : null}
         <div className="grid gap-3 sm:grid-cols-2">
-          <WorkspaceChoice icon={FolderSearch} name="Investigation Console" description="Cases, evidence, analysis and reports. Your day-to-day work." busy={busy} onSelect={() => void open("investigation")} />
-          <WorkspaceChoice icon={KeyRound} name="Administration" description="User accounts, roles, permissions and the access record." elevated busy={busy} onSelect={() => void open("administration")} />
+          <WorkspaceChoice icon={FolderSearch} name="Investigation Console" description="Cases, evidence, analysis and reports. Your day-to-day work." busy={opening !== null} opening={opening === "investigation"} onSelect={() => void open("investigation")} />
+          <WorkspaceChoice icon={KeyRound} name="Administration" description="User accounts, roles, permissions and the access record." elevated busy={opening !== null} opening={opening === "administration"} onSelect={() => void open("administration")} />
         </div>
     </AuthLayout>
   );
 }
 
-function WorkspaceChoice({ icon: Icon, name, description, elevated = false, busy, onSelect }: {
+function WorkspaceChoice({ icon: Icon, name, description, elevated = false, busy, opening, onSelect }: {
   icon: LucideIcon;
   name: string;
   description: string;
   elevated?: boolean;
   busy: boolean;
+  opening: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -220,8 +223,9 @@ function WorkspaceChoice({ icon: Icon, name, description, elevated = false, busy
       <span className="text-[16px] font-semibold text-[var(--text-strong)]">{name}</span>
       <span className="text-[13px] leading-relaxed text-[var(--muted)]">{description}</span>
       {elevated ? <span className="border border-[var(--accent-line)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--accent-contrast)]">Elevated privileges</span> : null}
-      <span className={cn("mt-auto w-full px-3 py-2 text-center font-mono text-[12px] font-semibold uppercase", elevated ? "bg-[var(--accent)] text-[var(--charcoal-deep)]" : "border border-[var(--border-strong)] text-[var(--text)] group-hover:border-[var(--accent-line)] group-hover:text-[var(--accent)]")}>
-        Open
+      <span className={cn("mt-auto flex w-full items-center justify-center gap-2 px-3 py-2 text-center font-mono text-[12px] font-semibold uppercase", elevated ? "bg-[var(--accent)] text-[var(--charcoal-deep)]" : "border border-[var(--border-strong)] text-[var(--text)] group-hover:border-[var(--accent-line)] group-hover:text-[var(--accent)]")}>
+        {opening ? <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" /> : null}
+        {opening ? "Opening…" : "Open"}
       </span>
     </button>
   );
@@ -231,15 +235,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const { state } = useAuth();
 
   if (state.status === "initializing" || state.status === "resolving_profile") {
-    return (
-      <main className="auth-shell flex min-h-screen items-center justify-center px-4">
-        <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
-          <p className="text-sm font-semibold text-accent">Netra Secure Access</p>
-          <h1 className="mt-2 text-2xl font-bold text-strong">Checking authentication</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">Verifying your identity and assigned Netra access before opening the investigation console.</p>
-        </section>
-      </main>
-    );
+    return <PageTransition label="Checking secure access" />;
   }
 
   if (state.status === "signed_out" || state.status === "profile_denied") {
@@ -254,24 +250,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 function RouteLoadingScreen() {
-  return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content" aria-busy="true">
-      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm" role="status">
-        <p className="text-sm font-semibold text-accent">Netra Secure Console</p>
-        <h1 className="mt-2 text-2xl font-bold text-strong">Opening workspace</h1>
-        <p className="mt-2 text-sm leading-6 text-muted">Loading the selected investigation view.</p>
-      </section>
-    </main>
-  );
+  return <PageTransition label="Loading your workspace" />;
 }
 
 function RouteLoadingPanel() {
-  return (
-    <main id="main-content" className="surface rounded-[1.5rem] p-6" aria-busy="true" role="status">
-      <h1 className="text-2xl font-normal text-strong">Opening workspace</h1>
-      <p className="mt-2 text-sm text-muted">Loading the selected investigation view.</p>
-    </main>
-  );
+  return <main id="main-content"><InlineTransition label="Loading view" /></main>;
 }
 
 export function LanguageControl() {
