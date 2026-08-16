@@ -1,10 +1,9 @@
-import { Activity, AlertTriangle, Database, FileSearch, FileText, Languages, type LucideIcon, Menu, PanelLeftClose, PanelLeftOpen, Search, Settings as SettingsIcon, Upload } from "lucide-react";
-import { Alert, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sheet, SheetContent, SheetTitle, TooltipProvider } from "../../components/ui/primitives";
+import { Activity, AlertTriangle, ArrowLeftRight, Database, FileSearch, FileText, FolderSearch, KeyRound, Languages, LogOut, type LucideIcon, Menu, PanelLeftClose, PanelLeftOpen, Search, Settings as SettingsIcon, ShieldCheck, Upload } from "lucide-react";
+import { Alert, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sheet, SheetContent, SheetTitle, TooltipProvider } from "../../components/ui/primitives";
 import { appViewRoute } from "./ConsoleCore";
 import { AuthProvider } from "../auth/AuthProvider";
 import { caseWorkspaceRoute } from "./ConsoleCore";
 import { cn } from "../../lib/utils";
-import { useCapabilities } from "../../lib/useCapabilities";
 import { Link, MemoryRouter as Router, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { MetadataRow } from "./reports/ReportPages";
 import { MfaPage } from "../auth/MfaPage";
@@ -13,15 +12,15 @@ import { NetraProvider } from "./ConsoleProvider";
 import { PageFrame } from "./reports/ReportPages";
 import { PublicHomePage } from "../../public/PublicSite";
 import { RouteErrorBoundary } from "../../components/RouteErrorBoundary";
-import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { toast, Toaster } from "sonner";
 import { type DeploymentModuleKey } from "./ConsoleCore";
-import { lazy, Suspense, type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { type Language } from "../../lib/types";
 import { useAuth } from "../auth/AuthContext";
+import { AuthLayout } from "../auth/AuthLayout";
 import { useNetra } from "./ConsoleCore";
 import { VIEW_REFS } from "./ConsoleCore";
-import { getLastConsoleWorkspace, rememberConsoleWorkspace, switchConsoleWorkspace } from "../../lib/consoleContext";
+import { clearLastConsoleWorkspace, getLastConsoleWorkspace, rememberConsoleWorkspace, switchConsoleWorkspace } from "../../lib/consoleContext";
 
 const UploadPage = lazy(() => import("./evidence/EvidencePages").then((module) => ({ default: module.UploadPage })));
 const TrafficPages = {
@@ -94,7 +93,10 @@ function AdministrationEntry() {
         isOwner: false,
         isAdministrative: true,
       }}
-      onExit={() => navigate("/", { replace: true })}
+      onExit={() => {
+        clearLastConsoleWorkspace();
+        navigate("/", { replace: true });
+      }}
       onSignOut={signOut}
     />
   );
@@ -137,6 +139,17 @@ function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["
       rememberConsoleWorkspace(workspace);
       navigate(workspace === "administration" ? "/administration" : appViewRoute("upload"), { replace: true });
     } catch {
+      if (workspace === "administration") {
+        try {
+          await switchConsoleWorkspace(state.session.access_token, "investigation");
+          rememberConsoleWorkspace("investigation");
+          toast.warning("Administration is not available for this account. Investigation was opened instead.");
+          navigate(appViewRoute("upload"), { replace: true });
+          return;
+        } catch {
+          // The shared context may have expired; surface the sign-in guidance below.
+        }
+      }
       setError("Netra could not open that workspace. Your access may have changed; sign in again.");
     } finally {
       setBusy(false);
@@ -165,18 +178,52 @@ function WorkspaceEntry({ state }: { state: Extract<ReturnType<typeof useAuth>["
     );
   }
   return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
-      <section className="auth-panel w-full max-w-3xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
-        <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Verified access</p>
-        <h1 className="mt-5 text-4xl font-normal text-strong">Choose a workspace.</h1>
-        <p className="mt-2 text-sm text-muted">Your available workspaces are resolved by the server from current permissions.</p>
-        {error ? <Alert>{error}</Alert> : null}
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Button className="h-auto min-h-28 justify-start p-5 text-left" disabled={busy} onClick={() => void open("investigation")}>Investigation<br /><span className="text-xs font-normal">Cases, evidence, analysis and reports</span></Button>
-          <Button className="h-auto min-h-28 justify-start p-5 text-left" disabled={busy} onClick={() => void open("administration")}>Administration<br /><span className="text-xs font-normal">Users, roles, sessions and audit history</span></Button>
+    <AuthLayout title="Choose a workspace" subtitle="You have access to more than one." width="wide">
+        <div className="mb-5 flex items-center gap-3 border border-[var(--border)] bg-[var(--surface-solid)] px-4 py-3">
+          <span className="grid size-9 shrink-0 place-items-center border border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]"><ShieldCheck className="size-4" aria-hidden="true" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13.5px] font-medium text-[var(--text-strong)]">{state.profile.user}</p>
+            <p className="truncate font-mono text-[11.5px] text-[var(--muted)]">{state.session.user.email ?? "Verified officer"} · {state.profile.organization.name}</p>
+          </div>
+          <span className="border border-[var(--accent-line)] bg-[var(--accent-soft)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--accent-contrast)]">Verified</span>
         </div>
-      </section>
-    </main>
+        {error ? <Alert>{error}</Alert> : null}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <WorkspaceChoice icon={FolderSearch} name="Investigation Console" description="Cases, evidence, analysis and reports. Your day-to-day work." busy={busy} onSelect={() => void open("investigation")} />
+          <WorkspaceChoice icon={KeyRound} name="Administration" description="User accounts, roles, permissions and the access record." elevated busy={busy} onSelect={() => void open("administration")} />
+        </div>
+    </AuthLayout>
+  );
+}
+
+function WorkspaceChoice({ icon: Icon, name, description, elevated = false, busy, onSelect }: {
+  icon: LucideIcon;
+  name: string;
+  description: string;
+  elevated?: boolean;
+  busy: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onSelect}
+      className={cn(
+        "group flex min-h-56 flex-col gap-3 border px-5 py-5 text-left transition-colors disabled:cursor-wait disabled:opacity-60",
+        elevated ? "border-[var(--accent-line)] bg-[var(--accent-soft)] hover:border-[var(--accent)]" : "border-[var(--border-strong)] bg-[var(--surface-solid)] hover:border-[var(--muted)]",
+      )}
+    >
+      <span className={cn("grid size-10 place-items-center border", elevated ? "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)]")}>
+        <Icon className="size-5" strokeWidth={1.75} aria-hidden="true" />
+      </span>
+      <span className="text-[16px] font-semibold text-[var(--text-strong)]">{name}</span>
+      <span className="text-[13px] leading-relaxed text-[var(--muted)]">{description}</span>
+      {elevated ? <span className="border border-[var(--accent-line)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--accent-contrast)]">Elevated privileges</span> : null}
+      <span className={cn("mt-auto w-full px-3 py-2 text-center font-mono text-[12px] font-semibold uppercase", elevated ? "bg-[var(--accent)] text-[var(--charcoal-deep)]" : "border border-[var(--border-strong)] text-[var(--text)] group-hover:border-[var(--accent-line)] group-hover:text-[var(--accent)]")}>
+        Open
+      </span>
+    </button>
   );
 }
 
@@ -227,79 +274,13 @@ function RouteLoadingPanel() {
   );
 }
 
-export function LoginPage() {
-  const { available } = useCapabilities();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { state, session, signIn: authenticateSession, signOut: endSession } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const from = typeof location.state === "object" && location.state && "from" in location.state ? String(location.state.from) : appViewRoute("upload");
-  const checkingSession = state.status === "initializing" || state.status === "resolving_profile";
-  const hasSession = Boolean(session);
-
-  async function signIn(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    setLoading(true);
-    const result = await authenticateSession(email, password);
-    setLoading(false);
-    if (!result.ok) {
-      toast.error(result.message ?? "Invalid login credentials.");
-      return;
-    }
-    toast.success("Secure session verified");
-    navigate(from, { replace: true });
-  }
-
-  async function signOut() {
-    await endSession();
-    toast.success("Signed out");
-  }
-
-  return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4">
-      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
-        <div className="mb-6">
-          <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Secure access</Link>
-          <h1 className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
-          <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
-        </div>
-        {!SUPABASE_AUTH_ENABLED && <Alert>Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild the frontend.</Alert>}
-        {checkingSession && <Alert>Checking authentication for this browser session.</Alert>}
-        {hasSession && (
-          <div className="mt-4 grid gap-3">
-            <Alert>You are already signed in on this browser. Continue to the investigation console or sign out to use another officer account.</Alert>
-            <Button type="button" onClick={() => navigate(from, { replace: true })}>Continue to investigation console</Button>
-            <Button type="button" variant="secondary" onClick={signOut}>Sign out</Button>
-          </div>
-        )}
-        {!hasSession && <form className="mt-4 grid gap-3" onSubmit={signIn}>
-          <label className="grid gap-1 text-sm font-semibold text-strong">
-            Email
-            <Input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="officer@example.com" type="email" autoComplete="email" />
-          </label>
-          <label className="grid gap-1 text-sm font-semibold text-strong">
-            Password
-            <Input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" autoComplete="current-password" />
-          </label>
-          <Button type="submit" disabled={loading || !email || !password}>
-            {loading ? "Signing in..." : "Sign in"}
-          </Button>
-          {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/auth/forgot-password">Forgot password?</Link> : null}
-        </form>}
-      </section>
-    </main>
-  );
-}
-
 export function LanguageControl() {
   const { language, setLanguage } = useNetra();
   return (
     <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
-      <SelectTrigger aria-label="Language" className="min-w-28">
+      <SelectTrigger aria-label="Language" className="min-h-11 w-11 min-w-11 px-0 sm:w-auto sm:min-w-28 sm:px-3">
         <Languages className="size-4" />
-        <SelectValue />
+        <span className="hidden sm:inline"><SelectValue /></span>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="English">English</SelectItem>
@@ -508,14 +489,16 @@ export function SidebarContent({ collapsed = false, onToggle }: { collapsed?: bo
 
 export function TopBar() {
   const { t, activeCaseId, caseRecords } = useNetra();
+  const { state, signOut } = useAuth();
   const navigate = useNavigate();
   const activeCase = caseRecords.find((record) => record.id === activeCaseId);
+  const canSwitchWorkspace = "profile" in state && state.profile.workspaces?.administration?.available === true;
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
     <header className="technical-topbar no-print sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 backdrop-blur-xl sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t("openNavigation")}>
+          <Button variant="ghost" size="icon" className="min-h-11 min-w-11 lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t("openNavigation")}>
             <Menu className="size-5" />
           </Button>
           <SheetContent aria-describedby={undefined} className="left-0 right-auto w-72 border-l-0 border-r bg-[var(--bg)]">
@@ -528,9 +511,24 @@ export function TopBar() {
           {t("searchPlaceholder")}
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1 sm:gap-3">
         <LanguageControl />
-        <Button onClick={() => navigate(appViewRoute("reports"))} disabled={!activeCase?.reportEligible} title={activeCase?.reportBlockedReason ?? "Select a completed case first."}>{t("generateReport")}</Button>
+        {canSwitchWorkspace ? (
+          <Button variant="outline" className="min-h-11 min-w-11 px-0 xl:px-4" onClick={() => {
+            clearLastConsoleWorkspace();
+            navigate("/", { replace: true });
+          }} aria-label="Switch workspace">
+            <ArrowLeftRight className="size-4" aria-hidden="true" />
+            <span className="hidden xl:inline">Switch workspace</span>
+          </Button>
+        ) : null}
+        <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={() => void signOut()} aria-label="Sign out">
+          <LogOut className="size-4" aria-hidden="true" />
+        </Button>
+        <Button className="min-h-11 min-w-11 px-0 sm:px-4" onClick={() => navigate(appViewRoute("reports"))} disabled={!activeCase?.reportEligible} title={activeCase?.reportBlockedReason ?? "Select a completed case first."} aria-label={t("generateReport")}>
+          <FileText className="size-4 sm:hidden" aria-hidden="true" />
+          <span className="hidden sm:inline">{t("generateReport")}</span>
+        </Button>
       </div>
     </header>
   );

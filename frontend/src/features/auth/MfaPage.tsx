@@ -4,6 +4,7 @@ import { Link, Navigate } from "react-router-dom";
 import { Alert, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/primitives";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "./AuthContext";
+import { AuthLayout } from "./AuthLayout";
 
 
 export function MfaPage({ allowAdditional = false }: { allowAdditional?: boolean }) {
@@ -73,11 +74,7 @@ export function MfaPage({ allowAdditional = false }: { allowAdditional?: boolean
   }
 
   return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
-      <section className="auth-panel w-full max-w-lg border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm" aria-labelledby="mfa-heading">
-        <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Multi-factor authentication</p>
-        <h1 id="mfa-heading" className="mt-5 text-3xl font-normal text-strong">{title}</h1>
-        <p className="mt-2 text-sm leading-6 text-muted">Administrator actions require a verified TOTP code. Netra never stores the QR code or manual secret.</p>
+    <AuthLayout title={title} subtitle="Every Netra workspace requires a verified authenticator. Netra never stores the QR code or manual secret." width="wide">
 
         {enrollmentRequired && !factorId ? (
           <div className="mt-5 grid gap-3">
@@ -122,7 +119,6 @@ export function MfaPage({ allowAdditional = false }: { allowAdditional?: boolean
           {allowAdditional ? <Link className="font-semibold text-accent underline" to="/">Return to console</Link> : null}
           <button type="button" className="font-semibold text-accent underline" onClick={() => void signOut()}>Sign out</button>
         </div>
-      </section>
-    </main>
+    </AuthLayout>
   );
 }

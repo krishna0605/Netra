@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const publicRoutes = [
   ["/", /See the traffic/i],
-  ["/login", /Enter the investigation console/i],
+  ["/login", /^Sign in$/i],
 ] as const;
 
 for (const [path, heading] of publicRoutes) {
@@ -11,6 +11,11 @@ for (const [path, heading] of publicRoutes) {
     await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
   });
 }
+
+test("login uses the plain secure-access background", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.locator("#main-content")).toHaveCSS("background-image", "none");
+});
 
 test("unknown routes use the NETRA 404", async ({ page }) => {
   await page.goto("/missing-route");

@@ -5,7 +5,9 @@ import { Toaster } from "sonner";
 import { Alert, Button, Input } from "../../components/ui/primitives";
 import { useCapabilities } from "../../lib/useCapabilities";
 import { SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
+import { clearLastConsoleWorkspace } from "../../lib/consoleContext";
 import { AuthProvider } from "./AuthProvider";
+import { AuthLayout } from "./AuthLayout";
 import { ForgotPasswordPage, InvitationPage, RecoveryPage } from "./AuthPages";
 import { useAuth } from "./AuthContext";
 import { MfaPage } from "./MfaPage";
@@ -39,31 +41,41 @@ function LoginPage() {
     window.location.assign(destination);
   }
 
+  function continueToConsole() {
+    clearLastConsoleWorkspace();
+    window.location.assign(destination);
+  }
+
   return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
-      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm" aria-labelledby="login-heading">
-        <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">NETRA / Secure access</Link>
-        <h1 id="login-heading" className="mt-6 text-4xl font-normal text-strong">Enter the investigation console.</h1>
-        <p className="mt-2 text-sm text-muted">Authorized officers only. Accounts and roles are provisioned by a Netra administrator.</p>
+    <AuthLayout
+      title="Sign in"
+      subtitle="Authorized personnel only. All access is recorded."
+      footer={<Link className="font-semibold text-[var(--accent)] underline underline-offset-2" to="/">Return to the public site</Link>}
+    >
         {!SUPABASE_AUTH_ENABLED ? <Alert>Authentication is unavailable in this build.</Alert> : null}
         {state.status === "initializing" || state.status === "resolving_profile" ? <Alert>Checking the current secure session.</Alert> : null}
         {error ? <p id="login-error" className="mt-4 text-sm text-red-300" role="alert">{error}</p> : null}
         {session ? (
           <div className="mt-5 grid gap-3">
             <Alert>This browser already has an authenticated session.</Alert>
-            <Button type="button" onClick={() => window.location.assign(destination)}>Continue to the console</Button>
+            <Button type="button" onClick={continueToConsole}>Continue</Button>
             <Button type="button" variant="secondary" onClick={() => void signOut()}>Sign out</Button>
           </div>
         ) : (
           <form className="mt-5 grid gap-4" onSubmit={submit} noValidate>
-            <div className="grid gap-1"><label htmlFor="login-email" className="text-sm font-semibold">Email</label><Input id="login-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
-            <div className="grid gap-1"><label htmlFor="login-password" className="text-sm font-semibold">Password</label><Input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} /></div>
-            <Button type="submit" disabled={busy || !email || !password} aria-busy={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-            {available("password_recovery") ? <Link className="text-sm font-semibold text-accent underline" to="/login/forgot-password">Forgot password?</Link> : null}
+            <div>
+              <label htmlFor="login-email" className="mb-1.5 block text-[13px] text-[var(--muted)]">Official email</label>
+              <Input id="login-email" className="font-mono" type="email" autoComplete="username" placeholder="name@gcc.gov.in" autoFocus required value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} />
+            </div>
+            <div>
+              <label htmlFor="login-password" className="mb-1.5 block text-[13px] text-[var(--muted)]">Password</label>
+              <Input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined} />
+            </div>
+            <Button type="submit" className="mt-1 w-full" disabled={busy || !email.trim() || !password} aria-busy={busy}>{busy ? "Checking…" : "Continue"}</Button>
+            {available("password_recovery") ? <Link className="text-sm font-semibold text-[var(--accent)] underline underline-offset-2" to="/login/forgot-password">Forgot password?</Link> : null}
           </form>
         )}
-      </section>
-    </main>
+    </AuthLayout>
   );
 }
 

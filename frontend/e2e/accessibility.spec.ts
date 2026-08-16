@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const reviewedRoutes = [
   ["/", /See the traffic/i],
-  ["/login", /Enter the investigation console/i],
+  ["/login", /^Sign in$/i],
   ["/login/forgot-password", /Reset your password/i],
   ["/login/recovery", /Choose a new password/i],
   ["/login/invite", /Complete your account/i],

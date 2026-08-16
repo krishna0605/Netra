@@ -119,7 +119,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installNetraFixture(page: Page, options: { role: Role; aal: Aal; verifiedFactor: boolean; enrollmentRequired?: boolean }) {
+export async function installNetraFixture(page: Page, options: { role: Role; aal: Aal; verifiedFactor: boolean; enrollmentRequired?: boolean; denyAdministrationSwitch?: boolean }) {
   const storedSession = session(options.aal, options.verifiedFactor);
   let authMeRequests = 0;
   let activeWorkspace: "investigation" | "administration" = "investigation";
@@ -162,6 +162,10 @@ export async function installNetraFixture(page: Page, options: { role: Role; aal
     }
     if (path === "/auth/context") {
       const body = route.request().postDataJSON() as { workspace?: "investigation" | "administration" } | null;
+      if (body?.workspace === "administration" && options.denyAdministrationSwitch) {
+        await fulfillJson(route, { code: "workspace_not_available", error: "The requested workspace is not available." }, 403);
+        return;
+      }
       if (body?.workspace) activeWorkspace = body.workspace;
       await fulfillJson(route, {
         context: {

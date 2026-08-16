@@ -144,6 +144,14 @@ select {
   background-size: 64px 64px;
 }
 
+/* Authentication, recovery, MFA, and workspace selection share a quiet,
+   distraction-free surface. The operational grid begins only after a
+   workspace has been authorized and opened. */
+.app-theme.auth-theme {
+  background: var(--charcoal-deep);
+  background-size: auto;
+}
+
 .surface {
   border: 1px solid var(--border);
   background: var(--surface);

@@ -11,7 +11,7 @@ test("Administration navigation is internal and every API call carries the conso
   });
   await installNetraFixture(page, { role: "Admin", aal: "aal2", verifiedFactor: true });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Choose a workspace." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a workspace" })).toBeVisible();
   await page.getByRole("button", { name: /Administration/ }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await page.getByRole("link", { name: "Users" }).first().click();

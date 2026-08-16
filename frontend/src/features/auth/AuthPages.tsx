@@ -1,31 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Alert, Button, Input } from "../../components/ui/primitives";
 import { useCapabilities } from "../../lib/useCapabilities";
 import { clearNetraSessionState, supabase, SUPABASE_AUTH_ENABLED } from "../../lib/supabase";
 import { passwordChecks, validPassword } from "./passwordPolicy";
-
-
-function AuthShell({ eyebrow, title, description, children }: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <main className="auth-shell flex min-h-screen items-center justify-center px-4" id="main-content">
-      <section className="auth-panel w-full max-w-md border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm" aria-labelledby="auth-heading">
-        <Link to="/" className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-accent">
-          {eyebrow}
-        </Link>
-        <h1 id="auth-heading" className="mt-6 text-4xl font-normal text-strong">{title}</h1>
-        <p className="mt-2 text-sm leading-6 text-muted">{description}</p>
-        {children}
-      </section>
-    </main>
-  );
-}
+import { AuthLayout } from "./AuthLayout";
 
 
 export function ForgotPasswordPage() {
@@ -58,7 +38,7 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <AuthShell eyebrow="NETRA / Account recovery" title="Reset your password." description="Use the email address assigned by your Netra administrator.">
+    <AuthLayout title="Reset your password" subtitle="Use the email address assigned by your Netra administrator.">
       {!loaded ? <Alert>Checking password-recovery availability…</Alert> : null}
       {loaded && (!SUPABASE_AUTH_ENABLED || !recoveryEnabled) ? (
         <div className="mt-5 grid gap-4" role="status" aria-live="polite">
@@ -82,7 +62,7 @@ export function ForgotPasswordPage() {
           <Link className="text-sm font-semibold text-accent underline" to="/login">Return to sign in</Link>
         </form>
       ) : null}
-    </AuthShell>
+    </AuthLayout>
   );
 }
 
@@ -155,10 +135,9 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
   }
 
   return (
-    <AuthShell
-      eyebrow={mode === "invite" ? "NETRA / Invitation" : "NETRA / Recovery"}
+    <AuthLayout
       title={mode === "invite" ? "Complete your account." : "Choose a new password."}
-      description="This link proves control of your email account. It never assigns a Netra organization or role."
+      subtitle="This link proves control of your email account. It never assigns a Netra organization or role."
     >
       {!loaded ? <Alert>Checking email-account availability…</Alert> : null}
       {loaded && !featureEnabled ? (
@@ -193,7 +172,7 @@ function PasswordCompletionPage({ mode }: { mode: "recovery" | "invite" }) {
           <Button type="submit" disabled={busy || !validPassword(password) || password !== confirmation}>{busy ? "Updating…" : "Set password and sign out"}</Button>
         </form>
       ) : null}
-    </AuthShell>
+    </AuthLayout>
   );
 }
 

@@ -176,6 +176,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return { ok: false, message: "Authentication is not configured for this build." };
+    // An explicit credential sign-in starts at the permission-derived chooser;
+    // a remembered workspace is used only for a refresh of the same session.
+    clearLastConsoleWorkspace();
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error || !data.session) return { ok: false, message: "Invalid login credentials." };
     const resolved = await resolveSession(data.session, "SIGNED_IN");
