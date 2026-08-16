@@ -29,11 +29,15 @@ jobs:
       - name: Require signed Krishna-only commits
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          python scripts/verify_commit_provenance.py
-          --before "${{ github.event.before }}"
-          --after "$GITHUB_SHA"
-          --github-repository "$GITHUB_REPOSITORY"
+        run: |
+          before="${{ github.event.before }}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            before="$(git rev-parse refs/remotes/origin/main)"
+          fi
+          python scripts/verify_commit_provenance.py \
+            --before "$before" \
+            --after "$GITHUB_SHA" \
+            --github-repository "$GITHUB_REPOSITORY"
 
   backend-unit:
     name: backend-unit
