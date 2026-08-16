@@ -299,6 +299,7 @@ class CorsTests(TestCase):
         denied = self.client.options("/api/cases", HTTP_ORIGIN="https://evil.example.test")
         self.assertEqual(allowed["Access-Control-Allow-Origin"], "https://console.example.test")
         self.assertNotIn("Access-Control-Allow-Origin", denied)
+        self.assertIn("X-Netra-Context-Id", allowed["Access-Control-Allow-Headers"])
         self.assertNotIn("X-Netra-Role", allowed["Access-Control-Allow-Headers"])
         self.assertIn("DELETE", allowed["Access-Control-Allow-Methods"])
 

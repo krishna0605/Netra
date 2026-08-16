@@ -18,7 +18,13 @@ class LocalCorsMiddleware:
             response["Access-Control-Allow-Origin"] = origin
             patch_vary_headers(response, ("Origin",))
         response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        allowed_headers = ["Content-Type", "Authorization", "X-Netra-Sensor-Key", "Last-Event-ID"]
+        allowed_headers = [
+            "Content-Type",
+            "Authorization",
+            "X-Netra-Context-Id",
+            "X-Netra-Sensor-Key",
+            "Last-Event-ID",
+        ]
         if settings.NETRA_DEV_ROLE_HEADERS:
             allowed_headers.extend(["X-Netra-Role", "X-Netra-User"])
         response["Access-Control-Allow-Headers"] = ", ".join(allowed_headers)
