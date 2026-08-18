@@ -115,6 +115,16 @@
     "capability": null,
     "deprecated": false,
     "rate_category": "mutation",
+    "route": "admin/v1/users/<int:user_id>/credential",
+    "scope": "organization",
+    "view": "apps.forensics.api.admin_console.admin_user_credential"
+  },
+  {
+    "aal": "aal2",
+    "authentication": "bearer",
+    "capability": null,
+    "deprecated": false,
+    "rate_category": "mutation",
     "route": "admin/v1/users/<int:user_id>/factors",
     "scope": "organization",
     "view": "apps.forensics.api.admin_console.admin_user_factors"

@@ -298,11 +298,31 @@ describe("AddUserDialog delivery", () => {
    * the path that does not depend on delivery — and has to open on it, because
    * the failure is silent from the operator's side.
    */
-  it("opens on issuing a credential rather than on an invitation", () => {
+  it("opens with a generated password already filled in", () => {
     withProvider(<AddUserDialog open onOpenChange={() => {}} />);
 
-    expect(screen.getByRole("radio", { name: /Issue a password now/ })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Send an invitation/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Auto-generate/ })).toBeChecked();
+    // Pre-filled so the common case is one click, and long enough to pass the
+    // floor the server enforces.
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("refuses to submit a weak password the operator typed", () => {
+    withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+
+    typeInto(screen.getByLabelText("Full name"), "K. Vyas");
+    typeInto(screen.getByLabelText("Official email"), "k.vyas@gcc.gov.in");
+    typeInto(screen.getByLabelText(/^Reason/), "Onboarding for the demonstration.");
+    typeInto(screen.getByLabelText("Confirm with your authenticator"), "482913");
+
+    fireEvent.click(screen.getByRole("radio", { name: /Set one myself/ }));
+    typeInto(screen.getByLabelText("Password"), "password");
+
+    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+    expect(screen.getByText(/three character types/)).toBeInTheDocument();
+
+    typeInto(screen.getByLabelText("Password"), "Handover-Credential-42");
+    expect(screen.getByRole("button", { name: "Create account" })).toBeEnabled();
   });
 
   it("states the reason floor instead of only disabling the button", () => {

@@ -35,6 +35,7 @@ urlpatterns = [
     path("admin/v1/audit/verify", admin_console_views.admin_audit_verify),
     path("admin/v1/users", admin_console_views.admin_users),
     path("admin/v1/users/<int:user_id>/password", admin_console_views.admin_user_password),
+    path("admin/v1/users/<int:user_id>/credential", admin_console_views.admin_user_credential),
     path("admin/v1/users/<int:user_id>/factors", admin_console_views.admin_user_factors),
     path("admin/v1/users/<int:user_id>/status", admin_console_views.admin_user_status),
     path("admin/v1/users/<int:user_id>/sessions/revoke", admin_console_views.admin_user_sessions_revoke),

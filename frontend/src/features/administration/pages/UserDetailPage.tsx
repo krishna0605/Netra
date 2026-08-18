@@ -1,4 +1,4 @@
-import { ArrowLeft, KeyRound, LogOut, RotateCcw, ShieldOff, UserMinus, X } from "lucide-react";
+import { ArrowLeft, Eye, KeyRound, LogOut, RotateCcw, ShieldOff, UserMinus, X } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -46,6 +46,7 @@ export function UserDetailPage() {
     revokeSession,
     revokeUserSessions,
     removeGrant,
+    revealCredential,
     roles,
     permissions: catalogue,
     loading,
@@ -54,7 +55,11 @@ export function UserDetailPage() {
   } = useDirectory();
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [grantOpen, setGrantOpen] = useState(false);
-  const [confirming, setConfirming] = useState<"authenticator" | "deactivate" | null>(null);
+  const [confirming, setConfirming] = useState<"authenticator" | "deactivate" | "reveal" | null>(null);
+  // Held only in this component, never in the store: a revealed credential must
+  // not outlive the page it was asked for, nor ride along in shared state that
+  // other screens read.
+  const [revealed, setRevealed] = useState("");
   // Withdrawing an override changes what somebody can do, so it asks for a
   // reason and the authenticator like every other permission change.
   const [withdrawing, setWithdrawing] = useState<PermissionKey | null>(null);
@@ -183,13 +188,11 @@ export function UserDetailPage() {
                       onChange={(event) => void onRoleChange(event.target.value)}
                       aria-label="Change role"
                     >
-                      {roles
-                        .filter((entry) => entry.slug !== "admin")
-                        .map((entry) => (
-                          <option key={entry.slug} value={entry.slug}>
-                            {entry.name}
-                          </option>
-                        ))}
+                      {roles.map((entry) => (
+                        <option key={entry.slug} value={entry.slug}>
+                          {entry.name}
+                        </option>
+                      ))}
                     </NativeSelect>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setGrantOpen(true)}>
@@ -352,11 +355,27 @@ export function UserDetailPage() {
               className="border-state-crit/25"
               hint="Each requires a fresh authenticator code and a written reason"
             />
+            {revealed ? (
+              <div className="mx-5 mt-4 rounded-control border-l-2 border-state-warn bg-state-warn/8 px-4 py-3">
+                <p className="text-[13px] text-sand-muted/80">Password for {user.email}</p>
+                <p className="mt-1 font-mono text-[15px] font-semibold text-signal">{revealed}</p>
+                <p className="mt-2 text-xs text-sand-muted/70">
+                  This reveal is recorded in the audit trail against your account. Anyone holding this can sign in as
+                  this officer, so the log cannot tell the two of you apart afterwards.
+                </p>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2 px-5 py-4">
               <Button variant="outline" size="sm" onClick={() => setPasswordOpen(true)}>
                 <KeyRound className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Set password
               </Button>
+              {user.credentialHeld ? (
+                <Button variant="outline" size="sm" onClick={() => setConfirming("reveal")}>
+                  <Eye className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  Show password
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -415,6 +434,22 @@ export function UserDetailPage() {
 
       <PasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />
       <GrantPermissionDialog user={user} open={grantOpen} onOpenChange={setGrantOpen} />
+
+      <ConfirmDialog
+        open={confirming === "reveal"}
+        onOpenChange={(next) => setConfirming(next ? "reveal" : null)}
+        title="Show password"
+        subject={`${user.name} · ${user.email}`}
+        consequences={[
+          "The audit trail records that you read this password, with your reason.",
+          "Anyone holding it can sign in as this officer, so the access log can no longer separate their actions from yours.",
+          "If they only need to get back in, set a new password instead — that leaves the credential known to them alone.",
+        ]}
+        confirmLabel="Show password"
+        onConfirm={async (reason) => {
+          setRevealed(await revealCredential(user.id, reason));
+        }}
+      />
 
       <ConfirmDialog
         open={confirming === "authenticator"}

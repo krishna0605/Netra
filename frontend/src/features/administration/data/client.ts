@@ -24,8 +24,11 @@ import type {
  * When the Django namespace exists, only the bodies here change — no screen,
  * dialog or state machine moves.
  *
- * Passwords are deliberately absent from every request and response shape.
- * They are shown once at the moment they are set and never stored.
+ * Passwords appear in exactly two shapes: the one that issues an account, and
+ * the reveal call that reads a held one back. They travel nowhere else — not in
+ * the directory snapshot, which only reports whether a credential is held. The
+ * reveal endpoint records every call, because whoever reads a password can
+ * afterwards sign in as that officer.
  */
 
 export type DirectorySnapshot = {
@@ -320,6 +323,17 @@ export const directoryApi = {
    * anywhere on this side: not in the snapshot, not in the audit entry, and
    * not retrievable afterwards.
    */
+  /** Read back a held password. POST, because the server records every call:
+   *  whoever reads this can afterwards sign in as that officer. */
+  async revealCredential(userId: number, reason: string) {
+    const response = await authorizedRequest<{ password: string }>(`/admin/v1/users/${userId}/credential`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    return response.password;
+  },
+
   async createUser(input: CreateUserInput) {
     const response = await authorizedRequest<{
       user: ServerAccount;

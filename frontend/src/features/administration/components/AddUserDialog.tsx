@@ -1,12 +1,31 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, Copy, X } from "lucide-react";
+import { Check, Copy, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button, Input, NativeSelect, Panel, Tag } from "./ui/primitives";
 import { useDirectory } from "../data/store";
 import { useAuth } from "../features/auth/AuthContext";
 
-type Delivery = "invite" | "password";
+type PasswordMode = "auto" | "custom";
+
+// Mirrors _MIN_PASSWORD and the class rule in admin_users.resolve_password. The
+// server is the authority — this only spares the operator a round trip.
+const PASSWORD_MINIMUM = 12;
+
+function generatePassword() {
+  // Excludes the characters that are misread when a credential is dictated
+  // aloud, which is how these are handed over.
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+";
+  const bytes = new Uint32Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
+}
+
+function passwordAcceptable(value: string) {
+  if (value.length < PASSWORD_MINIMUM) return false;
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(value)).length;
+  return classes >= 3;
+}
 
 type Handover = {
   name: string;
@@ -47,9 +66,10 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [roleSlug, setRoleSlug] = useState(DEFAULT_ROLE_SLUG);
   const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
-  // Issuing a credential is the path that does not depend on the officer being
-  // able to receive mail, so it is the one the dialog opens on.
-  const [delivery, setDelivery] = useState<Delivery>("password");
+  // Netra issues the credential. The field opens pre-filled so the common case
+  // is one click, and stays editable when the operator wants a specific one.
+  const [mode, setMode] = useState<PasswordMode>("auto");
+  const [password, setPassword] = useState(() => generatePassword());
 
   // After a successful create the dialog swaps to a handover panel. The password
   // is shown exactly once, here, and never stored — the operator has to pass it
@@ -65,14 +85,16 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   // floor is stated in the UI as well — a disabled button that will not say
   // what it is waiting for reads as a broken console.
   const reasonValid = reason.trim().length >= REASON_MINIMUM;
+  const passwordValid = passwordAcceptable(password);
   const canSubmit =
-    name.trim().length >= 2 && emailValid && reasonValid && code.trim().length === 6 && !busy;
+    name.trim().length >= 2 && emailValid && reasonValid && passwordValid && code.trim().length === 6 && !busy;
 
   // What the operator still has to do, in the order the fields appear.
   const blocking = [
     name.trim().length >= 2 ? "" : "a full name",
     emailValid ? "" : "a valid email address",
     reasonValid ? "" : `a reason of at least ${REASON_MINIMUM} characters`,
+    passwordValid ? "" : `a password of at least ${PASSWORD_MINIMUM} characters using three character types`,
     code.trim().length === 6 ? "" : "the 6-digit authenticator code",
   ].filter(Boolean);
 
@@ -83,7 +105,8 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setRoleSlug(DEFAULT_ROLE_SLUG);
     setReason("");
     setCode("");
-    setDelivery("password");
+    setMode("auto");
+    setPassword(generatePassword());
     setHandover(null);
     setCopied(false);
     setFailure("");
@@ -111,7 +134,8 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         department,
         roleSlug,
         reason: reason.trim(),
-        delivery,
+        delivery: "password",
+        password,
       });
       setHandover({
         name: created.name,
@@ -157,12 +181,12 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           <header className="flex items-start justify-between gap-4 border-b border-hairline px-6 py-4">
             <div className="min-w-0">
               <Dialog.Title className="text-lg font-semibold text-cream-bright">
-                {handover ? (handover.password ? "Account created" : "Invitation sent") : "Add a user"}
+                {handover ? "Account created" : "Add a user"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-[13px] text-sand-muted/80">
                 {handover
-                  ? (handover.password ? "Pass these details on now — the password is not shown again." : "The officer must use the expiring invitation and enroll MFA before entering Netra.")
-                  : "Netra sends an expiring invitation when approved email delivery is enabled."}
+                  ? "Hand these details over now. The password is kept on the officer's profile if you need it again."
+                  : "Netra issues the credential. The officer enrols an authenticator on first sign-in."}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -300,37 +324,53 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </p>
 
                 <fieldset className="rounded-panel border border-[color:var(--color-control-edge)] px-4 py-3">
-                  <legend className="px-1 text-[13px] font-medium text-sand">How they receive the account</legend>
-                  <div className="mt-1 flex flex-col gap-2.5">
-                    <label className="flex cursor-pointer items-start gap-2.5">
+                  <legend className="px-1 text-[13px] font-medium text-sand">Password</legend>
+                  <div className="mt-1 flex flex-wrap gap-4">
+                    <label className="flex cursor-pointer items-center gap-2">
                       <input
                         type="radio"
-                        name="delivery"
-                        value="password"
-                        checked={delivery === "password"}
-                        onChange={() => setDelivery("password")}
-                        className="mt-1 accent-[color:var(--color-signal)]"
+                        name="pwmode"
+                        checked={mode === "auto"}
+                        onChange={() => setMode("auto")}
+                        className="accent-[color:var(--color-signal)]"
                       />
-                      <span className="text-[13px] leading-relaxed text-sand-muted/85">
-                        <span className="font-medium text-sand">Issue a password now.</span> Netra generates it on the
-                        server and shows it here once. Works whether or not email is reaching this officer.
-                      </span>
+                      <span className="text-[13px] text-sand">Auto-generate</span>
                     </label>
-                    <label className="flex cursor-pointer items-start gap-2.5">
+                    <label className="flex cursor-pointer items-center gap-2">
                       <input
                         type="radio"
-                        name="delivery"
-                        value="invite"
-                        checked={delivery === "invite"}
-                        onChange={() => setDelivery("invite")}
-                        className="mt-1 accent-[color:var(--color-signal)]"
+                        name="pwmode"
+                        checked={mode === "custom"}
+                        onChange={() => setMode("custom")}
+                        className="accent-[color:var(--color-signal)]"
                       />
-                      <span className="text-[13px] leading-relaxed text-sand-muted/85">
-                        <span className="font-medium text-sand">Send an invitation.</span> They choose their own
-                        password from a link. Nothing reaches them if mail to this address is not being delivered.
-                      </span>
+                      <span className="text-[13px] text-sand">Set one myself</span>
                     </label>
                   </div>
+
+                  <div className="mt-3 flex flex-wrap items-start gap-2">
+                    <Input
+                      id="new-password"
+                      value={password}
+                      readOnly={mode === "auto"}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder={mode === "auto" ? "Press Generate" : "At least 12 characters"}
+                      className="min-w-[16rem] flex-1 font-mono"
+                      autoComplete="off"
+                      aria-label="Password"
+                    />
+                    {mode === "auto" ? (
+                      <Button variant="outline" size="sm" onClick={() => setPassword(generatePassword())}>
+                        <RefreshCw className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                        Generate
+                      </Button>
+                    ) : null}
+                  </div>
+                  <p className="mt-1.5 text-xs text-sand-muted/70">
+                    {passwordValid
+                      ? "Shown here and kept on the officer's profile so you can read it back."
+                      : "At least 12 characters, using three of: lowercase, uppercase, digits, symbols."}
+                  </p>
                 </fieldset>
                 <div>
                   <label className="block text-[13px] font-medium text-sand" htmlFor="new-reason">

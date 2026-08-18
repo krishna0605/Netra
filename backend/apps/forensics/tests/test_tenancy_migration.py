@@ -26,7 +26,7 @@ class TenancySchemaTests(TestCase):
     def test_schema_has_50_domain_and_10_framework_tables(self):
         domain_tables = {model._meta.db_table for model in apps.get_models() if model._meta.app_label == "forensics"}
         self.assertEqual(len(domain_tables), 50)
-        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 25)
+        self.assertEqual(MigrationRecorder.Migration.objects.filter(app="forensics").count(), 26)
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0014_security_tenancy_and_rate_limits").exists())
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0017_phase8_security_closure").exists())
         self.assertTrue(MigrationRecorder.Migration.objects.filter(app="forensics", name="0023_partition_access_logs").exists())
@@ -165,7 +165,7 @@ class MigrationHarnessRestoresLatestSchemaTests(MigrationHarnessMixin, Transacti
     """
 
     def test_latest_migration_tracks_the_graph_leaf(self):
-        self.assertEqual(latest_migration(), [("forensics", "0025_two_role_model")])
+        self.assertEqual(latest_migration(), [("forensics", "0026_held_credential")])
 
     def test_rewound_schema_breaks_current_models_and_is_restored(self):
         MigrationExecutor(connection).migrate([("forensics", "0015_custody_chain_index")])

@@ -35,6 +35,7 @@ from apps.forensics.services.admin_users import (
     end_all_sessions,
     end_sessions,
     provision_account,
+    reveal_held_credential,
     revoke_one_session,
     replace_password,
     set_account_active,
@@ -249,6 +250,31 @@ def admin_user_password(request, user_id: int):
             password=payload.get("password"),
         )
         return JsonResponse({"user": account_payload(change.profile), "password": change.password})
+
+    return _write(request, operation)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_user_credential(request, user_id: int):
+    """Read back a held password.
+
+    POST rather than GET, and through the same write guard as everything else
+    that changes an account, because in effect this one does: whoever reads it
+    can afterwards sign in as that officer. It takes a written reason, demands a
+    fresh authenticator, and seals an entry into the audit chain — so the record
+    at least says who looked. It is never part of the directory snapshot; a
+    credential must not be broadcast to nine screens that only needed a roster.
+    """
+
+    def operation(actor, organization, payload):
+        password = reveal_held_credential(
+            actor=actor,
+            organization=organization,
+            user_id=user_id,
+            reason=payload.get("reason", ""),
+        )
+        return JsonResponse({"password": password})
 
     return _write(request, operation)
 

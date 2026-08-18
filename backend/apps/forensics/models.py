@@ -132,6 +132,13 @@ class UserProfile(TimeStampedModel):
     department = models.CharField(max_length=160, default="Gujarat Cyber Crime Cell")
     must_change_password = models.BooleanField(default=False)
     mfa_reset_required = models.BooleanField(default=False)
+    # An AES-256-GCM envelope over the password an administrator issued, kept so
+    # a unit that issues every credential centrally can read it back. Never the
+    # password itself: see common/credential_vault.py, which also records what
+    # holding one costs. Empty on every account that was never issued one this
+    # way, which is how it stays distinguishable from "held but unreadable".
+    held_credential = models.JSONField(default=dict, blank=True)
+    held_credential_set_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:
         return f"{self.display_name or self.user.get_username()} ({self.role})"

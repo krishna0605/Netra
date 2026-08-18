@@ -77,6 +77,8 @@ export type AdminUser = {
   status: UserStatus;
   mfa: MfaState;
   department: string;
+  /** Whether a password is held for this account. Never the value. */
+  credentialHeld?: boolean;
   supabaseId: string;
   joinedAt: string;
   lastSignInAt: string | null;

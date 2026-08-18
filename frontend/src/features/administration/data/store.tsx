@@ -29,6 +29,8 @@ type DirectoryValue = DirectorySnapshot & {
   error: string;
   refetch: () => Promise<void>;
 
+  /** Read back a held password. Every call is recorded server-side. */
+  revealCredential: (userId: number, reason: string) => Promise<string>;
   createUser: (input: CreateUserInput) => Promise<{
     created: AdminUser;
     password: string;
@@ -100,6 +102,11 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       );
     }
   }, []);
+
+  const revealCredential = useCallback(
+    async (userId: number, reason: string) => run(() => directoryApi.revealCredential(userId, reason)),
+    [run],
+  );
 
   const createUser = useCallback(
     async (input: CreateUserInput) => {
@@ -219,6 +226,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       refetch,
+      revealCredential,
       createUser,
       changeRole,
       setPassword,
@@ -239,6 +247,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       refetch,
+      revealCredential,
       createUser,
       changeRole,
       setPassword,

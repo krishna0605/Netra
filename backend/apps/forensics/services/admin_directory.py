@@ -396,6 +396,11 @@ def user_rows(
                 if identity
                 else ("unenrolled" if identities_known else "unknown"),
                 "department": profile.department,
+                # Whether a password is held for this account, never the value.
+                # The roster needs to know a reveal is possible; the credential
+                # itself only ever travels through the endpoint that records who
+                # asked for it.
+                "credentialHeld": bool(profile.held_credential),
                 "supabaseId": identity.supabase_id if identity else "",
                 "joinedAt": profile.created_at.isoformat(),
                 "lastSignInAt": (identity.last_sign_in_at or None)
