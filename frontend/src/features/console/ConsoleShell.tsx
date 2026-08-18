@@ -283,12 +283,12 @@ export function ModuleRoute({ module, children }: { module: DeploymentModuleKey;
   if (!access.visible) return <Navigate to={appViewRoute("upload")} replace />;
   if (!access.enabled) {
     return (
-      <PageFrame title="Not configured" description={access.reason}>
-        <Alert>{module === "lab" ? "Use normal evidence upload for this deployment. Native capture must run through an enrolled external sensor and replay requires an isolated lab environment." : "This operation is intentionally unavailable in the active deployment profile. No action was simulated or queued."}</Alert>
+      <PageFrame title="Gated for this deployment" description={access.reason}>
+        <Alert>{module === "lab" ? "Native capture and replay run on an enrolled external sensor in an isolated lab. Upload evidence here instead — it takes the same analysis path." : "The active deployment profile does not open this module. Nothing was simulated or queued in its place."}</Alert>
         <div className="surface rounded-[1.5rem] p-5">
           <MetadataRow label="Deployment profile" value={deploymentAccess.profile} />
           <MetadataRow label="Module" value={module} />
-          <MetadataRow label="Status" value="Disabled" />
+          <MetadataRow label="Status" value="Gated" />
         </div>
       </PageFrame>
     );

@@ -78,7 +78,7 @@ export function SettingsPage() {
             <section key={section.module} className="surface flex min-h-56 flex-col rounded-[1.5rem] p-5">
               <div className="flex items-start justify-between gap-3">
                 <span className="flex size-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"><Icon className="size-5" /></span>
-                <Badge variant={access.enabled ? "secondary" : "warning"}>{access.enabled ? "enabled" : "not configured"}</Badge>
+                <Badge variant={access.enabled ? "secondary" : "warning"}>{access.enabled ? "enabled" : "gated"}</Badge>
               </div>
               <h2 className="mt-5 text-xl font-black text-strong">{section.title}</h2>
               <p className="mt-2 text-sm leading-6 text-muted">{section.description}</p>
@@ -234,7 +234,7 @@ export function LabToolsPage() {
         <div className="surface order-2 rounded-[1.5rem] p-5 lg:order-1">
           <div className="flex items-start justify-between gap-3">
             <div><h2 className="text-xl font-black text-strong">Native sensor capture</h2><p className="mt-1 text-sm leading-6 text-muted">Requires the sensor agent, dumpcap or tcpdump, capture permission, the Railway API URL, and the configured sensor key.</p></div>
-            <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{deploymentAccess.sensorCaptureEnabled ? selectedSensor?.status ?? "not connected" : "not configured"}</Badge>
+            <Badge variant={selectedSensor?.status === "online" ? "secondary" : "warning"}>{deploymentAccess.sensorCaptureEnabled ? selectedSensor?.status ?? "not connected" : "gated"}</Badge>
           </div>
           {!deploymentAccess.sensorCaptureEnabled && <p className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-sm leading-6 text-muted">Native capture is intentionally off in Railway. Enroll an external sensor and enable the sensor-capture setting before using this section.</p>}
           <fieldset className="mt-4 grid gap-3 md:grid-cols-2" disabled={!deploymentAccess.sensorCaptureEnabled}>
@@ -423,7 +423,7 @@ export function SystemPage() {
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {Object.entries(deploymentAccess.modules).map(([name, module]) => (
             <div key={name} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-              <div className="flex items-center justify-between gap-2"><h3 className="font-bold capitalize text-strong">{name}</h3><Badge variant={module.enabled ? "secondary" : "warning"}>{module.enabled ? "enabled" : "not configured"}</Badge></div>
+              <div className="flex items-center justify-between gap-2"><h3 className="font-bold capitalize text-strong">{name}</h3><Badge variant={module.enabled ? "secondary" : "warning"}>{module.enabled ? "enabled" : "gated"}</Badge></div>
               <p className="mt-2 text-xs leading-5 text-muted">{module.reason}</p>
             </div>
           ))}
@@ -493,7 +493,7 @@ export function SystemPage() {
           <MetadataRow label="Access mode" value={health?.access?.label ?? database?.access?.label ?? "Supabase Auth"} />
           <MetadataRow label="Authentication" value={health?.access?.authentication ?? database?.access?.authentication ?? "Enabled"} />
           <MetadataRow label="Authorization" value={health?.access?.authorization ?? health?.checks?.security?.rbac ?? "role-based"} />
-          <MetadataRow label="Public internet" value={health?.access?.publicInternet ?? database?.access?.publicInternet ?? "Not configured"} />
+          <MetadataRow label="Public internet" value={health?.access?.publicInternet ?? database?.access?.publicInternet ?? "Not reported"} />
           <MetadataRow label="Dev role headers" value={health?.checks?.security?.devRoleHeaders ? "enabled" : "disabled"} />
           <MetadataRow label="Service key" value={health?.checks?.security?.serviceRoleBackendOnly ? "backend-only" : "check config"} />
           <MetadataRow label="Admin profiles" value={`${health?.checks?.security?.adminProfiles ?? 0}`} />
