@@ -5,9 +5,13 @@ sessions table means either nobody is signed in or nobody can find out, and a
 console that renders those identically is worse than one that renders neither.
 """
 
+from datetime import UTC, datetime
+from unittest.mock import patch
+
 from django.db import connection
 from django.test import SimpleTestCase
 
+from common import supabase_sessions
 from common.supabase_sessions import LiveSession, _mask, list_sessions, session_payload
 
 
@@ -46,6 +50,41 @@ class AvailabilityTests(SimpleTestCase):
 
         self.assertEqual(rows, [])
         self.assertTrue(status.startswith("unavailable"))
+
+    def test_the_success_path_answers_with_rows_and_a_status(self):
+        """The path that reads actual sessions, which neither of the tests above
+        reaches: SQLite stops at _readable, and a bare PostgreSQL container has
+        no auth schema, so both take an early return.
+
+        It returned a bare list instead of the pair every other path returns.
+        The caller unpacks two values, so it raised ValueError the moment the
+        table held any number of rows other than two, and the administration
+        console — nine screens behind one read — answered 500.
+        """
+        started = datetime(2026, 8, 14, 9, 0, tzinfo=UTC)
+        refreshed = datetime(2026, 8, 14, 9, 40, tzinfo=UTC)
+        # Three rows: enough that unpacking the list itself cannot coincidentally
+        # succeed, which is what hid this for a pair of sessions.
+        stored = [
+            (f"sess-{n}", f"user-{n}", "aal2", started, refreshed, "Mozilla/5.0", "203.0.113.42")
+            for n in range(3)
+        ]
+
+        with patch.object(supabase_sessions, "_readable", return_value=True), patch.object(
+            supabase_sessions, "connection"
+        ) as fake_connection:
+            cursor = fake_connection.cursor.return_value.__enter__.return_value
+            cursor.fetchall.return_value = stored
+
+            result = list_sessions([f"user-{n}" for n in range(3)])
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+        rows, status = result
+        self.assertEqual(status, "live")
+        self.assertEqual([row.id for row in rows], ["sess-0", "sess-1", "sess-2"])
+        self.assertEqual(rows[0].ip, "203.0.113.…")
 
 
 class PayloadTests(SimpleTestCase):
