@@ -29,7 +29,14 @@ type DirectoryValue = DirectorySnapshot & {
   error: string;
   refetch: () => Promise<void>;
 
-  createUser: (input: CreateUserInput) => Promise<{ created: AdminUser; password: string }>;
+  createUser: (input: CreateUserInput) => Promise<{
+    created: AdminUser;
+    password: string;
+    delivery: string;
+    emailSent: boolean;
+    emailFailure: string;
+    mustChangePassword: boolean;
+  }>;
   changeRole: (userId: number, roleSlug: RoleSlug, reason: string) => Promise<void>;
   setPassword: (input: SetPasswordInput) => Promise<string>;
   setStatus: (userId: number, status: UserStatus, reason: string) => Promise<void>;
@@ -96,11 +103,14 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   const createUser = useCallback(
     async (input: CreateUserInput) => {
-      const { snapshot: next, created, password } = await run(() => directoryApi.createUser(input));
+      const { snapshot: next, created, password, delivery, emailSent, emailFailure, mustChangePassword } =
+        await run(() => directoryApi.createUser(input));
       setSnapshot(next);
       // The password comes back because the server decided it — it may have
-      // generated one rather than using what the dialog sent.
-      return { created, password };
+      // generated one rather than using what the dialog sent. emailSent is
+      // reported separately: the console must not imply a delivery that did
+      // not happen.
+      return { created, password, delivery, emailSent, emailFailure, mustChangePassword };
     },
     [run],
   );

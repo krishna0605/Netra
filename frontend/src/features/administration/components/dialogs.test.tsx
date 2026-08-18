@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { AddUserDialog } from "./AddUserDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AuthContext, type AuthValue } from "../features/auth/AuthContext";
 import { DirectoryProvider } from "../data/store";
@@ -287,5 +288,35 @@ describe("GrantPermissionDialog", () => {
 
     typeInto(screen.getByLabelText("Expires after"), "0");
     expect(screen.getByText(/has to be withdrawn by hand/)).toBeInTheDocument();
+  });
+});
+
+describe("AddUserDialog delivery", () => {
+  /**
+   * An invitation is a link and nothing else. Where mail is not reaching the
+   * officer it leaves an account nobody can enter, so the dialog has to offer
+   * the path that does not depend on delivery — and has to open on it, because
+   * the failure is silent from the operator's side.
+   */
+  it("opens on issuing a credential rather than on an invitation", () => {
+    withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("radio", { name: /Issue a password now/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Send an invitation/ })).not.toBeChecked();
+  });
+
+  it("states the reason floor instead of only disabling the button", () => {
+    withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+
+    typeInto(screen.getByLabelText("Full name"), "K. Vyas");
+    typeInto(screen.getByLabelText("Official email"), "k.vyas@gcc.gov.in");
+    typeInto(screen.getByLabelText(/^Reason/), "too short");
+    typeInto(screen.getByLabelText("Confirm with your authenticator"), "482913");
+
+    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+    expect(screen.getByText(/at least 10 characters/)).toBeInTheDocument();
+
+    typeInto(screen.getByLabelText(/^Reason/), "Onboarding for the demonstration.");
+    expect(screen.getByRole("button", { name: "Create account" })).toBeEnabled();
   });
 });

@@ -215,11 +215,22 @@ def admin_users(request):
             department=payload.get("department", ""),
             reason=payload.get("reason", ""),
             password=payload.get("password"),
+            delivery=payload.get("delivery", ""),
         )
         # The only time this password is ever transmitted. It is not stored
         # here, not written to the audit entry, and cannot be retrieved again.
+        # emailSent is reported separately from the credential: an operator who
+        # assumes a message was delivered when it was not will wait on an
+        # officer who never received anything.
         return JsonResponse(
-            {"user": account_payload(change.profile), "password": change.password},
+            {
+                "user": account_payload(change.profile),
+                "password": change.password,
+                "delivery": change.delivery,
+                "emailSent": change.email_sent,
+                "emailFailure": change.email_failure,
+                "mustChangePassword": change.profile.must_change_password,
+            },
             status=201,
         )
 

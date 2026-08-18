@@ -122,6 +122,10 @@ export type CreateUserInput = {
    *  until somebody posts to the endpoint directly. */
   password?: string;
   reason: string;
+  /** "invite" sends a magic link and no credential. "password" generates one,
+   *  shows it once, and mails it where the deployment has a mail host. Empty
+   *  keeps whatever the deployment already does. */
+  delivery?: "invite" | "password" | "";
 };
 
 export type SetPasswordInput = {
@@ -317,7 +321,14 @@ export const directoryApi = {
    * not retrievable afterwards.
    */
   async createUser(input: CreateUserInput) {
-    const response = await authorizedRequest<{ user: ServerAccount; password: string }>("/admin/v1/users", {
+    const response = await authorizedRequest<{
+      user: ServerAccount;
+      password: string;
+      delivery: string;
+      emailSent: boolean;
+      emailFailure: string;
+      mustChangePassword: boolean;
+    }>("/admin/v1/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -326,6 +337,7 @@ export const directoryApi = {
         role: input.roleSlug,
         department: input.department.trim(),
         reason: input.reason,
+        delivery: input.delivery,
       }),
     });
 
@@ -335,7 +347,15 @@ export const directoryApi = {
     // a row the database does not have.
     const snapshot = await this.read();
     const created = snapshot.users.find((row) => row.id === response.user.id) ?? snapshot.users[0];
-    return { snapshot, created, password: response.password };
+    return {
+      snapshot,
+      created,
+      password: response.password,
+      delivery: response.delivery,
+      emailSent: response.emailSent,
+      emailFailure: response.emailFailure,
+      mustChangePassword: response.mustChangePassword,
+    };
   },
 
   async changeRole(userId: number, roleSlug: RoleSlug, reason: string) {

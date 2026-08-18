@@ -169,6 +169,28 @@ NETRA_ADMINISTRATION_IDLE_SECONDS = max(
 )
 NETRA_AUTH_INVITATIONS_ENABLED = os.getenv("NETRA_AUTH_INVITATIONS_ENABLED", "0") == "1"
 NETRA_PASSWORD_RECOVERY_ENABLED = os.getenv("NETRA_PASSWORD_RECOVERY_ENABLED", "0") == "1"
+
+# Whether an administrator may hand an account over with a password Netra keeps
+# until an administrator replaces it, rather than one the officer must change on
+# arrival. Off by default: a credential nobody is forced to rotate is a standing
+# one, and on a platform whose value is saying who did what, a password two
+# people know weakens that answer. A closed unit that issues every credential
+# centrally may reasonably want it, which is why it is a setting and not a rule.
+NETRA_ADMIN_HELD_PASSWORDS_ENABLED = os.getenv("NETRA_ADMIN_HELD_PASSWORDS_ENABLED", "0") == "1"
+
+# Mail. Netra has never sent any; Supabase's invitation was the only message the
+# platform produced. These exist so a deployment whose officers cannot receive
+# that invitation can post the credential itself. Unset means unsent, and the
+# console says so rather than implying a delivery that never happened.
+NETRA_CREDENTIAL_EMAIL_ENABLED = os.getenv("NETRA_CREDENTIAL_EMAIL_ENABLED", "0") == "1"
+EMAIL_HOST = os.getenv("EMAIL_HOST", "").strip()
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "0") == "1"
+EMAIL_TIMEOUT = max(1, min(30, int(os.getenv("EMAIL_TIMEOUT", "10"))))
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "").strip()
 NETRA_AUTH_INVITE_REDIRECT_URL = os.getenv("NETRA_AUTH_INVITE_REDIRECT_URL", "").strip()
 NETRA_AUTH_ADMIN_TIMEOUT_SECONDS = max(1, min(15, int(os.getenv("NETRA_AUTH_ADMIN_TIMEOUT_SECONDS", "5"))))
 NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES = max(4096, min(1048576, int(os.getenv("NETRA_AUTH_ADMIN_RESPONSE_MAX_BYTES", "65536"))))
