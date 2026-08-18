@@ -42,7 +42,8 @@ from apps.forensics.models import (
 from common.admin_audit import admin_event_dict
 from common.audit import ROLE_PERMISSIONS
 from common.capabilities import capability_registry
-from common.supabase_admin import SupabaseAdminError, list_users
+from common.supabase_admin import SupabaseAdminError, SupabaseAdminUser, list_users
+from common.supabase_factors import verified_factor_owners
 from common.supabase_sessions import list_sessions, session_payload
 
 logger = logging.getLogger(__name__)
@@ -161,8 +162,9 @@ def _supabase_identities() -> tuple[dict[str, _Identity], bool]:
         settings, "SUPABASE_SECRET_KEY", ""
     ):
         return {}, False
-    identities: dict[str, _Identity] = {}
+    accounts: list[SupabaseAdminUser] = []
     page: int | None = 1
+    complete = True
     # Bounded so an unexpectedly large directory cannot turn one console load
     # into an unbounded fan-out against Supabase.
     for _ in range(settings.NETRA_AUTH_ADMIN_MAX_LIST_PAGES):
@@ -171,17 +173,43 @@ def _supabase_identities() -> tuple[dict[str, _Identity], bool]:
         try:
             rows, page = list_users(page=page)
         except SupabaseAdminError:
-            return identities, False
-        for row in rows:
-            if row.email:
-                identities[row.email] = _Identity(
-                    supabase_id=row.id,
-                    mfa_state=row.mfa_state,
-                    last_sign_in_at=row.last_sign_in_at,
-                    invited_at=row.invited_at,
-                    email_confirmed_at=row.email_confirmed_at,
-                )
-    return identities, True
+            complete = False
+            break
+        accounts.extend(row for row in rows if row.email)
+
+    # Enrolment is not read from the listing above. GoTrue's admin list returns
+    # users without their factors, so every row arrives claiming "unenrolled"
+    # whatever the account has actually done. It is read from the table GoTrue
+    # keeps it in instead — see common/supabase_factors.py.
+    enrolled, enrolment_known = verified_factor_owners([row.id for row in accounts if row.id])
+
+    identities = {
+        row.email: _Identity(
+            supabase_id=row.id,
+            mfa_state=_mfa_state(row, enrolled, enrolment_known),
+            last_sign_in_at=row.last_sign_in_at,
+            invited_at=row.invited_at,
+            email_confirmed_at=row.email_confirmed_at,
+        )
+        for row in accounts
+    }
+    return identities, complete
+
+
+def _mfa_state(row: SupabaseAdminUser, enrolled: set[str], enrolment_known: bool) -> str:
+    """Enrolment for one account, from whichever source can actually answer.
+
+    The listing payload is believed when it manages to say "verified", so a
+    future GoTrue that does include factors there is right rather than
+    overridden. Its silence proves nothing, though, so silence falls through to
+    the database — and, if that could not be read either, to "unknown" rather
+    than to an accusation of a gap nobody can confirm.
+    """
+    if row.mfa_state == "verified":
+        return "verified"
+    if not enrolment_known:
+        return "unknown"
+    return "verified" if row.id in enrolled else "unenrolled"
 
 
 def _status(user, identity: _Identity | None) -> str:
