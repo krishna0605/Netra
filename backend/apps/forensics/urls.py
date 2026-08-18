@@ -84,7 +84,6 @@ urlpatterns = [
     path("cases/<str:case_id>/summary", case_views.case_light_summary),
     path("cases/<str:case_id>/light-summary", case_views.case_light_summary),
     path("cases/<str:case_id>/charts", case_views.case_charts),
-    path("cases/<str:case_id>/tabs/<str:tab_name>", case_views.case_tab),
     path("cases/<str:case_id>/reports", report_views.case_reports),
     path("cases/<str:case_id>/flags", case_views.case_flags),
     path("cases/<str:case_id>/flags/<str:flag>", case_views.case_flag_detail),

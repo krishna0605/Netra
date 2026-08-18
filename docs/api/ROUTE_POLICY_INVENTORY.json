@@ -725,16 +725,6 @@
     "capability": null,
     "deprecated": false,
     "rate_category": "read",
-    "route": "cases/<str:case_id>/tabs/<str:tab_name>",
-    "scope": "case",
-    "view": "apps.forensics.api.cases.case_tab"
-  },
-  {
-    "aal": "aal1",
-    "authentication": "bearer",
-    "capability": null,
-    "deprecated": false,
-    "rate_category": "read",
     "route": "cases/<str:case_id>/workspace",
     "scope": "case",
     "view": "apps.forensics.api.cases.case_workspace"

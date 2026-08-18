@@ -22,7 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.forensics.models import AccessLog, Alert, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
+from apps.forensics.models import AccessLog, Alert, AnomalyRecord, CaptureJob, CaptureSchedule, Case, CaseAnalysisSnapshot, CaseLink, CaseMembership, ComplianceControl, CustodyLedgerEvent, DeadLetterEvent, EvidenceFile, EvidenceManifest, EvidenceUploadSession, Export, IntegrationConnection, IntegrationCredential, IntegrationDelivery, OperationalEvent, ProcessingJob, Report, RetentionPolicy, RetentionRun, Sensor, SensorCommand, SensorGroup, SensorHealthSnapshot, SessionSummary, UserProfile, WorkerHeartbeat
 from apps.forensics.services.webhook_delivery import queue_delivery
 from common.audit import access_log_dict, actor_from_request, add_history, can_actor_access_case, log_access, require_permission, visible_cases_for_actor
 from common.case_metadata import ALLOWED_CASE_FLAGS, InvalidCaseFlags, server_case_identity, validated_case_flags
@@ -319,24 +319,6 @@ def case_charts(_request, case_id: str):
             "evidenceVerified": bool((analysis.get("evidence") or {}).get("manifestHash")),
         }
     )
-
-
-def case_tab(request, case_id: str, tab_name: str):
-    mapping = {
-        "packets": lambda: packets(request),
-        "sessions": lambda: sessions(request),
-        "alerts": lambda: alerts(request),
-        "protocols": lambda: decoder_summary(request),
-        "payloads": lambda: payloads(request),
-        "graph": lambda: graph(request),
-        "timeline": lambda: JsonResponse({"results": _case_scoped_analysis(case_id=case_id).get("trafficTimeline", [])}),
-    }
-    if tab_name not in mapping:
-        raise Http404("Unknown case tab")
-    request.GET._mutable = True
-    request.GET["caseId"] = case_id
-    request.GET._mutable = False
-    return mapping[tab_name]()
 
 
 @csrf_exempt

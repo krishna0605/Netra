@@ -144,30 +144,6 @@ def setup_admin(request):
 
 def capabilities(_request):
     return JsonResponse({"results": public_capabilities()})
-    if limited:
-        return limited
-    if not analysis_admission_available():
-        return JsonResponse(
-            {"error": "Analysis capacity is temporarily unavailable.", "code": "analysis_capacity_unavailable"},
-            status=503,
-        )
-    if len(request.body) > 64 * 1024:
-        return JsonResponse({"error": "Upload session metadata is too large.", "code": "upload_metadata_too_large"}, status=413)
-    try:
-        payload = _json_body(request)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return JsonResponse({"error": "Request body must be valid JSON.", "code": "invalid_json"}, status=400)
-    if not isinstance(payload, dict):
-        return JsonResponse({"error": "Request body must be a JSON object.", "code": "invalid_json"}, status=400)
-    try:
-        session, replayed = create_upload_session(
-            actor_from_request(request),
-            payload,
-            (request.headers.get("Idempotency-Key") or "").strip(),
-        )
-        return JsonResponse(upload_session_payload(session, idempotent_replay=replayed), status=200 if replayed else 201)
-    except UploadSessionProblem as problem:
-        return _upload_session_problem_response(problem)
 
 
 def operational_events(request):
