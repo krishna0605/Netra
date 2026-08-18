@@ -183,8 +183,15 @@ class RotationTests(TestCase):
         self.assertFalse(change.profile.must_change_password)
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class CredentialMailTests(TestCase):
-    """A message that did not leave must never be reported as though it did."""
+    """A message that did not leave must never be reported as though it did.
+
+    The locmem backend is set for the whole class rather than per test. These
+    cases have to name a mail host to reach the code under test, and a suite
+    that can open a socket to whatever host a test invents will one day wait on
+    one instead of failing — which is how this file first held up a release.
+    """
 
     def test_nothing_is_sent_while_the_feature_is_off(self):
         result = send_credential(
@@ -246,14 +253,19 @@ class CredentialMailTests(TestCase):
         NETRA_CREDENTIAL_EMAIL_ENABLED=True,
         EMAIL_HOST="smtp.example",
         DEFAULT_FROM_EMAIL="netra@example",
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     )
     @patch("apps.forensics.services.admin_users.create_user", return_value=IDENTITY)
     def test_a_mail_failure_leaves_the_account_standing(self, _create):
         organization = netra_organization()
+        # Patched where it is used, not where it is defined. admin_users binds
+        # the name at import, so patching common.credential_mail leaves the
+        # bound reference alone and the real sender runs — which on a host with
+        # no route to smtp.example means the suite waits on a socket.
         with patch(
-            "common.credential_mail.send_credential",
+            "apps.forensics.services.admin_users.send_credential",
             return_value=Delivery(sent=False, reason="mail_host_refused"),
-        ):
+        ) as sender:
             change = provision_account(
                 actor=_admin(organization),
                 organization=organization,
@@ -265,5 +277,9 @@ class CredentialMailTests(TestCase):
                 delivery="password",
             )
 
+        # Asserted so the test cannot pass by patching a name nothing calls.
+        sender.assert_called_once()
         self.assertTrue(UserProfile.objects.filter(user__username="stands@netra.test").exists())
         self.assertTrue(change.password, "the credential must still reach the operator on screen")
+        self.assertFalse(change.email_sent)
+        self.assertEqual(change.email_failure, "mail_host_refused")
