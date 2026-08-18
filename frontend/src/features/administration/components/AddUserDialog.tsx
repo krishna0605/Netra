@@ -8,6 +8,14 @@ import { useAuth } from "../features/auth/AuthContext";
 
 type PasswordMode = "auto" | "custom";
 
+// How the account reaches its owner. An invitation is the ordinary path: the
+// officer sets their own password and enrols an authenticator from the link, so
+// no credential is ever handled by a second person. A password exists for the
+// case the invitation cannot cover — an address that does not receive mail from
+// this deployment — and is the reason the choice is the operator's rather than
+// the deployment's.
+type Delivery = "invite" | "password";
+
 // Mirrors _MIN_PASSWORD and the class rule in admin_users.resolve_password. The
 // server is the authority — this only spares the operator a round trip.
 const PASSWORD_MINIMUM = 12;
@@ -33,19 +41,7 @@ type Handover = {
   password: string;
   roleName: string;
   delivery: string;
-  emailSent: boolean;
-  emailFailure: string;
   mustChangePassword: boolean;
-};
-
-// Why a message did not leave, in the operator's terms rather than the mail
-// layer's. Anything unrecognised falls back to the generic line below.
-const EMAIL_FAILURE_TEXT: Record<string, string> = {
-  credential_email_disabled: "Emailing credentials is switched off for this deployment.",
-  no_mail_host_configured: "No mail host is configured, so nothing was sent.",
-  no_sender_address_configured: "No sender address is configured, so nothing was sent.",
-  mail_host_refused: "The mail host refused the message.",
-  mail_host_accepted_nothing: "The mail host accepted no recipients.",
 };
 
 // Mirrors _MIN_REASON in backend/apps/forensics/services/admin_users.py. Kept
@@ -66,8 +62,11 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [roleSlug, setRoleSlug] = useState(DEFAULT_ROLE_SLUG);
   const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
-  // Netra issues the credential. The field opens pre-filled so the common case
-  // is one click, and stays editable when the operator wants a specific one.
+  // Invitation first. It is the only path where the credential is never known
+  // to anyone but the officer, which is what keeps the access log meaningful.
+  const [delivery, setDelivery] = useState<Delivery>("invite");
+  // Only consulted on the password path. The field opens pre-filled so the
+  // common case is one click, and stays editable for a specific credential.
   const [mode, setMode] = useState<PasswordMode>("auto");
   const [password, setPassword] = useState(() => generatePassword());
 
@@ -85,7 +84,10 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   // floor is stated in the UI as well — a disabled button that will not say
   // what it is waiting for reads as a broken console.
   const reasonValid = reason.trim().length >= REASON_MINIMUM;
-  const passwordValid = passwordAcceptable(password);
+  // An invitation carries no credential, so the password rule is not a rule
+  // there. Applying it anyway would disable the button over a field the
+  // operator cannot even see.
+  const passwordValid = delivery === "invite" || passwordAcceptable(password);
   const canSubmit =
     name.trim().length >= 2 && emailValid && reasonValid && passwordValid && code.trim().length === 6 && !busy;
 
@@ -105,6 +107,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setRoleSlug(DEFAULT_ROLE_SLUG);
     setReason("");
     setCode("");
+    setDelivery("invite");
     setMode("auto");
     setPassword(generatePassword());
     setHandover(null);
@@ -125,8 +128,6 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         created,
         password: applied,
         delivery: appliedDelivery,
-        emailSent,
-        emailFailure,
         mustChangePassword,
       } = await createUser({
         name,
@@ -134,8 +135,10 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         department,
         roleSlug,
         reason: reason.trim(),
-        delivery: "password",
-        password,
+        delivery,
+        // Sent only where it means something. On the invitation path the server
+        // issues no credential at all.
+        ...(delivery === "password" ? { password } : {}),
       });
       setHandover({
         name: created.name,
@@ -144,8 +147,6 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         password: applied,
         roleName: roles.find((role) => role.slug === roleSlug)?.name ?? roleSlug,
         delivery: appliedDelivery,
-        emailSent,
-        emailFailure,
         mustChangePassword,
       });
     } catch (cause) {
@@ -185,8 +186,10 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-[13px] text-sand-muted/80">
                 {handover
-                  ? "Hand these details over now. The password is kept on the officer's profile if you need it again."
-                  : "Netra issues the credential. The officer enrols an authenticator on first sign-in."}
+                  ? handover.password
+                    ? "Hand these details over now. The password is kept on the officer's profile if you need it again."
+                    : "The invitation takes them through setting a password and enrolling an authenticator."
+                  : "Send an invitation, or issue a password when the officer cannot receive mail from this deployment."}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -224,25 +227,10 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   </dl>
                 </Panel>
 
-                {handover.password ? (
-                  handover.emailSent ? (
-                    <p className="rounded-control border-l-2 border-state-ok bg-state-ok/8 px-4 py-3 text-[13px] leading-relaxed text-sand-muted">
-                      A message with these details was sent to {handover.email}. Hand them over in person as well if you
-                      can — a credential that only exists in an inbox is only as protected as that inbox.
-                    </p>
-                  ) : (
-                    <p className="rounded-control border-l-2 border-state-warn bg-state-warn/8 px-4 py-3 text-[13px] leading-relaxed text-sand-muted">
-                      <strong className="font-medium text-sand">No email was sent.</strong>{" "}
-                      {EMAIL_FAILURE_TEXT[handover.emailFailure] ?? "The message could not be delivered."} Hand these
-                      details over in person, or on a number you hold on record. This is the only time the password is
-                      shown.
-                    </p>
-                  )
-                ) : (
-                  <p className="rounded-control border-l-2 border-state-warn bg-state-warn/8 px-4 py-3 text-[13px] leading-relaxed text-sand-muted">
-                    The invitation was handed to the mail provider. If it does not arrive, open this officer and use{" "}
-                    <span className="font-medium text-sand">Set a password</span> instead — that path does not depend on
-                    email reaching them.
+                {handover.password ? null : (
+                  <p className="rounded-control border-l-2 border-state-ok bg-state-ok/8 px-4 py-3 text-[13px] leading-relaxed text-sand-muted">
+                    An invitation is on its way to {handover.email}. Opening it is what puts the account into service —
+                    they choose a password and enrol an authenticator from the link.
                   </p>
                 )}
                 {handover.password && !handover.mustChangePassword ? (
@@ -324,6 +312,38 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </p>
 
                 <fieldset className="rounded-panel border border-[color:var(--color-control-edge)] px-4 py-3">
+                  <legend className="px-1 text-[13px] font-medium text-sand">Handover</legend>
+                  <div className="mt-1 flex flex-wrap gap-4">
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name="delivery"
+                        checked={delivery === "invite"}
+                        onChange={() => setDelivery("invite")}
+                        className="accent-[color:var(--color-signal)]"
+                      />
+                      <span className="text-[13px] text-sand">Send an invitation</span>
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name="delivery"
+                        checked={delivery === "password"}
+                        onChange={() => setDelivery("password")}
+                        className="accent-[color:var(--color-signal)]"
+                      />
+                      <span className="text-[13px] text-sand">Issue a password</span>
+                    </label>
+                  </div>
+                  <p className="mt-1.5 text-xs text-sand-muted/70">
+                    {delivery === "invite"
+                      ? "A sign-in link goes to the address above. They set their own password and enrol an authenticator from it, so nobody else ever holds the credential."
+                      : "Netra generates the credential and shows it here. Use this when the officer cannot receive mail from this deployment."}
+                  </p>
+                </fieldset>
+
+                {delivery === "password" ? (
+                <fieldset className="rounded-panel border border-[color:var(--color-control-edge)] px-4 py-3">
                   <legend className="px-1 text-[13px] font-medium text-sand">Password</legend>
                   <div className="mt-1 flex flex-wrap gap-4">
                     <label className="flex cursor-pointer items-center gap-2">
@@ -372,6 +392,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       : "At least 12 characters, using three of: lowercase, uppercase, digits, symbols."}
                   </p>
                 </fieldset>
+                ) : null}
                 <div>
                   <label className="block text-[13px] font-medium text-sand" htmlFor="new-reason">
                     Reason

@@ -293,13 +293,21 @@ describe("GrantPermissionDialog", () => {
 
 describe("AddUserDialog delivery", () => {
   /**
-   * An invitation is a link and nothing else. Where mail is not reaching the
-   * officer it leaves an account nobody can enter, so the dialog has to offer
-   * the path that does not depend on delivery — and has to open on it, because
-   * the failure is silent from the operator's side.
+   * An invitation is the ordinary path: the officer sets their own password
+   * from the link, so no second person ever holds it. The dialog opens there.
+   * A password is the exception, for an address that does not receive mail from
+   * this deployment, and it stays out of the way until it is asked for.
    */
-  it("opens with a generated password already filled in", () => {
+  it("opens on an invitation, with no credential to hand over", () => {
     withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("radio", { name: /Send an invitation/ })).toBeChecked();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  });
+
+  it("fills the password in only once that path is chosen", () => {
+    withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Issue a password/ }));
 
     expect(screen.getByRole("radio", { name: /Auto-generate/ })).toBeChecked();
     // Pre-filled so the common case is one click, and long enough to pass the
@@ -307,8 +315,22 @@ describe("AddUserDialog delivery", () => {
     expect((screen.getByLabelText("Password") as HTMLInputElement).value.length).toBeGreaterThanOrEqual(12);
   });
 
+  it("does not hold an invitation back over a password it will not issue", () => {
+    // The password rule is not a rule on the invitation path. Applying it there
+    // would disable the button over a field the operator cannot see.
+    withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+
+    typeInto(screen.getByLabelText("Full name"), "K. Vyas");
+    typeInto(screen.getByLabelText("Official email"), "k.vyas@gcc.gov.in");
+    typeInto(screen.getByLabelText(/^Reason/), "Onboarding for the demonstration.");
+    typeInto(screen.getByLabelText("Confirm with your authenticator"), "482913");
+
+    expect(screen.getByRole("button", { name: "Create account" })).toBeEnabled();
+  });
+
   it("refuses to submit a weak password the operator typed", () => {
     withProvider(<AddUserDialog open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Issue a password/ }));
 
     typeInto(screen.getByLabelText("Full name"), "K. Vyas");
     typeInto(screen.getByLabelText("Official email"), "k.vyas@gcc.gov.in");
