@@ -20,6 +20,7 @@ would be worse than one that admits it does not know.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,8 @@ from common.audit import ROLE_PERMISSIONS
 from common.capabilities import capability_registry
 from common.supabase_admin import SupabaseAdminError, list_users
 from common.supabase_sessions import list_sessions, session_payload
+
+logger = logging.getLogger(__name__)
 
 
 # The catalogue is server-owned so that a screen cannot drift from what the
@@ -124,9 +127,6 @@ PERMISSION_CATALOGUE: tuple[dict[str, str], ...] = (
 _ROLE_DESCRIPTIONS = {
     "Admin": "Full administration of the organization, its users and its integrations.",
     "Investigator": "Runs cases end to end, including reporting and export.",
-    "Analyst": "Works inside assigned cases without export or reporting rights.",
-    "Viewer": "Read-only access to assigned cases.",
-    "LAN Operator": "Operates capture on the local network without user administration.",
 }
 
 # How much history one snapshot carries. The activity screen pages beyond this
@@ -679,7 +679,15 @@ def session_rows(
     for why that is legitimate and where it stops.
     """
     by_supabase_id = {row["supabaseId"]: row for row in users if row.get("supabaseId")}
-    sessions, status = list_sessions(list(by_supabase_id))
+    try:
+        sessions, status = list_sessions(list(by_supabase_id))
+    except Exception:
+        # Sessions are one panel of nine. A fault here used to raise straight
+        # out of directory_snapshot and blank the whole console, which is a
+        # worse answer than a console that admits it cannot read one table.
+        # Mirrors how _supabase_identities already degrades.
+        logger.exception("session listing failed; reporting sessions as unavailable")
+        return [], "unavailable_error"
     rows = []
     for session in sessions:
         owner = by_supabase_id.get(session.supabase_user_id)

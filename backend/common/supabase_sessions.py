@@ -118,7 +118,7 @@ def list_sessions(supabase_user_ids: list[str]) -> tuple[list[LiveSession], str]
             ip=_mask(row[6] or ""),
         )
         for row in rows
-    ]
+    ], "live"
 
 
 def end_session(session_id: str) -> bool:
