@@ -8,6 +8,14 @@ import { useAuth } from "../features/auth/AuthContext";
 
 type Handover = { name: string; email: string; password: string; roleName: string };
 
+// Mirrors _MIN_REASON in backend/apps/forensics/services/admin_users.py. Kept
+// in one named place so the console and the server cannot drift apart silently.
+const REASON_MINIMUM = 10;
+
+// Netra ships two roles. Investigator is the safer landing point for a new
+// account, so it is what the dialog opens on.
+const DEFAULT_ROLE_SLUG = "investigator";
+
 export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { createUser, roles, organization } = useDirectory();
   const { stepUp } = useAuth();
@@ -15,7 +23,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [department, setDepartment] = useState(organization.name);
-  const [roleSlug, setRoleSlug] = useState("viewer");
+  const [roleSlug, setRoleSlug] = useState(DEFAULT_ROLE_SLUG);
   const [reason, setReason] = useState("");
   const [code, setCode] = useState("");
 
@@ -29,16 +37,26 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   // The reason floor matches the server's, so the button is disabled rather
-  // than the write refused after the operator has filled everything in.
-  const reasonValid = reason.trim().length >= 10;
+  // than the write refused after the operator has filled everything in. The
+  // floor is stated in the UI as well — a disabled button that will not say
+  // what it is waiting for reads as a broken console.
+  const reasonValid = reason.trim().length >= REASON_MINIMUM;
   const canSubmit =
     name.trim().length >= 2 && emailValid && reasonValid && code.trim().length === 6 && !busy;
+
+  // What the operator still has to do, in the order the fields appear.
+  const blocking = [
+    name.trim().length >= 2 ? "" : "a full name",
+    emailValid ? "" : "a valid email address",
+    reasonValid ? "" : `a reason of at least ${REASON_MINIMUM} characters`,
+    code.trim().length === 6 ? "" : "the 6-digit authenticator code",
+  ].filter(Boolean);
 
   function reset() {
     setName("");
     setEmail("");
     setDepartment(organization.name);
-    setRoleSlug("viewer");
+    setRoleSlug(DEFAULT_ROLE_SLUG);
     setReason("");
     setCode("");
     setHandover(null);
@@ -206,7 +224,7 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       onChange={(event) => setRoleSlug(event.target.value)}
                       className="h-9 w-full"
                     >
-                      {roles.filter((role) => role.slug !== "admin").map((role) => (
+                      {roles.map((role) => (
                         <option key={role.slug} value={role.slug}>
                           {role.name}
                         </option>
@@ -234,8 +252,20 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                     className="mt-2"
                     autoComplete="off"
                   />
-                  <p className="mt-1.5 text-xs text-sand-muted/70">
-                    Sealed into the audit trail. It is what answers &ldquo;why&rdquo; when someone reads this back in a year.
+                  <p className="mt-1.5 flex items-center justify-between gap-3 text-xs text-sand-muted/70">
+                    <span>
+                      Sealed into the audit trail. It is what answers &ldquo;why&rdquo; when someone reads this back in a
+                      year.
+                    </span>
+                    <span
+                      className={
+                        reasonValid
+                          ? "shrink-0 tabular-nums text-sand-muted/60"
+                          : "shrink-0 tabular-nums font-medium text-signal"
+                      }
+                    >
+                      {reason.trim().length}/{REASON_MINIMUM}
+                    </span>
                   </p>
                 </div>
 
@@ -265,14 +295,26 @@ export function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               </div>
 
               <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
-                <p className="text-xs text-sand-muted/70">Recorded in the audit trail.</p>
+                <p className="text-xs text-sand-muted/70">
+                  {blocking.length ? (
+                    <span className="text-signal">Still needed: {blocking.join(", ")}.</span>
+                  ) : (
+                    "Recorded in the audit trail."
+                  )}
+                </p>
                 <div className="flex gap-2">
                   <Dialog.Close asChild>
                     <Button variant="ghost" size="sm" disabled={busy}>
                       Cancel
                     </Button>
                   </Dialog.Close>
-                  <Button variant="primary" size="sm" disabled={!canSubmit} onClick={() => void submit()}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!canSubmit}
+                    title={blocking.length ? `Still needed: ${blocking.join(", ")}` : undefined}
+                    onClick={() => void submit()}
+                  >
                     {busy ? "Creating…" : "Create account"}
                   </Button>
                 </div>

@@ -131,7 +131,7 @@ class AdminWritePathTests(AdminWriteTestBase):
                 {
                     "email": f"officer{index}@gcc.gov.in",
                     "name": "Officer",
-                    "role": "Viewer",
+                    "role": "Investigator",
                     "department": "Cell",
                     "reason": "Bulk creation for this test.",
                 },
@@ -153,7 +153,7 @@ class AdminWritePathTests(AdminWriteTestBase):
             {
                 "email": "ghost@gcc.gov.in",
                 "name": "Ghost",
-                "role": "Viewer",
+                "role": "Investigator",
                 "department": "Cell",
                 "reason": "Should not be created at all.",
             },
@@ -170,7 +170,7 @@ class AdminWritePathTests(AdminWriteTestBase):
             {
                 "email": "officer@gcc.gov.in",
                 "name": "Duplicate",
-                "role": "Viewer",
+                "role": "Investigator",
                 "department": "Cell",
                 "reason": "Already present in the directory.",
             },
@@ -191,7 +191,7 @@ class AdminWritePathTests(AdminWriteTestBase):
             {
                 "email": "late@gcc.gov.in",
                 "name": "Late",
-                "role": "Viewer",
+                "role": "Investigator",
                 "department": "Cell",
                 "reason": "Should be refused for staleness.",
             },
@@ -209,7 +209,7 @@ class AdminWritePathTests(AdminWriteTestBase):
         """The reason is what makes the audit entry answer "why" a year later."""
         response = self._post(
             USERS,
-            {"email": "x@gcc.gov.in", "name": "X", "role": "Viewer", "department": "Cell", "reason": "too short"},
+            {"email": "x@gcc.gov.in", "name": "X", "role": "Investigator", "department": "Cell", "reason": "too short"},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -356,13 +356,13 @@ class AdminWritePathTests(AdminWriteTestBase):
 
     def test_changing_a_role_records_both_sides_of_the_change(self):
         response = self._patch(
-            f"{USERS}/{self.officer.id}/role", {"role": "Analyst", "reason": "Moved to the analysis desk."}
+            f"{USERS}/{self.officer.id}/role", {"role": "Admin", "reason": "Moved to the analysis desk."}
         )
 
         self.assertEqual(response.status_code, 200)
         entry = AdminAuditEvent.objects.get(action="user.role_changed")
         self.assertEqual(entry.before_json["role"], "Investigator")
-        self.assertEqual(entry.after_json["role"], "Analyst")
+        self.assertEqual(entry.after_json["role"], "Admin")
 
     def test_an_administrator_cannot_demote_themselves(self):
         """The same invariant from the role side: the only way to remove the
@@ -391,7 +391,7 @@ class AdminWritePathTests(AdminWriteTestBase):
 
         response = self._patch(
             f"{USERS}/{self.deputy.id}/role",
-            {"role": "viewer", "reason": "Posted to another district."},
+            {"role": "investigator", "reason": "Posted to another district."},
         )
 
         self.assertEqual(response.status_code, 409)
@@ -409,7 +409,7 @@ class AdminWritePathTests(AdminWriteTestBase):
 
         other = Organization.objects.create(name="Station B", slug="station-b")
         elsewhere = get_user_model().objects.create_user(username="elsewhere@gcc.gov.in")
-        UserProfile.objects.create(user=elsewhere, organization=other, role=UserProfile.Role.VIEWER)
+        UserProfile.objects.create(user=elsewhere, organization=other, role=UserProfile.Role.INVESTIGATOR)
 
         response = self._post(f"{USERS}/{elsewhere.id}/password", {"reason": "Should not be reachable."})
 
@@ -428,12 +428,12 @@ class AdminWritePathTests(AdminWriteTestBase):
                 {
                     "email": f"chain{index}@gcc.gov.in",
                     "name": "Chain",
-                    "role": "Viewer",
+                    "role": "Investigator",
                     "department": "Cell",
                     "reason": "Recorded for the chain test.",
                 },
             )
-        self._patch(f"{USERS}/{self.officer.id}/role", {"role": "Analyst", "reason": "Moved to the analysis desk."})
+        self._patch(f"{USERS}/{self.officer.id}/role", {"role": "Investigator", "reason": "Moved to the analysis desk."})
 
         report = verify_admin_chain(self.organization)
 

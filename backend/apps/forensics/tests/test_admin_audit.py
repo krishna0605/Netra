@@ -133,9 +133,9 @@ class AdminAuditChainTests(TestCase):
         self.assertEqual(report["firstBrokenIndex"], 3)
 
     def test_before_and_after_are_sealed(self):
-        event = self._append(before={"role": "Analyst"}, after={"role": "Admin"})
+        event = self._append(before={"role": "Investigator"}, after={"role": "Admin"})
 
-        AdminAuditEvent.objects.filter(pk=event.pk).update(after_json={"role": "Viewer"})
+        AdminAuditEvent.objects.filter(pk=event.pk).update(after_json={"role": "Investigator"})
 
         self.assertFalse(verify_admin_chain(self.organization)["verified"])
 
@@ -194,7 +194,7 @@ class AdminAuditChainTests(TestCase):
 
     def test_the_console_shape_carries_what_the_screen_renders(self):
         event = self._append(
-            before={"role": "Analyst"},
+            before={"role": "Investigator"},
             after={"role": "Investigator"},
             reason="Promoted after completing training.",
         )

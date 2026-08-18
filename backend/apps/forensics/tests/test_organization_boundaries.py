@@ -112,7 +112,7 @@ class OrganizationBoundaryTests(TestCase):
         case = self._case("CASE-MEMBERSHIP-NETRA", self.netra)
         response = self.client.post(
             f"/api/cases/{case.id}/members",
-            data={"email": "foreign-user@other.test", "role": "Viewer"},
+            data={"email": "foreign-user@other.test", "role": "Investigator"},
             content_type="application/json",
             **headers,
         )

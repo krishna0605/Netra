@@ -16,12 +16,17 @@ from common.step_up import factor_verified_at
 from common.tenancy import NETRA_ORGANIZATION_ID, netra_organization
 
 
+# Two roles, deliberately. Investigator works cases in the console; Admin does
+# that and runs the organization. Analyst, Viewer and LAN Operator were removed
+# once it was clear nobody held them and the extra rungs only made the grant
+# model harder to reason about.
+#
+# Every lookup goes through ROLE_PERMISSIONS.get(role, set()), so a role that is
+# not listed here resolves to no permissions rather than raising. That is what
+# makes removing a role safe: any stale value fails closed.
 ROLE_PERMISSIONS = {
     "Admin": {"upload", "review", "confirm", "report", "export", "view", "compliance", "manage_users", "integrations", "operations"},
     "Investigator": {"upload", "review", "confirm", "report", "export", "view", "compliance"},
-    "Analyst": {"upload", "review", "view"},
-    "Viewer": {"view"},
-    "LAN Operator": {"upload", "review", "confirm", "report", "export", "view", "compliance", "integrations", "operations"},
 }
 
 
@@ -47,7 +52,18 @@ class Actor:
     session_id: str = ""
 
 
-VALID_ROLES = {"Admin", "Investigator", "Analyst", "Viewer"}
+VALID_ROLES = {"Admin", "Investigator"}
+
+# Two sentinels for actors that hold no authority, kept distinct because the
+# difference matters when reading an access log: one never proved who they are,
+# the other did but has no profile in this deployment.
+#
+# Both are deliberately absent from ROLE_PERMISSIONS, so every permission lookup
+# resolves to the empty set, and absent from VALID_ROLES, so neither can be
+# assigned to a profile. Both previously read "Viewer", which was a real role
+# that carried the "view" permission.
+UNAUTHENTICATED_ROLE = "Unauthenticated"
+UNASSIGNED_ROLE = "Unassigned"
 
 
 def _admin_exists() -> bool:
@@ -65,12 +81,12 @@ def sync_supabase_actor(supabase_user) -> Actor:
     User = get_user_model()
     username = (getattr(supabase_user, "email", "") or getattr(supabase_user, "id", "")).strip().lower()
     if not username:
-        return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+        return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
     user = User.objects.filter(username__iexact=username).first()
     if user is None:
         return Actor(
             user=username,
-            role=UserProfile.Role.VIEWER,
+            role=UNASSIGNED_ROLE,
             authenticated=True,
             email=username,
             external_id=getattr(supabase_user, "id", ""),
@@ -82,7 +98,7 @@ def sync_supabase_actor(supabase_user) -> Actor:
     if profile is None or not user.is_active:
         return Actor(
             user=username,
-            role=UserProfile.Role.VIEWER,
+            role=UNASSIGNED_ROLE,
             authenticated=True,
             django_user_id=user.id,
             email=user.email or username,
@@ -144,17 +160,17 @@ def actor_from_request(request) -> Actor:
                 verification = verify_supabase_request_token(token)
             except SupabaseVerificationUnavailable:
                 request.netra_auth_error = "auth_verification_unavailable"
-                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+                return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
             except SupabaseTokenInvalid:
                 request.netra_auth_error = "session_invalid"
-                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+                return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
             request.netra_verified_supabase_token = verification.verified_token
             request.netra_supabase_bearer_token = token
             actor = sync_supabase_actor(verification.user)
             issued_at = getattr(verification.verified_token, "issued_at", None)
             if actor.django_user_id and _session_was_revoked(actor.django_user_id, issued_at):
                 request.netra_auth_error = "session_revoked"
-                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+                return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
             return actor
         try:
             auth = JWTAuthentication()
@@ -164,12 +180,12 @@ def actor_from_request(request) -> Actor:
             issued_at = datetime.fromtimestamp(issued, UTC) if isinstance(issued, (int, float)) else None
             if _session_was_revoked(user.id, issued_at):
                 request.netra_auth_error = "session_revoked"
-                return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+                return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
             profile = UserProfile.objects.select_related("organization").filter(user=user).first()
             if profile is None or not user.is_active:
                 return Actor(
                     user=user.get_username(),
-                    role="Viewer",
+                    role=UNASSIGNED_ROLE,
                     authenticated=True,
                     django_user_id=user.id,
                     aal=str(validated.get("aal", "aal2" if settings.NETRA_TEST_SQLITE else "aal1")),
@@ -195,7 +211,7 @@ def actor_from_request(request) -> Actor:
                 session_id=str(validated.get("jti", ""))[:128],
             )
         except Exception:
-            return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+            return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
     if settings.NETRA_DEV_ROLE_HEADERS:
         role = request.headers.get("X-Netra-Role", "Investigator")
         if role not in ROLE_PERMISSIONS:
@@ -209,7 +225,7 @@ def actor_from_request(request) -> Actor:
             aal="aal2" if settings.NETRA_TEST_SQLITE else "aal1",
             session_id="development-header",
         )
-    return Actor(user="Unauthenticated", role="Viewer", authenticated=False)
+    return Actor(user="Unauthenticated", role=UNAUTHENTICATED_ROLE, authenticated=False)
 
 
 def can(actor: Actor, permission: str) -> bool:

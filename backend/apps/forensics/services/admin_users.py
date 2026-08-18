@@ -62,10 +62,12 @@ _ALPHABET = "".join(
 _PASSWORD_LENGTH = 20
 _MIN_REASON, _MAX_REASON = 10, 1000
 
+# Two roles, matching ROLE_PERMISSIONS. Analyst and Viewer were removed once
+# nobody held them; a request naming either now fails with invalid_role rather
+# than quietly provisioning an account with permissions the console no longer
+# describes.
 ASSIGNABLE_ROLES = {
     UserProfile.Role.INVESTIGATOR,
-    UserProfile.Role.ANALYST,
-    UserProfile.Role.VIEWER,
     UserProfile.Role.ADMIN,
 }
 

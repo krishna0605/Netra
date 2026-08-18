@@ -63,8 +63,8 @@ class ResolutionTests(TestCase):
         self.profile = UserProfile.objects.create(
             user=self.analyst,
             organization=self.organization,
-            role=UserProfile.Role.ANALYST,
-            role_ref=Role.objects.get(organization=self.organization, slug="analyst"),
+            role=UserProfile.Role.INVESTIGATOR,
+            role_ref=Role.objects.get(organization=self.organization, slug="investigator"),
         )
 
     def _grant(self, key, mode=PermissionGrant.Mode.GRANT, expires_at=None):
@@ -78,12 +78,12 @@ class ResolutionTests(TestCase):
         )
 
     def test_a_role_alone_resolves_to_its_permissions(self):
-        self.assertEqual(effective_permissions(self.profile), ROLE_PERMISSIONS["Analyst"])
+        self.assertEqual(effective_permissions(self.profile), ROLE_PERMISSIONS["Investigator"])
 
     def test_a_grant_adds_to_the_role(self):
-        self._grant("export")
+        self._grant("operations")
 
-        self.assertIn("export", effective_permissions(self.profile))
+        self.assertIn("operations", effective_permissions(self.profile))
 
     def test_a_revocation_removes_from_the_role(self):
         self._grant("upload", mode=PermissionGrant.Mode.REVOKE)
@@ -94,14 +94,14 @@ class ResolutionTests(TestCase):
     def test_an_expired_grant_stops_counting(self):
         """A temporary grant that outlives its expiry is the same as one that
         was never temporary."""
-        self._grant("export", expires_at=timezone.now() - timedelta(minutes=1))
+        self._grant("operations", expires_at=timezone.now() - timedelta(minutes=1))
 
-        self.assertNotIn("export", effective_permissions(self.profile))
+        self.assertNotIn("operations", effective_permissions(self.profile))
 
     def test_a_grant_expiring_later_still_counts(self):
-        self._grant("export", expires_at=timezone.now() + timedelta(days=1))
+        self._grant("operations", expires_at=timezone.now() + timedelta(days=1))
 
-        self.assertIn("export", effective_permissions(self.profile))
+        self.assertIn("operations", effective_permissions(self.profile))
 
     def test_editing_a_role_changes_what_its_holders_can_do(self):
         """The point of the whole phase: a permission change without a deploy."""
@@ -122,12 +122,12 @@ class ResolutionTests(TestCase):
         UserProfile.objects.filter(pk=self.profile.pk).update(role_ref=None)
         self.profile.refresh_from_db()
 
-        self.assertEqual(effective_permissions(self.profile), ROLE_PERMISSIONS["Analyst"])
+        self.assertEqual(effective_permissions(self.profile), ROLE_PERMISSIONS["Investigator"])
 
     def test_can_reads_the_resolved_set_when_one_is_present(self):
         actor = Actor(
             user="analyst",
-            role="Analyst",
+            role="Investigator",
             authenticated=True,
             django_user_id=self.analyst.id,
             organization_id=self.organization.id,
@@ -146,16 +146,16 @@ class ResolutionTests(TestCase):
         self.assertFalse(can(actor, "manage_users"))
 
     def test_permissions_for_reads_the_database(self):
-        self._grant("export")
+        self._grant("operations")
 
-        self.assertIn("export", permissions_for(self.analyst.id, self.organization.id))
+        self.assertIn("operations", permissions_for(self.analyst.id, self.organization.id))
 
     def test_version_bump_invalidates_the_cross_request_cache(self):
-        self.assertNotIn("export", permissions_for(self.analyst.id, self.organization.id))
-        self._grant("export")
+        self.assertNotIn("operations", permissions_for(self.analyst.id, self.organization.id))
+        self._grant("operations")
         bump_permissions_version(self.organization)
 
-        self.assertIn("export", permissions_for(self.analyst.id, self.organization.id))
+        self.assertIn("operations", permissions_for(self.analyst.id, self.organization.id))
 
 
 class CeilingTests(TestCase):
@@ -179,8 +179,8 @@ class CeilingTests(TestCase):
         UserProfile.objects.create(
             user=self.analyst,
             organization=self.organization,
-            role=UserProfile.Role.ANALYST,
-            role_ref=Role.objects.get(organization=self.organization, slug="analyst"),
+            role=UserProfile.Role.INVESTIGATOR,
+            role_ref=Role.objects.get(organization=self.organization, slug="investigator"),
         )
 
     def _actor(self, user, role):
@@ -198,11 +198,11 @@ class CeilingTests(TestCase):
     def test_a_lesser_administrator_cannot_confer_beyond_their_own_set(self):
         requested = {"view", "export", "manage_users"}
 
-        allowed = within_ceiling(self._actor(self.analyst, "Analyst"), requested)
+        allowed = within_ceiling(self._actor(self.analyst, "Investigator"), requested)
 
-        # Analyst holds view; export and manage_users are refused because the
-        # person granting them does not hold them either.
-        self.assertEqual(allowed, {"view"})
+        # Investigator holds view and export; manage_users is refused because
+        # the person granting it does not hold it either.
+        self.assertEqual(allowed, {"view", "export"})
 
     def test_the_ceiling_follows_a_revocation(self):
         """Taking a permission away must also take away the ability to hand it
@@ -218,7 +218,7 @@ class CeilingTests(TestCase):
         self.assertNotIn("export", ceiling_for(self._actor(self.admin, "Admin")))
 
     def test_the_ceiling_is_empty_for_an_actor_with_no_profile(self):
-        self.assertEqual(ceiling_for(Actor(user="nobody", role="Viewer")), set())
+        self.assertEqual(ceiling_for(Actor(user="nobody", role="Investigator")), set())
 
 
 class VersionTests(TestCase):

@@ -62,21 +62,21 @@ class SupabaseUserProvisioningTests(TestCase):
 
     @patch("apps.forensics.api.authentication.invite_user", return_value=SUPABASE_USER)
     def test_invitation_creates_unusable_local_identity_and_audit(self, invite):
-        response = self._call({"email": "Invitee@Netra.Test", "name": "Invitee", "role": "Viewer"})
+        response = self._call({"email": "Invitee@Netra.Test", "name": "Invitee", "role": "Investigator"})
         self.assertEqual(response.status_code, 201)
         payload = json.loads(response.content)
         self.assertEqual(payload["invitationState"], "sent")
         user = get_user_model().objects.get(username="invitee@netra.test")
         self.assertFalse(user.has_usable_password())
         self.assertEqual(user.netra_profile.organization_id, self.organization.id)
-        self.assertEqual(user.netra_profile.role, UserProfile.Role.VIEWER)
+        self.assertEqual(user.netra_profile.role, UserProfile.Role.INVESTIGATOR)
         self.assertTrue(AccessLog.objects.filter(action="organization.user_invited", resource_id=str(user.id)).exists())
         self.assertTrue(OperationalEvent.objects.filter(event_type="organization.user_invited").exists())
         invite.assert_called_once_with("invitee@netra.test", redirect_to="https://netra.example/auth/invite")
 
     @patch("apps.forensics.api.authentication.invite_user", side_effect=SupabaseAdminError("offline"))
     def test_provider_failure_creates_no_local_user_or_success_audit(self, _invite):
-        response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Viewer"})
+        response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Investigator"})
         self.assertEqual(response.status_code, 503)
         self.assertFalse(get_user_model().objects.filter(username="invitee@netra.test").exists())
         self.assertFalse(AccessLog.objects.filter(action="organization.user_invited").exists())
@@ -84,7 +84,7 @@ class SupabaseUserProvisioningTests(TestCase):
     @patch("apps.forensics.api.authentication.invite_user", return_value=SUPABASE_USER)
     def test_password_and_admin_role_are_rejected_before_provider_call(self, invite):
         password_response = self._call(
-            {"email": "invitee@netra.test", "name": "Invitee", "role": "Viewer", "password": "NotAllowed1!"}
+            {"email": "invitee@netra.test", "name": "Invitee", "role": "Investigator", "password": "NotAllowed1!"}
         )
         admin_response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Admin"})
         self.assertEqual(password_response.status_code, 400)
@@ -93,7 +93,7 @@ class SupabaseUserProvisioningTests(TestCase):
 
     def test_disabled_invitation_is_truthful_and_side_effect_free(self):
         with override_settings(NETRA_AUTH_INVITATIONS_ENABLED=False):
-            response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Viewer"})
+            response = self._call({"email": "invitee@netra.test", "name": "Invitee", "role": "Investigator"})
         self.assertEqual(response.status_code, 503)
         payload = json.loads(response.content)
         self.assertEqual(payload["error"]["code"], "feature_disabled")
@@ -103,7 +103,7 @@ class SupabaseUserProvisioningTests(TestCase):
     @patch("apps.forensics.api.authentication.list_auth_users", return_value=([SUPABASE_USER], None))
     def test_user_list_adds_bounded_auth_metadata(self, _list_users):
         invited = get_user_model().objects.create_user(username="invitee@netra.test", email="invitee@netra.test")
-        UserProfile.objects.create(user=invited, organization=self.organization, role=UserProfile.Role.VIEWER)
+        UserProfile.objects.create(user=invited, organization=self.organization, role=UserProfile.Role.INVESTIGATOR)
         response = self._list()
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)

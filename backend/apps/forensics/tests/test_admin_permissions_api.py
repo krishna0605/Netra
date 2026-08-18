@@ -20,6 +20,7 @@ from apps.forensics.models import (
     RolePermission,
     UserProfile,
 )
+from common.audit import ROLE_PERMISSIONS
 from common.permissions import effective_permissions
 from common.tenancy import netra_organization
 
@@ -52,7 +53,7 @@ class PermissionApiBase(TestCase):
         for user, role in (
             (self.head, "Admin"),
             (self.deputy, "Admin"),
-            (self.officer, "Analyst"),
+            (self.officer, "Investigator"),
         ):
             UserProfile.objects.create(
                 user=user,
@@ -90,14 +91,14 @@ class PermissionApiBase(TestCase):
 @SECURE_SETTINGS
 class GrantTests(PermissionApiBase):
     def test_granting_adds_a_permission_the_role_does_not_carry(self):
-        self.assertNotIn("export", effective_permissions(self._profile(self.officer)))
+        self.assertNotIn("operations", effective_permissions(self._profile(self.officer)))
 
         response = self._send(
-            "post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "export", "reason": REASON}
+            "post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "operations", "reason": REASON}
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("export", effective_permissions(self._profile(self.officer)))
+        self.assertIn("operations", effective_permissions(self._profile(self.officer)))
 
     def test_a_grant_beyond_your_own_permissions_is_refused(self):
         """The whole point of the ceiling.
@@ -110,7 +111,7 @@ class GrantTests(PermissionApiBase):
         PermissionGrant.objects.create(
             organization=self.organization,
             user=self.deputy,
-            permission_id="export",
+            permission_id="operations",
             mode=PermissionGrant.Mode.REVOKE,
             reason="Export rights suspended pending review.",
         )
@@ -118,23 +119,23 @@ class GrantTests(PermissionApiBase):
         response = self._send(
             "post",
             f"/api/admin/v1/users/{self.officer.id}/grants",
-            {"permission": "export", "reason": REASON},
+            {"permission": "operations", "reason": REASON},
             user=self.deputy,
         )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self._code(response), "beyond_your_permissions")
-        self.assertNotIn("export", effective_permissions(self._profile(self.officer)))
+        self.assertNotIn("operations", effective_permissions(self._profile(self.officer)))
 
     def test_the_same_grant_succeeds_from_someone_who_holds_it(self):
         """Otherwise the refusal above could be anything — a broken endpoint
         looks identical to a working ceiling."""
         response = self._send(
-            "post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "export", "reason": REASON}
+            "post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "operations", "reason": REASON}
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("export", effective_permissions(self._profile(self.officer)))
+        self.assertIn("operations", effective_permissions(self._profile(self.officer)))
 
     def test_revoking_is_not_ceilinged(self):
         """An administrator whose own export right was taken away should still
@@ -143,7 +144,7 @@ class GrantTests(PermissionApiBase):
         PermissionGrant.objects.create(
             organization=self.organization,
             user=self.deputy,
-            permission_id="export",
+            permission_id="operations",
             mode=PermissionGrant.Mode.REVOKE,
             reason="Export rights suspended pending review.",
         )
@@ -162,7 +163,7 @@ class GrantTests(PermissionApiBase):
         response = self._send(
             "post",
             f"/api/admin/v1/users/{self.officer.id}/grants",
-            {"permission": "export", "reason": REASON, "expiresAt": "2020-01-01T00:00:00Z"},
+            {"permission": "operations", "reason": REASON, "expiresAt": "2020-01-01T00:00:00Z"},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -172,25 +173,25 @@ class GrantTests(PermissionApiBase):
         response = self._send(
             "post",
             f"/api/admin/v1/users/{self.officer.id}/grants",
-            {"permission": "export", "reason": REASON, "expiresAt": "2099-01-01T00:00:00Z"},
+            {"permission": "operations", "reason": REASON, "expiresAt": "2099-01-01T00:00:00Z"},
         )
 
         self.assertEqual(response.status_code, 200)
-        grant = PermissionGrant.objects.get(user=self.officer, permission_id="export")
+        grant = PermissionGrant.objects.get(user=self.officer, permission_id="operations")
         self.assertIsNotNone(grant.expires_at)
 
     def test_removing_an_override_returns_the_role_to_charge(self):
-        self._send("post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "export", "reason": REASON})
+        self._send("post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "operations", "reason": REASON})
 
         response = self.client.delete(
             f"/api/admin/v1/users/{self.officer.id}/grants",
-            data='{"permission": "export", "reason": "No longer required for the case."}',
+            data='{"permission": "operations", "reason": "No longer required for the case."}',
             content_type="application/json",
             **self._headers(self.head),
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("export", effective_permissions(self._profile(self.officer)))
+        self.assertNotIn("operations", effective_permissions(self._profile(self.officer)))
 
     def test_an_unknown_permission_is_refused(self):
         response = self._send(
@@ -201,17 +202,17 @@ class GrantTests(PermissionApiBase):
         self.assertEqual(self._code(response), "unknown_permission")
 
     def test_a_grant_is_sealed_into_the_chain_with_both_sides(self):
-        self._send("post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "export", "reason": REASON})
+        self._send("post", f"/api/admin/v1/users/{self.officer.id}/grants", {"permission": "operations", "reason": REASON})
 
         entry = AdminAuditEvent.objects.get(action="permission.granted")
-        self.assertNotIn("export", entry.before_json["permissions"])
-        self.assertIn("export", entry.after_json["permissions"])
+        self.assertNotIn("operations", entry.before_json["permissions"])
+        self.assertIn("operations", entry.after_json["permissions"])
 
     def test_a_stale_authenticator_refuses_a_grant(self):
         response = self._send(
             "post",
             f"/api/admin/v1/users/{self.officer.id}/grants",
-            {"permission": "export", "reason": REASON},
+            {"permission": "operations", "reason": REASON},
             fresh=False,
         )
 
@@ -225,7 +226,7 @@ class RoleTests(PermissionApiBase):
         """An organization that could strip manage_users from the only role
         holding it would lock itself out with no way back in."""
         response = self.client.put(
-            "/api/admin/v1/roles/analyst/permissions/export",
+            "/api/admin/v1/roles/investigator/permissions/operations",
             data='{"reason": "Should not be permitted at all."}',
             content_type="application/json",
             **self._headers(self.head),
@@ -238,12 +239,12 @@ class RoleTests(PermissionApiBase):
         response = self._send(
             "post",
             "/api/admin/v1/roles",
-            {"name": "Records Desk", "description": "", "baseSlug": "analyst", "reason": REASON},
+            {"name": "Records Desk", "description": "", "baseSlug": "investigator", "reason": REASON},
         )
 
         self.assertEqual(response.status_code, 201)
         created = Role.objects.get(organization=self.organization, slug="records_desk")
-        base = Role.objects.get(organization=self.organization, slug="analyst")
+        base = Role.objects.get(organization=self.organization, slug="investigator")
         self.assertFalse(created.is_system)
         self.assertEqual(
             set(RolePermission.objects.filter(role=created).values_list("permission_id", flat=True)),
@@ -254,7 +255,7 @@ class RoleTests(PermissionApiBase):
         self._send(
             "post",
             "/api/admin/v1/roles",
-            {"name": "Records Desk", "description": "", "baseSlug": "viewer", "reason": REASON},
+            {"name": "Records Desk", "description": "", "baseSlug": "investigator", "reason": REASON},
         )
 
         response = self.client.put(
@@ -269,7 +270,7 @@ class RoleTests(PermissionApiBase):
         self.assertIn("report", RolePermission.objects.filter(role=role).values_list("permission_id", flat=True))
 
     def test_a_duplicate_role_name_is_refused(self):
-        payload = {"name": "Records Desk", "description": "", "baseSlug": "viewer", "reason": REASON}
+        payload = {"name": "Records Desk", "description": "", "baseSlug": "investigator", "reason": REASON}
         self._send("post", "/api/admin/v1/roles", payload)
 
         response = self._send("post", "/api/admin/v1/roles", payload)
@@ -282,27 +283,27 @@ class RoleTests(PermissionApiBase):
         self._send(
             "post",
             "/api/admin/v1/roles",
-            {"name": "Records Desk", "description": "", "baseSlug": "viewer", "reason": REASON},
+            {"name": "Records Desk", "description": "", "baseSlug": "investigator", "reason": REASON},
         )
         role = Role.objects.get(organization=self.organization, slug="records_desk")
         UserProfile.objects.filter(user=self.officer).update(role_ref=role)
 
-        self.assertNotIn("report", effective_permissions(self._profile(self.officer)))
+        self.assertNotIn("operations", effective_permissions(self._profile(self.officer)))
 
         self.client.put(
-            "/api/admin/v1/roles/records_desk/permissions/report",
-            data='{"reason": "The desk now produces disclosure packs."}',
+            "/api/admin/v1/roles/records_desk/permissions/operations",
+            data='{"reason": "The desk now runs its own capture jobs."}',
             content_type="application/json",
             **self._headers(self.head),
         )
 
-        self.assertIn("report", effective_permissions(self._profile(self.officer)))
+        self.assertIn("operations", effective_permissions(self._profile(self.officer)))
 
     def test_assigning_a_custom_role_updates_display_and_enforcement_together(self):
         self._send(
             "post",
             "/api/admin/v1/roles",
-            {"name": "Records Desk", "description": "", "baseSlug": "viewer", "reason": REASON},
+            {"name": "Records Desk", "description": "", "baseSlug": "investigator", "reason": REASON},
         )
 
         response = self._send(
@@ -314,8 +315,10 @@ class RoleTests(PermissionApiBase):
         self.assertEqual(response.status_code, 200)
         profile = self._profile(self.officer)
         self.assertEqual(profile.role_ref.slug, "records_desk")
+        # Custom roles keep the legacy CharField at Viewer, which is no longer a
+        # granted role — so a rollback to the previous release is fail-closed.
         self.assertEqual(profile.role, UserProfile.Role.VIEWER)
-        self.assertEqual(effective_permissions(profile), {"view"})
+        self.assertEqual(effective_permissions(profile), ROLE_PERMISSIONS["Investigator"])
         directory = self.client.get("/api/admin/v1/directory", **self._headers(self.head)).json()
         row = next(item for item in directory["users"] if item["id"] == self.officer.id)
         self.assertEqual(row["roleSlug"], "records_desk")
@@ -324,14 +327,14 @@ class RoleTests(PermissionApiBase):
         response = self._send(
             "patch",
             f"/api/admin/v1/users/{self.officer.id}/role",
-            {"role": "viewer", "reason": REASON},
+            {"role": "admin", "reason": REASON},
         )
 
         self.assertEqual(response.status_code, 200)
         profile = self._profile(self.officer)
-        self.assertEqual(profile.role, UserProfile.Role.VIEWER)
-        self.assertEqual(profile.role_ref.slug, "viewer")
-        self.assertEqual(effective_permissions(profile), {"view"})
+        self.assertEqual(profile.role, UserProfile.Role.ADMIN)
+        self.assertEqual(profile.role_ref.slug, "admin")
+        self.assertEqual(effective_permissions(profile), ROLE_PERMISSIONS["Admin"])
 
     def test_revoking_manage_users_removes_access_to_the_admin_namespace(self):
         PermissionGrant.objects.create(

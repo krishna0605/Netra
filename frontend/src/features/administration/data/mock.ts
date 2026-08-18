@@ -34,8 +34,7 @@ export const PERMISSIONS: Permission[] = [
 ];
 
 /* ---------------------------------------------------------------------------
-   Roles — five system roles seeded from ROLE_PERMISSIONS, plus one custom role
-   to show what cloning produces.
+   Roles — the two system roles seeded from ROLE_PERMISSIONS.
    --------------------------------------------------------------------------- */
 export const ROLES: Role[] = [
   {
@@ -53,38 +52,6 @@ export const ROLES: Role[] = [
     isSystem: true,
     memberCount: 7,
     permissions: ["view", "review", "upload", "confirm", "report", "export", "compliance"],
-  },
-  {
-    slug: "analyst",
-    name: "Analyst",
-    description: "Works the evidence but cannot confirm findings or export.",
-    isSystem: true,
-    memberCount: 9,
-    permissions: ["view", "review", "upload"],
-  },
-  {
-    slug: "viewer",
-    name: "Viewer",
-    description: "Read-only access to cases they are a member of.",
-    isSystem: true,
-    memberCount: 5,
-    permissions: ["view"],
-  },
-  {
-    slug: "lan_operator",
-    name: "LAN Operator",
-    description: "Trusted-LAN operator profile for on-premises deployments.",
-    isSystem: true,
-    memberCount: 0,
-    permissions: ["view", "review", "upload", "confirm", "report", "export", "compliance", "integrations", "operations"],
-  },
-  {
-    slug: "evidence_clerk",
-    name: "Evidence Clerk",
-    description: "Cloned from Analyst. Adds export for the records desk.",
-    isSystem: false,
-    memberCount: 1,
-    permissions: ["view", "review", "upload", "export"],
   },
 ];
 
@@ -138,7 +105,7 @@ export const USERS: AdminUser[] = [
     id: 41,
     email: "a.mehta@gcc.gov.in",
     name: "A. Mehta",
-    roleSlug: "analyst",
+    roleSlug: "investigator",
     isOwner: false,
     status: "active",
     mfa: "unenrolled",
@@ -156,16 +123,16 @@ export const USERS: AdminUser[] = [
       { key: "export", source: "granted", expiresAt: ahead(21), reason: "Temporary access for the Sector 7 handover pack.", grantedBy: "Inspector A. Patel" },
     ],
     caseMemberships: [
-      { caseId: "CASE-2026-0142", caseTitle: "Exfiltration — Sector 7 relay", role: "Analyst", addedAt: daysAgo(9) },
-      { caseId: "CASE-2026-0139", caseTitle: "Credential stuffing — payroll portal", role: "Analyst", addedAt: daysAgo(14) },
-      { caseId: "CASE-2026-0131", caseTitle: "Lateral movement — records annexe", role: "Viewer", addedAt: daysAgo(28) },
+      { caseId: "CASE-2026-0142", caseTitle: "Exfiltration — Sector 7 relay", role: "Investigator", addedAt: daysAgo(9) },
+      { caseId: "CASE-2026-0139", caseTitle: "Credential stuffing — payroll portal", role: "Investigator", addedAt: daysAgo(14) },
+      { caseId: "CASE-2026-0131", caseTitle: "Lateral movement — records annexe", role: "Investigator", addedAt: daysAgo(28) },
     ],
   },
   {
     id: 44,
     email: "p.iyer@gcc.gov.in",
     name: "P. Iyer",
-    roleSlug: "analyst",
+    roleSlug: "investigator",
     isOwner: false,
     status: "locked_out",
     mfa: "factor_lost",
@@ -176,14 +143,14 @@ export const USERS: AdminUser[] = [
     lastActivityAt: daysAgo(3),
     invitationState: "accepted",
     deniedLast24h: 0,
-    permissions: ROLES[2].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
-    caseMemberships: [{ caseId: "CASE-2026-0138", caseTitle: "Beaconing — municipal VPN", role: "Analyst", addedAt: daysAgo(21) }],
+    permissions: ROLES[1].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
+    caseMemberships: [{ caseId: "CASE-2026-0138", caseTitle: "Beaconing — municipal VPN", role: "Investigator", addedAt: daysAgo(21) }],
   },
   {
     id: 52,
     email: "r.shah@gcc.gov.in",
     name: "R. Shah",
-    roleSlug: "viewer",
+    roleSlug: "investigator",
     isOwner: false,
     status: "invited",
     mfa: "unenrolled",
@@ -194,14 +161,14 @@ export const USERS: AdminUser[] = [
     lastActivityAt: null,
     invitationState: "expiring",
     deniedLast24h: 0,
-    permissions: ROLES[3].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
+    permissions: ROLES[1].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
     caseMemberships: [],
   },
   {
     id: 57,
     email: "m.joshi@gcc.gov.in",
     name: "M. Joshi",
-    roleSlug: "evidence_clerk",
+    roleSlug: "investigator",
     isOwner: false,
     status: "active",
     mfa: "verified",
@@ -212,14 +179,14 @@ export const USERS: AdminUser[] = [
     lastActivityAt: ago(95),
     invitationState: "accepted",
     deniedLast24h: 2,
-    permissions: ROLES[5].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
-    caseMemberships: [{ caseId: "CASE-2026-0131", caseTitle: "Lateral movement — records annexe", role: "Viewer", addedAt: daysAgo(28) }],
+    permissions: ROLES[1].permissions.map((key) => ({ key, source: "role" as const, expiresAt: null, reason: "", grantedBy: "" })),
+    caseMemberships: [{ caseId: "CASE-2026-0131", caseTitle: "Lateral movement — records annexe", role: "Investigator", addedAt: daysAgo(28) }],
   },
   {
     id: 63,
     email: "s.nair@gcc.gov.in",
     name: "S. Nair",
-    roleSlug: "viewer",
+    roleSlug: "investigator",
     isOwner: false,
     status: "deactivated",
     mfa: "unenrolled",
@@ -257,24 +224,24 @@ export const USERS: AdminUser[] = [
    Activity — the union of the five streams described in plan §6.
    --------------------------------------------------------------------------- */
 export const ACTIVITY: ActivityEvent[] = [
-  { id: "a1", at: ago(3), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Analyst", action: "permission:export", target: "Case CASE-2026-0142", result: "denied", source: "AccessLog", chainIndex: null },
-  { id: "a2", at: ago(5), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Analyst", action: "permission:export", target: "Case CASE-2026-0142", result: "denied", source: "AccessLog", chainIndex: null },
-  { id: "a3", at: ago(9), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Analyst", action: "permission:operations", target: "—", result: "denied", source: "AccessLog", chainIndex: null },
-  { id: "a4", at: ago(14), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "user.role_changed", target: "User 57 → Evidence Clerk", result: "allowed", source: "AdminAudit", chainIndex: 214 },
+  { id: "a1", at: ago(3), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Investigator", action: "permission:export", target: "Case CASE-2026-0142", result: "denied", source: "AccessLog", chainIndex: null },
+  { id: "a2", at: ago(5), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Investigator", action: "permission:export", target: "Case CASE-2026-0142", result: "denied", source: "AccessLog", chainIndex: null },
+  { id: "a3", at: ago(9), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Investigator", action: "permission:operations", target: "—", result: "denied", source: "AccessLog", chainIndex: null },
+  { id: "a4", at: ago(14), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "user.role_changed", target: "User 57 → Investigator", result: "allowed", source: "AdminAudit", chainIndex: 214 },
   { id: "a5", at: ago(18), actor: "K. Desai", actorEmail: "k.desai@gcc.gov.in", role: "Investigator", action: "permission:review", target: "Case CASE-2026-0142", result: "allowed", source: "AccessLog", chainIndex: null },
   { id: "a6", at: ago(26), actor: "system", actorEmail: "", role: "—", action: "evidence.custody_append", target: "CASE-2026-0142 · chain 812", result: "recorded", source: "Custody", chainIndex: 812 },
-  { id: "a7", at: ago(34), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Analyst", action: "permission:export", target: "Case CASE-2026-0139", result: "denied", source: "AccessLog", chainIndex: null },
+  { id: "a7", at: ago(34), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Investigator", action: "permission:export", target: "Case CASE-2026-0139", result: "denied", source: "AccessLog", chainIndex: null },
   { id: "a8", at: ago(41), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "credential.recovery_link", target: "User 44 · P. Iyer", result: "allowed", source: "AdminAudit", chainIndex: 213 },
-  { id: "a9", at: ago(52), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Evidence Clerk", action: "permission:compliance", target: "—", result: "denied", source: "AccessLog", chainIndex: null },
+  { id: "a9", at: ago(52), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Investigator", action: "permission:compliance", target: "—", result: "denied", source: "AccessLog", chainIndex: null },
   { id: "a10", at: ago(68), actor: "system", actorEmail: "", role: "—", action: "job.completed", target: "Analysis job 8814", result: "recorded", source: "OperationalEvent", chainIndex: null },
   { id: "a11", at: ago(84), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "permission.granted", target: "User 41 · +export until 01 Sep", result: "allowed", source: "AdminAudit", chainIndex: 212 },
-  { id: "a12", at: ago(96), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Evidence Clerk", action: "permission:export", target: "Case CASE-2026-0131", result: "allowed", source: "AccessLog", chainIndex: null },
+  { id: "a12", at: ago(96), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Investigator", action: "permission:export", target: "Case CASE-2026-0131", result: "allowed", source: "AccessLog", chainIndex: null },
   { id: "a13", at: ago(120), actor: "K. Desai", actorEmail: "k.desai@gcc.gov.in", role: "Investigator", action: "case.status_changed", target: "CASE-2026-0138 → open", result: "recorded", source: "CaseHistory", chainIndex: null },
   { id: "a14", at: ago(155), actor: "V. Rathod", actorEmail: "v.rathod@gcc.gov.in", role: "Investigator", action: "permission:upload", target: "Case CASE-2026-0139", result: "allowed", source: "AccessLog", chainIndex: null },
-  { id: "a15", at: ago(190), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Evidence Clerk", action: "auth.sign_in", target: "console.netra.app · aal1", result: "allowed", source: "AccessLog", chainIndex: null },
-  { id: "a16", at: ago(240), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "user.invited", target: "r.shah@gcc.gov.in · Viewer", result: "allowed", source: "AdminAudit", chainIndex: 211 },
+  { id: "a15", at: ago(190), actor: "M. Joshi", actorEmail: "m.joshi@gcc.gov.in", role: "Investigator", action: "auth.sign_in", target: "console.netra.app · aal1", result: "allowed", source: "AccessLog", chainIndex: null },
+  { id: "a16", at: ago(240), actor: "Inspector A. Patel", actorEmail: "a.patel@gcc.gov.in", role: "Owner", action: "user.invited", target: "r.shah@gcc.gov.in · Investigator", result: "allowed", source: "AdminAudit", chainIndex: 211 },
   { id: "a17", at: ago(310), actor: "system", actorEmail: "", role: "—", action: "evidence.custody_append", target: "CASE-2026-0139 · chain 604", result: "recorded", source: "Custody", chainIndex: 604 },
-  { id: "a18", at: ago(330), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Analyst", action: "auth.sign_in", target: "console.netra.app · aal1", result: "allowed", source: "AccessLog", chainIndex: null },
+  { id: "a18", at: ago(330), actor: "A. Mehta", actorEmail: "a.mehta@gcc.gov.in", role: "Investigator", action: "auth.sign_in", target: "console.netra.app · aal1", result: "allowed", source: "AccessLog", chainIndex: null },
 ];
 
 /* ---------------------------------------------------------------------------
@@ -317,7 +284,7 @@ export const AUDIT: AuditEvent[] = [
     id: "e214", chainIndex: 214, at: ago(14), actor: "Inspector A. Patel",
     action: "user.role_changed", targetType: "UserProfile", targetId: "57",
     reason: "Records desk needs export for the quarterly handover pack.",
-    before: "role=analyst", after: "role=evidence_clerk",
+    before: "role=investigator", after: "role=admin",
     previousHash: "9d41c8…7b2e", eventHash: "4fa07b…13c9",
   },
   {
@@ -338,7 +305,7 @@ export const AUDIT: AuditEvent[] = [
     id: "e211", chainIndex: 211, at: ago(240), actor: "Inspector A. Patel",
     action: "user.invited", targetType: "AuthUser", targetId: "r.shah@gcc.gov.in",
     reason: "New records liaison joining the unit this week.",
-    before: "—", after: "role=viewer, invitation sent",
+    before: "—", after: "role=investigator, invitation sent",
     previousHash: "aa39d1…0e77", eventHash: "6b02af…c815",
   },
   {

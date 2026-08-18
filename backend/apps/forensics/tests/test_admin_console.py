@@ -158,7 +158,7 @@ class AdminConsoleAccessTests(AdminConsoleTestBase):
         headers = self._headers(self.admin)
         self.assertEqual(self.client.get(DIRECTORY, **headers).status_code, 200)
 
-        UserProfile.objects.filter(user=self.admin).update(role=UserProfile.Role.VIEWER)
+        UserProfile.objects.filter(user=self.admin).update(role=UserProfile.Role.INVESTIGATOR)
 
         self.assertEqual(self.client.get(DIRECTORY, **headers).status_code, 403)
 
@@ -300,7 +300,8 @@ class AdminDirectoryContentTests(AdminConsoleTestBase):
 
         self.assertEqual(by_slug["admin"]["memberCount"], 1)
         self.assertEqual(by_slug["investigator"]["memberCount"], 1)
-        self.assertEqual(by_slug["viewer"]["memberCount"], 0)
+        # Two roles ship, so the catalogue is exactly these two.
+        self.assertEqual(set(by_slug), {"admin", "investigator"})
 
     def test_permission_catalogue_covers_exactly_the_enforced_vocabulary(self):
         """A permission the checker knows but the catalogue does not cannot be
@@ -459,13 +460,13 @@ class AdminDirectoryScaleTests(AdminConsoleTestBase):
                 for index in range(250)
             ]
         )
-        viewer_role = Role.objects.get(organization=self.organization, slug="viewer")
+        viewer_role = Role.objects.get(organization=self.organization, slug="investigator")
         UserProfile.objects.bulk_create(
             [
                 UserProfile(
                     user=user,
                     organization=self.organization,
-                    role=UserProfile.Role.VIEWER,
+                    role=UserProfile.Role.INVESTIGATOR,
                     role_ref=viewer_role,
                     display_name=f"Member {index:03d}",
                 )

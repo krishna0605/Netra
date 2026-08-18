@@ -189,12 +189,16 @@ class ApiAccessControlTests(TestCase):
         self.assertEqual(wrong_case_response.status_code, 404)
         self.assertFalse(CaseMembership.objects.filter(case=bob_case, user=alice).exists())
 
-    def test_viewer_cannot_reach_operational_or_mutating_routes(self):
-        _user, headers = self._user("viewer@example.test", "Viewer")
+    def test_investigator_is_refused_the_operational_namespace(self):
+        """Netra ships two roles. An Investigator works cases, which is why the
+        case route is allowed here; the operational namespace is the boundary
+        that separates them from an Admin."""
+        _user, headers = self._user("officer@example.test", "Investigator")
+
         self.assertEqual(self.client.get("/api/system/metrics", **headers).status_code, 403)
         self.assertEqual(
             self.client.post("/api/cases", data={}, content_type="application/json", **headers).status_code,
-            403,
+            201,
         )
 
     @override_settings(
@@ -279,7 +283,7 @@ class IdentityProvisioningTests(TestCase):
                 role="Admin",
             )
         )
-        self.assertEqual(actor.role, "Viewer")
+        self.assertEqual(actor.role, "Unassigned")
         self.assertTrue(actor.authenticated)
         self.assertIsNone(actor.organization_id)
         self.assertFalse(UserProfile.objects.filter(user__username="new@example.test").exists())

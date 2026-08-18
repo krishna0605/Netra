@@ -39,7 +39,7 @@ class AdministratorInvariantTests(TestCase):
     def test_aal1_admin_cannot_mutate_users(self):
         response = self.client.post(
             "/api/users",
-            data={"email": "viewer@netra.test", "role": "Viewer"},
+            data={"email": "viewer@netra.test", "role": "Investigator"},
             content_type="application/json",
             **self._headers(self.admin),
         )
@@ -49,7 +49,7 @@ class AdministratorInvariantTests(TestCase):
     def test_aal2_admin_can_create_only_non_admin_profile(self):
         response = self.client.post(
             "/api/users",
-            data={"email": "viewer@netra.test", "role": "Viewer"},
+            data={"email": "viewer@netra.test", "role": "Investigator"},
             content_type="application/json",
             **self._headers(self.admin, aal="aal2"),
         )
@@ -117,13 +117,13 @@ class AdministratorInvariantTests(TestCase):
 
     def test_break_glass_command_requires_audit_context(self):
         with self.assertRaises(CommandError):
-            call_command("provision_netra_user", "new@netra.test", role="Viewer", stdout=StringIO())
+            call_command("provision_netra_user", "new@netra.test", role="Investigator", stdout=StringIO())
 
     def test_break_glass_command_records_both_audit_rows(self):
         call_command(
             "provision_netra_user",
             "new@netra.test",
-            role="Viewer",
+            role="Investigator",
             ticket="NETRA-2000",
             reason="Approved emergency account provisioning.",
             operator="security-operator",
